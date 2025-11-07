@@ -1,0 +1,29 @@
+[Unit]
+Description=ZTP Bootstrap Script Server for Arista CVaaS
+
+[Container]
+ContainerName=ztpbootstrap
+Image=docker.io/nginx:alpine
+Network=host
+# IP=10.0.0.10  # Uncomment and set your IPv4 address if not using host network
+# IP6=2001:db8::10  # Uncomment and set your IPv6 address if not using host network
+# DNS=8.8.8.8  # Uncomment and set your DNS servers if needed
+# DNS=8.8.4.4
+PublishPort=443:443
+Volume=/opt/containerdata/ztpbootstrap:/usr/share/nginx/html:ro
+Volume=/opt/containerdata/ztpbootstrap/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+Volume=/opt/containerdata/certs/wild:/etc/nginx/ssl:ro
+Environment="TZ=UTC"
+
+# Health check for ZTP bootstrap - check if nginx is running
+HealthCmd=["sh", "-c", "pgrep nginx > /dev/null || exit 1"]
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=60s
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,32 @@
+# Environment-specific configuration files
+ztpbootstrap.env
+
+# Backup files
+*.backup
+*.bak
+*.old
+
+# Generated files
+bootstrap_configured.py
+
+# SSL certificates (should never be in git)
+*.pem
+*.key
+*.crt
+*.csr
+
+# Editor files
+*~
+*.swp
+*.swo
+.DS_Store
+.vscode/
+.idea/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+*.log
