@@ -43,6 +43,186 @@ get_yaml_value() {
     yq eval "$path" "$CONFIG_FILE" 2>/dev/null || echo ""
 }
 
+# Copy source files to target directory
+copy_source_files() {
+    log "Copying source files to target directory..."
+    
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Get target paths from config
+    local bootstrap_script
+    local nginx_conf
+    
+    bootstrap_script=$(get_yaml_value '.paths.bootstrap_script')
+    nginx_conf=$(get_yaml_value '.paths.nginx_conf')
+    
+    # Copy bootstrap.py
+    if [[ -n "$bootstrap_script" ]] && [[ "$bootstrap_script" != "null" ]]; then
+        local source_bootstrap="${repo_dir}/bootstrap.py"
+        if [[ -f "$source_bootstrap" ]]; then
+            if [[ ("$bootstrap_script" =~ ^/etc/ || "$bootstrap_script" =~ ^/opt/) && $EUID -ne 0 ]]; then
+                if sudo cp "$source_bootstrap" "$bootstrap_script" 2>/dev/null; then
+                    sudo chown "$USER:$(id -gn)" "$bootstrap_script" 2>/dev/null || true
+                    sudo chmod 644 "$bootstrap_script" 2>/dev/null || true
+                    log "Copied bootstrap.py to: $bootstrap_script"
+                else
+                    warn "Failed to copy bootstrap.py to: $bootstrap_script"
+                fi
+            else
+                if cp "$source_bootstrap" "$bootstrap_script" 2>/dev/null; then
+                    chmod 644 "$bootstrap_script" 2>/dev/null || true
+                    log "Copied bootstrap.py to: $bootstrap_script"
+                else
+                    # Try with sudo if regular copy failed
+                    if sudo cp "$source_bootstrap" "$bootstrap_script" 2>/dev/null; then
+                        sudo chown "$USER:$(id -gn)" "$bootstrap_script" 2>/dev/null || true
+                        sudo chmod 644 "$bootstrap_script" 2>/dev/null || true
+                        log "Copied bootstrap.py with sudo to: $bootstrap_script"
+                    else
+                        warn "Failed to copy bootstrap.py to: $bootstrap_script"
+                    fi
+                fi
+            fi
+        else
+            warn "Source file not found: $source_bootstrap"
+        fi
+    fi
+    
+    # Copy nginx.conf
+    if [[ -n "$nginx_conf" ]] && [[ "$nginx_conf" != "null" ]]; then
+        local source_nginx="${repo_dir}/nginx.conf"
+        if [[ -f "$source_nginx" ]]; then
+            if [[ ("$nginx_conf" =~ ^/etc/ || "$nginx_conf" =~ ^/opt/) && $EUID -ne 0 ]]; then
+                if sudo cp "$source_nginx" "$nginx_conf" 2>/dev/null; then
+                    sudo chown "$USER:$(id -gn)" "$nginx_conf" 2>/dev/null || true
+                    sudo chmod 644 "$nginx_conf" 2>/dev/null || true
+                    log "Copied nginx.conf to: $nginx_conf"
+                else
+                    warn "Failed to copy nginx.conf to: $nginx_conf"
+                fi
+            else
+                if cp "$source_nginx" "$nginx_conf" 2>/dev/null; then
+                    chmod 644 "$nginx_conf" 2>/dev/null || true
+                    log "Copied nginx.conf to: $nginx_conf"
+                else
+                    # Try with sudo if regular copy failed
+                    if sudo cp "$source_nginx" "$nginx_conf" 2>/dev/null; then
+                        sudo chown "$USER:$(id -gn)" "$nginx_conf" 2>/dev/null || true
+                        sudo chmod 644 "$nginx_conf" 2>/dev/null || true
+                        log "Copied nginx.conf with sudo to: $nginx_conf"
+                    else
+                        warn "Failed to copy nginx.conf to: $nginx_conf"
+                    fi
+                fi
+            fi
+        else
+            warn "Source file not found: $source_nginx"
+        fi
+    fi
+    
+    echo ""
+}
+
+# Create all necessary directories from config
+create_directories() {
+    log "Creating necessary directories..."
+    
+    local script_dir
+    local cert_dir
+    local env_file
+    local quadlet_file
+    local dirs_to_create=()
+    
+    script_dir=$(get_yaml_value '.paths.script_dir')
+    cert_dir=$(get_yaml_value '.paths.cert_dir')
+    env_file=$(get_yaml_value '.paths.env_file')
+    quadlet_file=$(get_yaml_value '.paths.quadlet_file')
+    
+    # Collect all directories that need to be created
+    if [[ -n "$script_dir" ]] && [[ "$script_dir" != "null" ]]; then
+        dirs_to_create+=("$script_dir")
+    fi
+    
+    if [[ -n "$cert_dir" ]] && [[ "$cert_dir" != "null" ]]; then
+        dirs_to_create+=("$cert_dir")
+    fi
+    
+    if [[ -n "$env_file" ]] && [[ "$env_file" != "null" ]]; then
+        local env_dir
+        env_dir=$(dirname "$env_file")
+        dirs_to_create+=("$env_dir")
+    fi
+    
+    if [[ -n "$quadlet_file" ]] && [[ "$quadlet_file" != "null" ]]; then
+        local quadlet_dir
+        quadlet_dir=$(dirname "$quadlet_file")
+        dirs_to_create+=("$quadlet_dir")
+    fi
+    
+    # Create directories (mkdir -p creates parent directories automatically)
+    for dir in "${dirs_to_create[@]}"; do
+        if [[ -z "$dir" ]] || [[ "$dir" == "null" ]]; then
+            continue
+        fi
+        
+        if [[ ! -d "$dir" ]]; then
+            if [[ ("$dir" =~ ^/etc/ || "$dir" =~ ^/opt/) && $EUID -ne 0 ]]; then
+                log "Creating directory (requires sudo): $dir"
+                if sudo mkdir -p "$dir" 2>/dev/null; then
+                    # Make writable by current user
+                    if sudo chown "$USER:$(id -gn)" "$dir" 2>/dev/null; then
+                        sudo chmod 755 "$dir" 2>/dev/null || true
+                        log "Created and set permissions: $dir"
+                    else
+                        sudo chmod 755 "$dir" 2>/dev/null || true
+                        log "Created: $dir"
+                    fi
+                else
+                    warn "Failed to create directory: $dir (may need manual creation with sudo)"
+                fi
+            else
+                log "Creating directory: $dir"
+                if mkdir -p "$dir" 2>/dev/null; then
+                    # Make writable by current user
+                    chmod 755 "$dir" 2>/dev/null || true
+                    log "Created and set permissions: $dir"
+                else
+                    # Try with sudo if regular mkdir failed
+                    if sudo mkdir -p "$dir" 2>/dev/null; then
+                        sudo chown "$USER:$(id -gn)" "$dir" 2>/dev/null || true
+                        sudo chmod 755 "$dir" 2>/dev/null || true
+                        log "Created with sudo and set permissions: $dir"
+                    else
+                        warn "Failed to create directory: $dir"
+                    fi
+                fi
+            fi
+        else
+            # Directory exists - ensure it's writable
+            if [[ ("$dir" =~ ^/etc/ || "$dir" =~ ^/opt/) && $EUID -ne 0 ]]; then
+                if sudo chown "$USER:$(id -gn)" "$dir" 2>/dev/null; then
+                    sudo chmod 755 "$dir" 2>/dev/null || true
+                    log "Updated permissions for existing directory: $dir"
+                else
+                    log "Directory already exists: $dir (may need sudo to modify)"
+                fi
+            else
+                # Try to make writable, use sudo if needed
+                if chmod 755 "$dir" 2>/dev/null; then
+                    log "Directory already exists: $dir"
+                elif sudo chown "$USER:$(id -gn)" "$dir" 2>/dev/null && sudo chmod 755 "$dir" 2>/dev/null; then
+                    log "Updated permissions for existing directory: $dir"
+                else
+                    log "Directory already exists: $dir"
+                fi
+            fi
+        fi
+    done
+    
+    echo ""
+}
+
 # Update bootstrap.py with CVaaS configuration
 update_bootstrap_py() {
     local bootstrap_file
@@ -365,6 +545,12 @@ main() {
     log "Reading configuration from: $CONFIG_FILE"
     
     check_yq
+    
+    # Create directories before validation
+    create_directories
+    
+    # Copy source files to target directory
+    copy_source_files
     
     # Validate configuration first
     if [[ -f "validate-config.sh" ]]; then

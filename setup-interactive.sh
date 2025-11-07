@@ -224,6 +224,176 @@ interactive_config() {
     echo ""
 }
 
+# Copy source files to target directory
+copy_source_files() {
+    log "Copying source files to target directory..."
+    
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Get target paths from config variables
+    local script_dir="${SCRIPT_DIR:-}"
+    local bootstrap_script="${BOOTSTRAP_SCRIPT:-}"
+    local nginx_conf="${NGINX_CONF:-}"
+    
+    # Copy bootstrap.py
+    if [[ -n "$bootstrap_script" ]] && [[ "$bootstrap_script" != "null" ]]; then
+        local source_bootstrap="${repo_dir}/bootstrap.py"
+        if [[ -f "$source_bootstrap" ]]; then
+            if [[ ("$bootstrap_script" =~ ^/etc/ || "$bootstrap_script" =~ ^/opt/) && $EUID -ne 0 ]]; then
+                if sudo cp "$source_bootstrap" "$bootstrap_script" 2>/dev/null; then
+                    sudo chown "$USER:$(id -gn)" "$bootstrap_script" 2>/dev/null || true
+                    sudo chmod 644 "$bootstrap_script" 2>/dev/null || true
+                    log "Copied bootstrap.py to: $bootstrap_script"
+                else
+                    warn "Failed to copy bootstrap.py to: $bootstrap_script"
+                fi
+            else
+                if cp "$source_bootstrap" "$bootstrap_script" 2>/dev/null; then
+                    chmod 644 "$bootstrap_script" 2>/dev/null || true
+                    log "Copied bootstrap.py to: $bootstrap_script"
+                else
+                    # Try with sudo if regular copy failed
+                    if sudo cp "$source_bootstrap" "$bootstrap_script" 2>/dev/null; then
+                        sudo chown "$USER:$(id -gn)" "$bootstrap_script" 2>/dev/null || true
+                        sudo chmod 644 "$bootstrap_script" 2>/dev/null || true
+                        log "Copied bootstrap.py with sudo to: $bootstrap_script"
+                    else
+                        warn "Failed to copy bootstrap.py to: $bootstrap_script"
+                    fi
+                fi
+            fi
+        else
+            warn "Source file not found: $source_bootstrap"
+        fi
+    fi
+    
+    # Copy nginx.conf
+    if [[ -n "$nginx_conf" ]] && [[ "$nginx_conf" != "null" ]]; then
+        local source_nginx="${repo_dir}/nginx.conf"
+        if [[ -f "$source_nginx" ]]; then
+            if [[ ("$nginx_conf" =~ ^/etc/ || "$nginx_conf" =~ ^/opt/) && $EUID -ne 0 ]]; then
+                if sudo cp "$source_nginx" "$nginx_conf" 2>/dev/null; then
+                    sudo chown "$USER:$(id -gn)" "$nginx_conf" 2>/dev/null || true
+                    sudo chmod 644 "$nginx_conf" 2>/dev/null || true
+                    log "Copied nginx.conf to: $nginx_conf"
+                else
+                    warn "Failed to copy nginx.conf to: $nginx_conf"
+                fi
+            else
+                if cp "$source_nginx" "$nginx_conf" 2>/dev/null; then
+                    chmod 644 "$nginx_conf" 2>/dev/null || true
+                    log "Copied nginx.conf to: $nginx_conf"
+                else
+                    # Try with sudo if regular copy failed
+                    if sudo cp "$source_nginx" "$nginx_conf" 2>/dev/null; then
+                        sudo chown "$USER:$(id -gn)" "$nginx_conf" 2>/dev/null || true
+                        sudo chmod 644 "$nginx_conf" 2>/dev/null || true
+                        log "Copied nginx.conf with sudo to: $nginx_conf"
+                    else
+                        warn "Failed to copy nginx.conf to: $nginx_conf"
+                    fi
+                fi
+            fi
+        else
+            warn "Source file not found: $source_nginx"
+        fi
+    fi
+    
+    echo ""
+}
+
+# Create necessary directories
+create_directories() {
+    log "Creating necessary directories..."
+    
+    local dirs_to_create=()
+    local need_sudo=false
+    
+    # Extract directories from config variables
+    # Main service directory
+    if [[ -n "${SCRIPT_DIR:-}" ]]; then
+        dirs_to_create+=("$SCRIPT_DIR")
+    fi
+    
+    # Certificate directory
+    if [[ -n "${CERT_DIR:-}" ]]; then
+        dirs_to_create+=("$CERT_DIR")
+    fi
+    
+    # Systemd quadlet directory (may need sudo)
+    if [[ -n "${QUADLET_FILE:-}" ]]; then
+        local quadlet_dir
+        quadlet_dir=$(dirname "$QUADLET_FILE")
+        if [[ "$quadlet_dir" == /etc/* ]]; then
+            need_sudo=true
+        fi
+        dirs_to_create+=("$quadlet_dir")
+    fi
+    
+    # Create directories (mkdir -p creates parent directories automatically)
+    for dir in "${dirs_to_create[@]}"; do
+        if [[ -z "$dir" ]] || [[ "$dir" == "null" ]]; then
+            continue
+        fi
+        
+        if [[ ! -d "$dir" ]]; then
+            if [[ ("$dir" =~ ^/etc/ || "$dir" =~ ^/opt/) && $EUID -ne 0 ]]; then
+                log "Creating directory (requires sudo): $dir"
+                if sudo mkdir -p "$dir" 2>/dev/null; then
+                    # Make writable by current user
+                    if sudo chown "$USER:$(id -gn)" "$dir" 2>/dev/null; then
+                        sudo chmod 755 "$dir" 2>/dev/null || true
+                        log "Created and set permissions: $dir"
+                    else
+                        sudo chmod 755 "$dir" 2>/dev/null || true
+                        log "Created: $dir"
+                    fi
+                else
+                    warn "Failed to create directory: $dir (may need manual creation with sudo)"
+                fi
+            else
+                log "Creating directory: $dir"
+                if mkdir -p "$dir" 2>/dev/null; then
+                    # Make writable by current user
+                    chmod 755 "$dir" 2>/dev/null || true
+                    log "Created and set permissions: $dir"
+                else
+                    # Try with sudo if regular mkdir failed
+                    if sudo mkdir -p "$dir" 2>/dev/null; then
+                        sudo chown "$USER:$(id -gn)" "$dir" 2>/dev/null || true
+                        sudo chmod 755 "$dir" 2>/dev/null || true
+                        log "Created with sudo and set permissions: $dir"
+                    else
+                        warn "Failed to create directory: $dir"
+                    fi
+                fi
+            fi
+        else
+            # Directory exists - ensure it's writable
+            if [[ ("$dir" =~ ^/etc/ || "$dir" =~ ^/opt/) && $EUID -ne 0 ]]; then
+                if sudo chown "$USER:$(id -gn)" "$dir" 2>/dev/null; then
+                    sudo chmod 755 "$dir" 2>/dev/null || true
+                    log "Updated permissions for existing directory: $dir"
+                else
+                    log "Directory already exists: $dir (may need sudo to modify)"
+                fi
+            else
+                # Try to make writable, use sudo if needed
+                if chmod 755 "$dir" 2>/dev/null; then
+                    log "Directory already exists: $dir"
+                elif sudo chown "$USER:$(id -gn)" "$dir" 2>/dev/null && sudo chmod 755 "$dir" 2>/dev/null; then
+                    log "Updated permissions for existing directory: $dir"
+                else
+                    log "Directory already exists: $dir"
+                fi
+            fi
+        fi
+    done
+    
+    echo ""
+}
+
 # Generate YAML configuration file
 generate_yaml_config() {
     log "Generating YAML configuration file: $CONFIG_FILE"
@@ -318,6 +488,12 @@ EOF
     prompt_yes_no "Apply this configuration to all files now?" "y" APPLY_NOW
     
     if [[ "$APPLY_NOW" == "true" ]]; then
+        # Create directories before applying config
+        create_directories
+        
+        # Copy source files to target directory
+        copy_source_files
+        
         if [[ -f "update-config.sh" ]]; then
             log "Running update-config.sh to apply configuration..."
             bash update-config.sh "$CONFIG_FILE"
@@ -328,6 +504,8 @@ EOF
     else
         log "Configuration saved. To apply later, run:"
         log "  bash update-config.sh $CONFIG_FILE"
+        log ""
+        log "Note: Directories will be created automatically when you apply the config."
     fi
 }
 
