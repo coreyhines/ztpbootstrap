@@ -513,8 +513,8 @@ update_pod_file() {
     ipv4=$(get_yaml_value '.network.ipv4')
     ipv6=$(get_yaml_value '.network.ipv6')
     
-    # Update IP addresses in pod file
-    if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]]; then
+    # Update or remove IP addresses in pod file
+    if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]] && [[ "$ipv4" != "" ]]; then
         # Use sed to update IP= line
         if sed -i.tmp "s|^IP=.*|IP=$ipv4|" "$pod_file" 2>/dev/null; then
             log "Updated IPv4 address to: $ipv4"
@@ -522,15 +522,31 @@ update_pod_file() {
         else
             warn "Failed to update IPv4 address in pod file"
         fi
+    else
+        # Remove IP= line if IPv4 is empty (for host network mode)
+        if sed -i.tmp "/^IP=/d" "$pod_file" 2>/dev/null; then
+            rm -f "${pod_file}.tmp" 2>/dev/null || true
+            log "Removed IPv4 address from pod file (using host network)"
+        else
+            warn "Failed to remove IPv4 address from pod file"
+        fi
     fi
     
-    if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]]; then
+    if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]] && [[ "$ipv6" != "" ]]; then
         # Use sed to update IP6= line
         if sed -i.tmp "s|^IP6=.*|IP6=$ipv6|" "$pod_file" 2>/dev/null; then
             log "Updated IPv6 address to: $ipv6"
             rm -f "${pod_file}.tmp" 2>/dev/null || true
         else
             warn "Failed to update IPv6 address in pod file"
+        fi
+    else
+        # Remove IP6= line if IPv6 is empty (disabled)
+        if sed -i.tmp "/^IP6=/d" "$pod_file" 2>/dev/null; then
+            rm -f "${pod_file}.tmp" 2>/dev/null || true
+            log "Removed IPv6 address from pod file (IPv6 disabled)"
+        else
+            warn "Failed to remove IPv6 address from pod file"
         fi
     fi
 }
