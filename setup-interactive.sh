@@ -41,6 +41,7 @@ prompt_with_default() {
     local default_value="$2"
     local var_name="$3"
     local is_secret="${4:-false}"
+    local allow_empty="${5:-false}"
     
     if [[ "$is_secret" == "true" ]]; then
         info "$prompt_text"
@@ -53,15 +54,23 @@ prompt_with_default() {
         echo ""
     else
         if [[ -n "$default_value" ]]; then
-            echo -n -e "${CYAN}[?]${NC} $prompt_text ${BLUE}[$default_value]${NC}: "
+            if [[ "$allow_empty" == "true" ]]; then
+                echo -n -e "${CYAN}[?]${NC} $prompt_text ${BLUE}[$default_value, or Enter for empty]${NC}: "
+            else
+                echo -n -e "${CYAN}[?]${NC} $prompt_text ${BLUE}[$default_value]${NC}: "
+            fi
         else
             echo -n -e "${CYAN}[?]${NC} $prompt_text: "
         fi
         read -r value
     fi
     
+    # If value is empty and allow_empty is true, keep it empty
+    # Otherwise, use default if value is empty
     if [[ -z "$value" ]]; then
-        value="$default_value"
+        if [[ "$allow_empty" != "true" ]]; then
+            value="$default_value"
+        fi
     fi
     
     eval "$var_name='$value'"
@@ -145,8 +154,8 @@ interactive_config() {
     echo ""
     
     prompt_with_default "Domain name" "ztpboot.example.com" DOMAIN
-    prompt_with_default "IPv4 address (leave empty for host network)" "10.0.0.10" IPV4
-    prompt_with_default "IPv6 address (leave empty to disable)" "2001:db8::10" IPV6
+    prompt_with_default "IPv4 address (leave empty for host network)" "10.0.0.10" IPV4 "false" "true"
+    prompt_with_default "IPv6 address (leave empty to disable)" "2001:db8::10" IPV6 "false" "true"
     prompt_with_default "HTTPS port" "443" HTTPS_PORT
     prompt_with_default "HTTP port" "80" HTTP_PORT
     prompt_yes_no "Use HTTP-only mode (insecure, not recommended)" "n" HTTP_ONLY
