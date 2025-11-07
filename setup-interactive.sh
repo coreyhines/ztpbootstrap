@@ -496,7 +496,7 @@ EOF
         
         if [[ -f "update-config.sh" ]]; then
             log "Running update-config.sh to apply configuration..."
-            bash update-config.sh "$CONFIG_FILE"
+            QUIET=true bash update-config.sh "$CONFIG_FILE"
         else
             warn "update-config.sh not found. Please run it manually:"
             warn "  bash update-config.sh $CONFIG_FILE"
@@ -559,10 +559,19 @@ main() {
     
     log "Interactive setup completed!"
     echo ""
-    log "Next steps:"
-    log "  1. Review config.yaml"
-    log "  2. Run: sudo ./setup.sh"
-    log "  3. Or run: sudo ./setup.sh --http-only (for testing)"
+    if [[ "$APPLY_NOW" == "true" ]]; then
+        log "Configuration has been applied to all files."
+        log ""
+        log "Next steps:"
+        log "  1. Review the updated files if needed"
+        log "  2. Run: sudo ./setup.sh"
+        log "  3. Or run: sudo ./setup.sh --http-only (for testing)"
+    else
+        log "Next steps:"
+        log "  1. Review config.yaml"
+        log "  2. Run: ./update-config.sh config.yaml (to apply configuration)"
+        log "  3. Then run: sudo ./setup.sh"
+    fi
 }
 
 # Run main function

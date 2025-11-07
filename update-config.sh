@@ -623,11 +623,15 @@ main() {
     
     log ""
     log "Configuration update completed!"
-    log ""
-    log "Next steps:"
-    log "  1. Review the updated files"
-    log "  2. Run: sudo ./setup.sh"
-    log "  3. Or run: sudo ./setup.sh --http-only (if HTTP-only mode is enabled)"
+    
+    # Only show "Next steps" if not called from another script (check if --quiet flag is set)
+    if [[ "${QUIET:-false}" != "true" ]]; then
+        log ""
+        log "Next steps:"
+        log "  1. Review the updated files"
+        log "  2. Run: sudo ./setup.sh"
+        log "  3. Or run: sudo ./setup.sh --http-only (if HTTP-only mode is enabled)"
+    fi
 }
 
 # Run main function
