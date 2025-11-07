@@ -93,21 +93,35 @@ test_ssl_certificates() {
 
 # Test container configuration
 test_container_config() {
-    log "Testing container configuration..."
+    log "Testing pod and container configuration..."
     
-    local quadlet_file="/etc/containers/systemd/ztpbootstrap/ztpbootstrap.container"
+    local pod_file="/etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod"
+    local nginx_container="/etc/containers/systemd/ztpbootstrap/ztpbootstrap-nginx.container"
     
-    if [[ -f "$quadlet_file" ]]; then
-        log "Quadlet configuration file found"
+    if [[ -f "$pod_file" ]]; then
+        log "Pod configuration file found"
         
-        # Check if systemd can parse the file
-        if systemd-analyze verify "$quadlet_file" 2>/dev/null; then
-            log "Quadlet configuration is valid"
+        # Check if systemd can parse the pod file
+        if systemd-analyze verify "$pod_file" 2>/dev/null; then
+            log "Pod configuration is valid"
         else
-            warn "Quadlet configuration may have issues"
+            warn "Pod configuration may have issues"
         fi
     else
-        error "Quadlet configuration file not found"
+        warn "Pod configuration file not found (may not be installed yet)"
+    fi
+    
+    if [[ -f "$nginx_container" ]]; then
+        log "Nginx container configuration file found"
+        
+        # Check if systemd can parse the container file
+        if systemd-analyze verify "$nginx_container" 2>/dev/null; then
+            log "Nginx container configuration is valid"
+        else
+            warn "Nginx container configuration may have issues"
+        fi
+    else
+        warn "Nginx container configuration file not found (may not be installed yet)"
     fi
 }
 

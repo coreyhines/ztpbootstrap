@@ -197,7 +197,7 @@ If you absolutely must use HTTP-only (e.g., for a completely isolated lab networ
 
 2. The script will:
    - Configure nginx to serve HTTP on port 80
-   - Update the systemd quadlet configuration to remove certificate mounts
+   - Update the pod and container configurations for HTTP-only mode
    - Back up your original configuration files
 
 3. Update your DHCP configuration to use HTTP:

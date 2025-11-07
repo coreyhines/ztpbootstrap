@@ -152,16 +152,11 @@ For automatic startup and service management:
 # 1. Complete setup (interactive or manual)
 ./setup-interactive.sh
 
-# 2. Copy systemd quadlet file
-sudo mkdir -p /etc/containers/systemd/ztpbootstrap
-sudo cp systemd/ztpbootstrap.container /etc/containers/systemd/ztpbootstrap/
+# 2. Run setup script (automatically copies pod and container files)
+sudo ./setup.sh
 
-# 3. Update paths in quadlet file if needed
-sudo vi /etc/containers/systemd/ztpbootstrap/ztpbootstrap.container
-
-# 4. Reload systemd and start service
-sudo systemctl daemon-reload
-sudo systemctl start ztpbootstrap
+# Or for HTTP-only mode (testing only):
+sudo ./setup.sh --http-only
 sudo systemctl enable ztpbootstrap  # Enable on boot
 ```
 
