@@ -26,7 +26,6 @@ paths:
   env_file: "${TEST_SCRIPT_DIR}/ztpbootstrap.env"
   bootstrap_script: "${TEST_SCRIPT_DIR}/bootstrap.py"
   nginx_conf: "${TEST_SCRIPT_DIR}/nginx.conf"
-  quadlet_file: "${TEST_DIR}/ztpbootstrap.container"
 
 network:
   domain: "test.example.com"
