@@ -41,9 +41,18 @@ ENROLLMENT_TOKEN=your_actual_enrollment_token_here
 ```
 
 ### 3. Run the Setup Script
+
+**Standard HTTPS Setup (Recommended):**
 ```bash
 sudo /opt/containerdata/ztpbootstrap/setup.sh
 ```
+
+**HTTP-Only Setup (NOT RECOMMENDED - Insecure):**
+```bash
+sudo /opt/containerdata/ztpbootstrap/setup.sh --http-only
+```
+
+⚠️ **Warning**: HTTP-only mode is insecure and should only be used in isolated lab environments. All traffic will be unencrypted and vulnerable to interception. Let's Encrypt certificates can be fully automated with certbot and systemd timers, making HTTPS setup nearly as simple as HTTP while providing proper security.
 
 ### 4. Verify the Service
 ```bash
@@ -105,10 +114,40 @@ sudo systemctl status ztpbootstrap.container
 
 ## 🧪 Testing
 
-Run the test script to verify everything is working:
+### Quick Validation Test
+
+Run the basic test script to verify service configuration:
 ```bash
 sudo /opt/containerdata/ztpbootstrap/test-service.sh
 ```
+
+### Comprehensive Integration Test
+
+For end-to-end testing that actually spins up a container and validates it works:
+```bash
+# Test HTTPS mode (requires SSL certificates)
+sudo /opt/containerdata/ztpbootstrap/integration-test.sh
+
+# Test HTTP-only mode (no certificates needed)
+sudo /opt/containerdata/ztpbootstrap/integration-test.sh --http-only
+```
+
+The integration test validates:
+- Container starts and runs correctly
+- Health endpoint responds
+- Bootstrap.py is served correctly
+- Response headers are correct
+- Python syntax is valid
+- EOS device simulation works
+
+### CI/CD Validation
+
+For automated testing in CI/CD pipelines:
+```bash
+/opt/containerdata/ztpbootstrap/ci-test.sh
+```
+
+See the [Testing section in README.md](../README.md#testing) for more details.
 
 ## 📚 Documentation
 
@@ -129,6 +168,39 @@ sudo /opt/containerdata/ztpbootstrap/test-service.sh
 - Run the test script: `sudo /opt/containerdata/ztpbootstrap/test-service.sh`
 - Review the README: `cat /opt/containerdata/ztpbootstrap/README.md`
 
+## 🔒 HTTP-Only Setup (Not Recommended)
+
+<a name="http-only-setup"></a>
+
+**⚠️ Warning: HTTP-only setup is strongly discouraged for production use.** All traffic will be unencrypted, making it vulnerable to interception and tampering. This should only be used for testing in isolated lab environments. **Let's Encrypt certificates can be fully automated** with certbot and systemd timers, making HTTPS setup nearly as simple as HTTP while providing proper security.
+
+If you absolutely must use HTTP-only (e.g., for a completely isolated lab network with no internet access):
+
+1. Run the setup script with the `--http-only` flag:
+   ```bash
+   sudo /opt/containerdata/ztpbootstrap/setup.sh --http-only
+   ```
+
+2. The script will:
+   - Configure nginx to serve HTTP on port 80
+   - Update the systemd quadlet configuration to remove certificate mounts
+   - Back up your original configuration files
+
+3. Update your DHCP configuration to use HTTP:
+   ```dhcp
+   option bootfile-name "http://ztpboot.example.com/bootstrap.py";
+   ```
+
+4. Test the service:
+   ```bash
+   curl http://ztpboot.example.com/health
+   curl http://ztpboot.example.com/bootstrap.py
+   ```
+
+**Remember**: This configuration is insecure and should never be used in production or on networks with internet access. Consider using Let's Encrypt with automated renewal instead.
+
+For more details, see the [HTTP-Only Setup](#http-only-setup) section in README.md.
+
 ---
 
-**Ready to go!** Just set your enrollment token and run the setup script to start serving Arista ZTP bootstrap scripts over HTTPS.
+**Ready to go!** Just set your enrollment token and run the setup script to start serving Arista ZTP bootstrap scripts over HTTPS (or HTTP if using insecure mode).
