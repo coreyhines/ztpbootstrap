@@ -2,6 +2,51 @@
 
 A containerized service that provides a secure HTTPS endpoint for serving Arista Zero Touch Provisioning (ZTP) bootstrap scripts to network devices. The service runs an nginx container that serves the bootstrap script over HTTPS with proper security headers, enabling automated device provisioning and enrollment with Arista CloudVision (CVaaS).
 
+---
+
+## 🚀 START HERE - Choose Your Setup Method
+
+**New to this project?** Follow this decision tree:
+
+```
+Do you want guided prompts for all configuration?
+├─ YES → Use Interactive Setup (Recommended for first-time users)
+│   └─ Run: ./setup-interactive.sh
+│   └─ See: [Interactive Setup](#interactive-setup)
+│
+└─ NO → Use Automated Setup
+    └─ Run: sudo ./setup.sh
+    └─ See: [Automated Setup](#automated-setup)
+```
+
+### Quick Decision Guide
+
+**Use Interactive Setup (`setup-interactive.sh`) if:**
+- ✅ First time setting up this service
+- ✅ Want to customize paths, IPs, or other settings
+- ✅ Prefer guided prompts over manual file editing
+- ✅ Want centralized YAML configuration
+
+**Use Automated Setup (`setup.sh`) if:**
+- ✅ You've already configured `ztpbootstrap.env`
+- ✅ Using default paths and settings
+- ✅ Want quick setup without prompts
+- ✅ Already familiar with the service
+
+### Setup Prerequisites Checklist
+
+Before starting, ensure you have:
+- [ ] **Podman** installed (`podman --version`)
+- [ ] **Macvlan network** created (run `./check-macvlan.sh` to verify)
+- [ ] **Enrollment token** from CVaaS Device Registration page
+- [ ] **SSL certificates** ready (or plan to use HTTP-only mode for testing)
+- [ ] **Root/sudo access** for setup
+
+**For Interactive Setup, also need:**
+- [ ] **yq** installed (`yq --version`) - See [Interactive Setup](#interactive-setup) for installation
+
+---
+
 ## What This Does
 
 When an Arista switch boots for the first time, it requests network configuration from a DHCP server. The DHCP server responds with network settings and a URL to a bootstrap script (via DHCP Option 67). This service provides that bootstrap script endpoint, allowing switches to:
@@ -21,6 +66,8 @@ When an Arista switch boots for the first time, it requests network configuratio
 
 ## Architecture
 
+The service runs as a **Podman pod** with multiple containers sharing a macvlan network:
+
 ```
 ┌─────────────────┐
 │  Arista Switch  │
@@ -34,17 +81,23 @@ When an Arista switch boots for the first time, it requests network configuratio
 └─────────────────┘
          │
          │ HTTPS GET /bootstrap.py
+         │ HTTP GET /ui/ (Web UI)
          ▼
-┌─────────────────────────────────┐
-│  ztpbootstrap Service           │
-│  (Podman Container)             │
-│  ┌───────────────────────────┐  │
-│  │  Nginx                    │  │
-│  │  - Serves bootstrap.py    │  │
-│  │  - HTTPS on port 443      │  │
-│  │  - Security headers       │  │
-│  └───────────────────────────┘  │
-└─────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  ztpbootstrap-pod (Podman Pod)                         │
+│  Network: ztpbootstrap-net (macvlan)                   │
+│  IP: 10.0.0.10/24                                      │
+│                                                        │
+│  ┌──────────────────────────┐  ┌───────────────────┐  │
+│  │  Nginx Container         │  │  Web UI Container │  │
+│  │  (Port 80, 443)          │  │  (Port 5000)      │  │
+│  │                          │  │                   │  │
+│  │  - Serves bootstrap.py   │  │  - Flask app      │  │
+│  │  - HTTPS on port 443     │  │  - Status/config  │  │
+│  │  - Security headers      │  │  - Runtime mgmt   │  │
+│  │  - Proxies /ui/ → Web UI │  │                   │  │
+│  └──────────────────────────┘  └───────────────────┘  │
+└─────────────────────────────────────────────────────────┘
          │
          │ Executes bootstrap.py
          ▼
@@ -54,51 +107,242 @@ When an Arista switch boots for the first time, it requests network configuratio
 └─────────────────┘
 ```
 
+**Key Components:**
+- **Pod**: `ztpbootstrap-pod` - Groups containers, provides shared network
+- **Nginx Container**: Serves bootstrap script, handles HTTPS, proxies Web UI
+- **Web UI Container**: Flask-based management interface (optional)
+- **Macvlan Network**: `ztpbootstrap-net` - Direct network access with dedicated IP
+- **Systemd Integration**: Quadlet files for automatic service management
+
 ## Quick Start
 
-**Prerequisites:** Podman installed, SSL certificates ready (or use [HTTP-only mode](#http-only-setup) for testing)
+**Recommended:** Start with [Interactive Setup](#interactive-setup) for first-time users, or [Automated Setup](#automated-setup) if you've used this before.
+
+### Prerequisites
+
+Before starting, verify prerequisites:
 
 ```bash
-# 1. Prepare directories
-sudo mkdir -p /opt/containerdata/ztpbootstrap
-sudo mkdir -p /opt/containerdata/certs/wild
+# 1. Check Podman is installed
+podman --version
 
-# 2. Copy service files to /opt/containerdata/ztpbootstrap/
-#    - bootstrap.py (configure with your CVaaS settings)
-#    - nginx.conf
-#    - ztpbootstrap.env (optional)
+# 2. Check macvlan network exists (required for pod-based deployment)
+./check-macvlan.sh
 
-# 3. Configure bootstrap.py with your enrollment token
-#    Edit cvAddr and enrollmentToken in the USER INPUT section
-
-# 4. Place SSL certificates
-#    - /opt/containerdata/certs/wild/fullchain.pem
-#    - /opt/containerdata/certs/wild/privkey.pem
-
-# 5. Configure network IPs (if needed)
-sudo ip addr add 10.0.0.10/24 dev <interface>
-
-# 6. Start the service
-sudo podman run -d \
-  --name ztpbootstrap \
-  --network host \
-  -v /opt/containerdata/ztpbootstrap:/usr/share/nginx/html:ro \
-  -v /opt/containerdata/certs/wild:/etc/nginx/ssl:ro \
-  -v /opt/containerdata/ztpbootstrap/nginx.conf:/etc/nginx/nginx.conf:ro \
-  nginx:alpine
-
-# 7. Verify it's working
-curl -k https://ztpboot.example.com/health
+# 3. Have your CVaaS enrollment token ready
+#    Get it from: CVaaS Device Registration page
 ```
 
-**For automated setup:** Use the [setup script](#automated-setup) or [systemd quadlet](#systemd-integration) for production deployments.
+### Option 1: Interactive Setup (Recommended for First-Time Users)
+
+Guided setup with prompts for all configuration:
+
+```bash
+# 1. Install yq if needed (required for interactive setup)
+# macOS: brew install yq
+# Linux: sudo apt-get install yq  # or dnf/yum
+
+# 2. Run interactive setup
+./setup-interactive.sh
+
+# 3. Follow prompts to configure everything
+# 4. Script will generate config.yaml and optionally apply it
+# 5. Run setup.sh to start the service
+sudo ./setup.sh
+```
+
+**Why use interactive?** No manual file editing, guided configuration, centralized YAML config.
+
+### Option 2: Automated Setup (Quick Setup)
+
+For users who want to use default settings or have already configured files:
+
+```bash
+# 1. Create environment file
+cp ztpbootstrap.env.template ztpbootstrap.env
+# Edit ztpbootstrap.env and set ENROLLMENT_TOKEN
+
+# 2. Ensure macvlan network exists
+./check-macvlan.sh
+
+# 3. Run automated setup
+sudo ./setup.sh
+
+# For HTTP-only mode (testing only):
+sudo ./setup.sh --http-only
+```
+
+**Why use automated?** Faster, no prompts, good for repeat deployments.
+
+### What Happens During Setup
+
+Both methods will:
+1. ✅ Check prerequisites (macvlan network, files)
+2. ✅ Configure bootstrap script with your settings
+3. ✅ Set up Podman pod with nginx and Web UI containers
+4. ✅ Start the service
+5. ✅ Verify it's running
+
+### Verify Installation
+
+```bash
+# Check pod status
+sudo systemctl status ztpbootstrap-pod
+
+# Check individual container status
+sudo podman ps --filter pod=ztpbootstrap-pod
+
+# Test health endpoint
+curl -k https://ztpboot.example.com/health
+
+# Access Web UI (if enabled)
+# Navigate to: https://ztpboot.example.com/ui/
+# Features:
+#   - Service status and health
+#   - Current configuration view
+#   - Bootstrap script management
+#   - Service logs
+```
 
 **Need more details?** See:
-- [Detailed Setup Guide](#detailed-setup) - Step-by-step instructions for beginners
-- [Configuration](#configuration) - All configuration options
-- [SSL Certificates](#ssl-certificates) - Certificate setup options including [HTTP-only mode](#http-only-setup)
-- [Network Configuration](#network-configuration) - IP addresses and DHCP setup
-- [Service Management](#service-management) - Starting, stopping, monitoring
+- [Interactive Setup](#interactive-setup) - Complete interactive setup guide
+- [Automated Setup](#automated-setup) - Automated setup details
+- [Detailed Setup Guide](#detailed-setup) - Step-by-step manual instructions
+- [Troubleshooting](TROUBLESHOOTING.md) - Common issues and solutions
+- [Quick Start Guide](QUICK_START.md) - Common deployment scenarios
+
+---
+
+## Setup Scripts Overview
+
+Understanding the relationship between setup scripts:
+
+```
+setup-interactive.sh
+    │
+    ├─→ Generates config.yaml
+    │
+    └─→ update-config.sh (optional)
+            │
+            └─→ Updates all files from config.yaml
+                    │
+                    ├─→ bootstrap.py
+                    ├─→ nginx.conf
+                    ├─→ ztpbootstrap.env
+                    └─→ systemd/*.container files
+
+setup.sh
+    │
+    ├─→ Checks prerequisites (Podman, macvlan network)
+    ├─→ Reads ztpbootstrap.env
+    ├─→ Generates configured bootstrap.py
+    ├─→ Sets up Podman pod
+    └─→ Starts systemd service
+```
+
+**Script Purposes:**
+- **`setup-interactive.sh`**: Interactive configuration wizard → generates `config.yaml`
+- **`update-config.sh`**: Applies `config.yaml` to all service files
+- **`setup.sh`**: Automated setup and service deployment
+- **`check-macvlan.sh`**: Verifies macvlan network exists (called by `setup.sh`)
+
+---
+
+## Interactive Setup
+
+The interactive setup mode provides a guided configuration experience that prompts you for all paths and variables, then stores them in a YAML configuration file. This makes it easy to customize the deployment for your environment.
+
+### Prerequisites
+
+- **yq** installed (for YAML parsing):
+  ```bash
+  # macOS
+  brew install yq
+  
+  # Debian/Ubuntu
+  sudo apt-get install yq
+  
+  # Or download from: https://github.com/mikefarah/yq
+  ```
+
+### Quick Start with Interactive Setup
+
+```bash
+# 1. Run the interactive setup
+./setup-interactive.sh
+
+# 2. Answer the prompts to configure:
+#    - Directory paths
+#    - Network settings (domain, IPs, ports)
+#    - CVaaS configuration (address, enrollment token, etc.)
+#    - SSL certificate settings
+#    - Container and service configuration
+
+# 3. The script will:
+#    - Generate config.yaml with your settings
+#    - Optionally apply the configuration to all files
+#    - Update bootstrap.py, nginx.conf, systemd quadlet, etc.
+```
+
+### What Gets Configured
+
+The interactive setup configures:
+
+- **Directory Paths**: All file locations (script directory, cert directory, etc.)
+- **Network Settings**: Domain name, IPv4/IPv6 addresses, ports
+- **CVaaS Configuration**: Address, enrollment token, proxy, EOS URL, NTP server
+- **SSL Certificates**: Certificate paths, Let's Encrypt settings
+- **Container Settings**: Image, timezone, network mode, DNS
+- **Service Settings**: Health checks, restart policies
+
+### Manual Configuration Update
+
+If you've already created `config.yaml`, you can update all files manually:
+
+```bash
+# Update all files from config.yaml
+./update-config.sh config.yaml
+```
+
+This will update:
+- `bootstrap.py` - CVaaS configuration
+- `nginx.conf` - Network and domain settings
+- `ztpbootstrap.env` - Environment variables
+- `systemd/ztpbootstrap.pod` - Pod definition
+- `systemd/ztpbootstrap-nginx.container` - Nginx container configuration
+- `systemd/ztpbootstrap-webui.container` - Web UI container configuration (optional)
+- `setup.sh` - Path variables
+
+### Configuration File Format
+
+The configuration is stored in YAML format (`config.yaml`):
+
+```yaml
+paths:
+  script_dir: "/opt/containerdata/ztpbootstrap"
+  cert_dir: "/opt/containerdata/certs/wild"
+  # ... more paths
+
+network:
+  domain: "ztpboot.example.com"
+  ipv4: "10.0.0.10"
+  # ... more network settings
+
+cvaas:
+  address: "www.arista.io"
+  enrollment_token: "your_token_here"
+  # ... more CVaaS settings
+```
+
+See `config.yaml.template` for the complete structure and all available options.
+
+### Benefits of Interactive Setup
+
+- ✅ **No manual file editing** - All configuration through prompts
+- ✅ **Centralized configuration** - Single YAML file for all settings
+- ✅ **Easy updates** - Change config.yaml and re-run update script
+- ✅ **Validation** - Prompts guide you through valid options
+- ✅ **Documentation** - Config file serves as documentation
 
 ---
 
@@ -166,6 +410,10 @@ Copy all service files to `/opt/containerdata/ztpbootstrap/`:
 - `nginx.conf` - Nginx configuration
 - `ztpbootstrap.env` - Environment configuration (optional)
 - `setup.sh` - Automated setup script (optional)
+- `systemd/ztpbootstrap.pod` - Pod definition
+- `systemd/ztpbootstrap-nginx.container` - Nginx container definition
+- `systemd/ztpbootstrap-webui.container` - Web UI container definition (optional)
+- `webui/` - Web UI application files (optional)
 
 ### Step 4: Configure Bootstrap Script
 
@@ -200,7 +448,17 @@ ntpServer = "10.0.0.11"  # or "ntp1.aristanetworks.com"
 
 See [Configuration](#configuration) for detailed options.
 
-### Step 5: Set Up SSL Certificates
+### Step 5: Set Up Macvlan Network
+
+The service requires a macvlan network for direct network access. Check if it exists:
+
+```bash
+./check-macvlan.sh
+```
+
+If the network doesn't exist, the script will provide instructions for manual creation. The network must be created before running `setup.sh`.
+
+### Step 6: Set Up SSL Certificates
 
 You need SSL certificates for HTTPS. Place them in `/opt/containerdata/certs/wild/`:
 
@@ -219,58 +477,29 @@ ls -la /opt/containerdata/certs/wild/
 - **Self-signed certificate** (testing only) - See [SSL Certificates](#ssl-certificates)
 - **HTTP-only mode** (lab/testing only) - See [HTTP-Only Setup](#http-only-setup)
 
-### Step 6: Configure Network
-
-Assign IP addresses to your network interface:
-
-```bash
-# Identify your interface
-ip addr show
-
-# Assign IPv4 address
-sudo ip addr add 10.0.0.10/24 dev <interface>
-
-# Assign IPv6 address (if needed)
-sudo ip -6 addr add 2001:db8::10/64 dev <interface>
-
-# Verify
-ip addr show <interface>
-```
-
-**Important:** To make IP assignments persistent across reboots, configure them in your network manager (NetworkManager, netplan, etc.) or add them to `/etc/network/interfaces` (Debian/Ubuntu) or network-scripts (RHEL/CentOS).
-
-See [Network Configuration](#network-configuration) for details.
-
 ### Step 7: Start the Service
 
-**Option A: Manual Podman Command**
+**Recommended: Use the automated setup script**
 
 ```bash
-sudo podman run -d \
-  --name ztpbootstrap \
-  --network host \
-  -v /opt/containerdata/ztpbootstrap:/usr/share/nginx/html:ro \
-  -v /opt/containerdata/certs/wild:/etc/nginx/ssl:ro \
-  -v /opt/containerdata/ztpbootstrap/nginx.conf:/etc/nginx/nginx.conf:ro \
-  nginx:alpine
+# For HTTPS (production)
+sudo ./setup.sh
+
+# For HTTP-only (testing only)
+sudo ./setup.sh --http-only
 ```
 
-**Option B: Automated Setup Script**
+The setup script will:
+1. Check prerequisites (Podman, macvlan network)
+2. Configure the bootstrap script with your settings
+3. Set up the Podman pod with nginx and Web UI containers
+4. Install systemd quadlet files
+5. Start the service
+6. Verify it's running
 
-```bash
-# Configure environment file first
-sudo vi /opt/containerdata/ztpbootstrap/ztpbootstrap.env
+**Manual setup (advanced users)**
 
-# Run setup script
-sudo /opt/containerdata/ztpbootstrap/setup.sh
-
-# For HTTP-only mode (testing only)
-sudo /opt/containerdata/ztpbootstrap/setup.sh --http-only
-```
-
-**Option C: Systemd Quadlet (Recommended for Production)**
-
-See [Systemd Integration](#systemd-integration) for automatic startup and service management.
+If you prefer manual setup, see [Systemd Integration](#systemd-integration) section for quadlet file configuration.
 
 ### Step 8: Verify Service
 
@@ -286,7 +515,8 @@ curl -k https://ztpboot.example.com/health
 curl -k https://ztpboot.example.com/bootstrap.py | head -20
 
 # View logs
-podman logs ztpbootstrap
+sudo podman logs ztpbootstrap-nginx
+sudo podman logs ztpbootstrap-webui
 ```
 
 ### Step 9: Configure DHCP Server
@@ -416,15 +646,11 @@ To manually configure HTTP-only mode:
 
 2. **Update container command** - Remove certificate volume mounts and change port:
    ```bash
-   sudo podman run -d \
-     --name ztpbootstrap \
-     --network host \
-     -v /opt/containerdata/ztpbootstrap:/usr/share/nginx/html:ro \
-     -v /opt/containerdata/ztpbootstrap/nginx.conf:/etc/nginx/nginx.conf:ro \
-     nginx:alpine
+   # Note: For pod-based setup, use setup.sh instead
+   # Manual pod creation is not recommended - use systemd quadlet files
    ```
 
-3. **Update systemd quadlet** (if using) - Change `PublishPort=443:443` to `PublishPort=80:80` and remove certificate volume mount
+3. **The setup script handles this automatically** - When using `--http-only`, the script configures nginx and updates quadlet files accordingly
 
 </details>
 
@@ -434,102 +660,99 @@ To manually configure HTTP-only mode:
 
 ### Start/Stop/Restart
 
-**Using Podman directly:**
+**Using Podman directly (for pod):**
 ```bash
-# Start
-sudo podman start ztpbootstrap
+# Start pod
+sudo podman pod start ztpbootstrap-pod
 
-# Stop
-sudo podman stop ztpbootstrap
+# Stop pod
+sudo podman pod stop ztpbootstrap-pod
 
-# Restart
-sudo podman restart ztpbootstrap
+# Restart pod
+sudo podman pod restart ztpbootstrap-pod
+
+# Check pod status
+sudo podman pod ps
 ```
 
 **Using systemd (if using quadlet):**
 ```bash
 # Start
-sudo systemctl start ztpbootstrap.container
+sudo systemctl start ztpbootstrap-pod
 
 # Stop
-sudo systemctl stop ztpbootstrap.container
+sudo systemctl stop ztpbootstrap-pod
 
 # Restart
-sudo systemctl restart ztpbootstrap.container
+sudo systemctl restart ztpbootstrap-pod
 
 # Enable on boot
-sudo systemctl enable ztpbootstrap.container
+sudo systemctl enable ztpbootstrap-pod
 ```
 
 ### View Logs
 
 **Podman logs:**
 ```bash
-# Follow logs in real-time
-sudo podman logs -f ztpbootstrap
+# Follow logs for nginx container
+sudo podman logs -f ztpbootstrap-nginx
+
+# Follow logs for Web UI container
+sudo podman logs -f ztpbootstrap-webui
 
 # View recent logs
-sudo podman logs --tail 100 ztpbootstrap
+sudo podman logs --tail 100 ztpbootstrap-nginx
 ```
 
 **Systemd logs (if using quadlet):**
 ```bash
 # Follow logs in real-time
-sudo journalctl -u ztpbootstrap.container -f
+sudo journalctl -u ztpbootstrap-pod -f
 
 # View recent logs
-sudo journalctl -u ztpbootstrap.container --since "1 hour ago"
+sudo journalctl -u ztpbootstrap-pod --since "1 hour ago"
 ```
 
 ### Check Status
 
 ```bash
-# Container status
-sudo podman ps | grep ztpbootstrap
+# Pod and container status
+sudo podman pod ps
+sudo podman ps --filter pod=ztpbootstrap-pod
 
-# Systemd service status (if using quadlet)
-sudo systemctl status ztpbootstrap.container
+# Systemd service status
+sudo systemctl status ztpbootstrap-pod
 ```
 
 ### Systemd Integration {#systemd-integration}
 
-For automatic startup and service management, use systemd quadlets:
+The service uses systemd quadlets for automatic startup and service management. The setup script automatically installs the quadlet files, but you can also install them manually:
 
-**Create quadlet file:**
+**Quadlet files are automatically installed by `setup.sh`:**
+
+The setup script copies these files to `/etc/containers/systemd/ztpbootstrap/`:
+- `ztpbootstrap.pod` - Pod definition with macvlan network
+- `ztpbootstrap-nginx.container` - Nginx container configuration
+- `ztpbootstrap-webui.container` - Web UI container configuration (optional)
+
+**Manual installation (if needed):**
+
 ```bash
+# 1. Create quadlet directory
 sudo mkdir -p /etc/containers/systemd/ztpbootstrap
 
-sudo tee /etc/containers/systemd/ztpbootstrap/ztpbootstrap.container > /dev/null <<'EOF'
-[Unit]
-Description=ZTP Bootstrap Service
-After=network-online.target
-Wants=network-online.target
+# 2. Copy pod and container files
+sudo cp systemd/ztpbootstrap.pod /etc/containers/systemd/ztpbootstrap/
+sudo cp systemd/ztpbootstrap-nginx.container /etc/containers/systemd/ztpbootstrap/
+sudo cp systemd/ztpbootstrap-webui.container /etc/containers/systemd/ztpbootstrap/
 
-[Container]
-Image=nginx:alpine
-ContainerName=ztpbootstrap
-Network=host
-PublishPort=443:443
-Volume=/opt/containerdata/ztpbootstrap:/usr/share/nginx/html:ro
-Volume=/opt/containerdata/certs/wild:/etc/nginx/ssl:ro
-Volume=/opt/containerdata/ztpbootstrap/nginx.conf:/etc/nginx/nginx.conf:ro
-Restart=always
-RestartSec=10
-
-[Service]
-Restart=always
-RestartSec=10
-EOF
-
-# Reload systemd
+# 3. Reload systemd and start
 sudo systemctl daemon-reload
-
-# Start and enable
-sudo systemctl start ztpbootstrap.container
-sudo systemctl enable ztpbootstrap.container
+sudo systemctl start ztpbootstrap-pod
+sudo systemctl enable ztpbootstrap-pod
 ```
 
-**Note:** For Ubuntu/Debian, quadlet support may require additional setup. See [Detailed Setup](#detailed-setup) for alternatives.
+**Note:** The pod-based setup requires a macvlan network (`ztpbootstrap-net`). Run `./check-macvlan.sh` to verify it exists before starting the service.
 
 ---
 
@@ -641,7 +864,7 @@ See [Testing Guide](TESTING.md) for complete testing documentation.
    ```bash
    sudo podman logs ztpbootstrap
    # or
-   sudo journalctl -u ztpbootstrap.container
+   sudo journalctl -u ztpbootstrap-pod
    ```
 
 2. **Verify certificates:**
@@ -745,7 +968,9 @@ See [Testing Guide](TESTING.md) for complete testing documentation.
 └── README.md               # This file
 
 /etc/containers/systemd/ztpbootstrap/
-└── ztpbootstrap.container   # Systemd quadlet configuration (if present)
+├── ztpbootstrap.pod              # Pod definition
+├── ztpbootstrap-nginx.container  # Nginx container configuration
+└── ztpbootstrap-webui.container  # Web UI container configuration (optional)
 
 /opt/containerdata/certs/wild/
 ├── fullchain.pem           # SSL certificate

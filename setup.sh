@@ -319,27 +319,103 @@ update_quadlet_http_only() {
     log "Quadlet file updated for HTTP-only mode"
 }
 
+# Check prerequisites before setup
+check_setup_prerequisites() {
+    log "Checking prerequisites..."
+    
+    # Check Podman
+    if ! command -v podman >/dev/null 2>&1; then
+        error "Podman is not installed. Please install Podman first."
+        echo ""
+        info "Install Podman:"
+        echo "  Fedora/RHEL: sudo dnf install podman"
+        echo "  Ubuntu/Debian: sudo apt-get install podman"
+        echo "  See: https://podman.io/getting-started/installation"
+        return 1
+    fi
+    log "✓ Podman found: $(podman --version)"
+    
+    # Check macvlan network
+    if ! podman network exists ztpbootstrap-net 2>/dev/null; then
+        error "Macvlan network 'ztpbootstrap-net' not found"
+        echo ""
+        warn "The macvlan network must exist before starting the pod."
+        warn "Run './check-macvlan.sh' to check network status and get instructions."
+        echo ""
+        info "The network must be created manually. See check-macvlan.sh for instructions."
+        echo ""
+        return 1
+    else
+        log "✓ Macvlan network 'ztpbootstrap-net' found"
+    fi
+    
+    return 0
+}
+
+# Setup Podman pod with containers
+setup_pod() {
+    log "Setting up Podman pod with containers..."
+    
+    local systemd_dir="/etc/containers/systemd/ztpbootstrap"
+    mkdir -p "$systemd_dir"
+    
+    # Copy pod and container files
+    if [[ -f "${SCRIPT_DIR}/systemd/ztpbootstrap.pod" ]]; then
+        cp "${SCRIPT_DIR}/systemd/ztpbootstrap.pod" "$systemd_dir/"
+        log "Pod configuration installed"
+    else
+        error "Pod configuration file not found: ${SCRIPT_DIR}/systemd/ztpbootstrap.pod"
+        return 1
+    fi
+    
+    if [[ -f "${SCRIPT_DIR}/systemd/ztpbootstrap-nginx.container" ]]; then
+        cp "${SCRIPT_DIR}/systemd/ztpbootstrap-nginx.container" "$systemd_dir/"
+        log "Nginx container configuration installed"
+    else
+        error "Nginx container configuration not found"
+        return 1
+    fi
+    
+    # Copy Web UI container if webui directory exists
+    if [[ -d "${SCRIPT_DIR}/webui" ]] && [[ -f "${SCRIPT_DIR}/systemd/ztpbootstrap-webui.container" ]]; then
+        cp "${SCRIPT_DIR}/systemd/ztpbootstrap-webui.container" "$systemd_dir/"
+        log "Web UI container configuration installed"
+    else
+        warn "Web UI directory not found, Web UI container will not be included"
+        warn "Service will run without Web UI"
+    fi
+    
+    return 0
+}
+
 # Reload systemd and start service
 start_service() {
     log "Reloading systemd daemon..."
     systemctl daemon-reload
     
-    log "Enabling ztpbootstrap service..."
-    # Service is transient/generated, skip enable step
-    log "Service is transient, skipping enable step"
+    # Setup pod configuration
+    if ! setup_pod; then
+        error "Pod setup failed. Please create the macvlan network first."
+        exit 1
+    fi
     
-    log "Starting ztpbootstrap service..."
-    if systemctl start ztpbootstrap; then
-        log "Service started successfully"
+    log "Starting ztpbootstrap pod..."
+    if systemctl start ztpbootstrap-pod; then
+        log "Pod started successfully"
     else
-        error "Failed to start service"
+        error "Failed to start pod. Check logs with: journalctl -u ztpbootstrap-pod -f"
     fi
 }
 
 # Check service status
 check_service_status() {
-    log "Checking service status..."
-    systemctl status ztpbootstrap --no-pager -l
+    log "Checking pod status..."
+    systemctl status ztpbootstrap-pod --no-pager -l
+    
+    log ""
+    log "Container status:"
+    podman pod ps --filter name=ztpbootstrap-pod
+    podman ps --filter pod=ztpbootstrap-pod
 }
 
 # Main function
@@ -361,6 +437,12 @@ main() {
             exit 0
         fi
         echo ""
+    fi
+    
+    # Check prerequisites first
+    if ! check_setup_prerequisites; then
+        error "Prerequisites check failed. Please fix issues above and try again."
+        exit 1
     fi
     
     check_env_file

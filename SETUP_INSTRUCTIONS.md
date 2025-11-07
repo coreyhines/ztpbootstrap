@@ -12,7 +12,9 @@ The following components have been set up for your Arista ZTP Bootstrap service:
 - `/opt/containerdata/ztpbootstrap/setup.sh` - Automated setup script
 - `/opt/containerdata/ztpbootstrap/test-service.sh` - Service testing script
 - `/opt/containerdata/ztpbootstrap/README.md` - Complete documentation
-- `/etc/containers/systemd/ztpbootstrap/ztpbootstrap.container` - Systemd quadlet configuration
+- `/etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod` - Pod definition
+- `/etc/containers/systemd/ztpbootstrap/ztpbootstrap-nginx.container` - Nginx container definition
+- `/etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container` - Web UI container definition (optional)
 
 ### Network Configuration:
 - **IPv4**: `10.0.0.10`
@@ -56,12 +58,18 @@ sudo /opt/containerdata/ztpbootstrap/setup.sh --http-only
 
 ### 4. Verify the Service
 ```bash
-# Check service status
-sudo systemctl status ztpbootstrap.container
+# Check pod status
+sudo systemctl status ztpbootstrap-pod
+
+# Check individual container status
+sudo podman ps --filter pod=ztpbootstrap-pod
 
 # Test the endpoints
 curl -k https://ztpboot.example.com/health
 curl -k https://ztpboot.example.com/bootstrap.py
+
+# Access Web UI (if enabled)
+# Navigate to: https://ztpboot.example.com/ui/
 ```
 
 ## 🔧 Configuration Details
@@ -97,19 +105,23 @@ subnet 10.0.0.0 netmask 255.255.255.0 {
 
 ```bash
 # Start service
-sudo systemctl start ztpbootstrap.container
+sudo systemctl start ztpbootstrap-pod
 
 # Stop service
-sudo systemctl stop ztpbootstrap.container
+sudo systemctl stop ztpbootstrap-pod
 
 # Restart service
-sudo systemctl restart ztpbootstrap.container
+sudo systemctl restart ztpbootstrap-pod
 
 # View logs
-sudo journalctl -u ztpbootstrap.container -f
+sudo journalctl -u ztpbootstrap-pod -f
 
 # Check status
-sudo systemctl status ztpbootstrap.container
+sudo systemctl status ztpbootstrap-pod
+
+# Check individual container logs
+sudo podman logs ztpbootstrap-nginx
+sudo podman logs ztpbootstrap-webui
 ```
 
 ## 🧪 Testing
@@ -158,13 +170,15 @@ See the [Testing section in README.md](../README.md#testing) for more details.
 
 ### Common Issues:
 
-1. **Service won't start**: Check logs with `sudo journalctl -u ztpbootstrap.container`
-2. **SSL issues**: Verify certificates with `openssl x509 -in /opt/containerdata/certs/wild/fullchain.pem -text -noout`
-3. **Network issues**: Ensure IPs are assigned with `ip addr show`
-4. **Bootstrap script issues**: Verify environment variables are set correctly
+1. **Service won't start**: Check logs with `sudo journalctl -u ztpbootstrap-pod`
+2. **Macvlan network missing**: Run `./check-macvlan.sh` to verify network exists
+3. **SSL issues**: Verify certificates with `openssl x509 -in /opt/containerdata/certs/wild/fullchain.pem -text -noout`
+4. **Network issues**: Ensure macvlan network is configured correctly
+5. **Bootstrap script issues**: Verify environment variables are set correctly
 
 ### Getting Help:
-- Check the logs: `sudo journalctl -u ztpbootstrap.container -f`
+- Check the logs: `sudo journalctl -u ztpbootstrap-pod -f`
+- Check macvlan network: `./check-macvlan.sh`
 - Run the test script: `sudo /opt/containerdata/ztpbootstrap/test-service.sh`
 - Review the README: `cat /opt/containerdata/ztpbootstrap/README.md`
 

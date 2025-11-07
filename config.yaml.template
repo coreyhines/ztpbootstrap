@@ -1,0 +1,138 @@
+# Arista ZTP Bootstrap Service Configuration
+# This file contains all customizable paths and variables for the service
+# Copy this to config.yaml and customize as needed
+
+# ============================================================================
+# Directory Paths
+# ============================================================================
+paths:
+  # Main service directory where bootstrap files are stored
+  script_dir: "/opt/containerdata/ztpbootstrap"
+  
+  # SSL certificate directory
+  cert_dir: "/opt/containerdata/certs/wild"
+  
+  # Environment file path
+  env_file: "/opt/containerdata/ztpbootstrap/ztpbootstrap.env"
+  
+  # Bootstrap script paths
+  bootstrap_script: "/opt/containerdata/ztpbootstrap/bootstrap.py"
+  configured_script: "/opt/containerdata/ztpbootstrap/bootstrap_configured.py"
+  
+  # Nginx configuration file
+  nginx_conf: "/opt/containerdata/ztpbootstrap/nginx.conf"
+  
+  # Systemd quadlet file
+  quadlet_file: "/etc/containers/systemd/ztpbootstrap/ztpbootstrap.container"
+
+# ============================================================================
+# Network Configuration
+# ============================================================================
+network:
+  # Domain name for the bootstrap service
+  domain: "ztpboot.example.com"
+  
+  # IPv4 address (leave empty to use host network)
+  ipv4: "10.0.0.10"
+  
+  # IPv6 address (leave empty to disable IPv6)
+  ipv6: "2001:db8::10"
+  
+  # HTTPS port
+  https_port: 443
+  
+  # HTTP port (for HTTP-only mode)
+  http_port: 80
+  
+  # Use HTTP-only mode (insecure, not recommended for production)
+  http_only: false
+
+# ============================================================================
+# CVaaS Configuration
+# ============================================================================
+cvaas:
+  # CVaaS address - Use "www.arista.io" for all clusters (recommended)
+  # or use specific regional URLs:
+  # - United States 1a: "www.arista.io"
+  # - United States 1b: "www.cv-prod-us-central1-b.arista.io"
+  # - United States 1c: "www.cv-prod-us-central1-c.arista.io"
+  # - Canada: "www.cv-prod-na-northeast1-b.arista.io"
+  # - Europe West 2: "www.cv-prod-euwest-2.arista.io"
+  # - Japan: "www.cv-prod-apnortheast-1.arista.io"
+  # - Australia: "www.cv-prod-ausoutheast-1.arista.io"
+  # - United Kingdom: "www.cv-prod-uk-1.arista.io"
+  address: "www.arista.io"
+  
+  # Enrollment token from CVaaS Device Registration page
+  # IMPORTANT: Replace with your actual enrollment token
+  enrollment_token: ""
+  
+  # Proxy URL if device is behind a proxy server (leave empty if not needed)
+  proxy: ""
+  
+  # EOS image URL for upgrades (optional)
+  # Only needed for EOS versions < 4.24.1F or specific upgrade scenarios
+  eos_url: ""
+  
+  # NTP server for time synchronization
+  ntp_server: "time.nist.gov"
+
+# ============================================================================
+# SSL Certificate Configuration
+# ============================================================================
+ssl:
+  # Certificate file path (relative to cert_dir)
+  cert_file: "fullchain.pem"
+  
+  # Private key file path (relative to cert_dir)
+  key_file: "privkey.pem"
+  
+  # Use Let's Encrypt with certbot (if true, will attempt to obtain certificate)
+  use_letsencrypt: false
+  
+  # Email for Let's Encrypt registration
+  letsencrypt_email: "admin@example.com"
+  
+  # Create self-signed certificate for testing (if true and no cert exists)
+  create_self_signed: false
+
+# ============================================================================
+# Container Configuration
+# ============================================================================
+container:
+  # Container name
+  name: "ztpbootstrap"
+  
+  # Container image
+  image: "docker.io/nginx:alpine"
+  
+  # Timezone
+  timezone: "UTC"
+  
+  # Use host network mode (if true, ignores IP settings)
+  host_network: true
+  
+  # DNS servers (if not using host network)
+  dns:
+    - "8.8.8.8"
+    - "8.8.4.4"
+
+# ============================================================================
+# Service Configuration
+# ============================================================================
+service:
+  # Health check interval
+  health_interval: "30s"
+  
+  # Health check timeout
+  health_timeout: "10s"
+  
+  # Health check retries
+  health_retries: 3
+  
+  # Health check start period
+  health_start_period: "60s"
+  
+  # Restart policy
+  restart_policy: "on-failure"
+

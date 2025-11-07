@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZTP Bootstrap Service - Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        [x-cloak] { display: none !important; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div x-data="dashboard()" x-init="init()" x-cloak class="min-h-screen">
+        <!-- Header -->
+        <header class="bg-white shadow">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                <h1 class="text-2xl font-bold text-gray-900">ZTP Bootstrap Service</h1>
+                <p class="text-sm text-gray-600">Configuration and Monitoring Dashboard</p>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <!-- Status Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <!-- Container Status -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm font-medium text-gray-600">Container Status</p>
+                            <p class="text-2xl font-bold" :class="status.container_running ? 'text-green-600' : 'text-red-600'">
+                                <span x-text="status.container_running ? 'Running' : 'Stopped'"></span>
+                            </p>
+                        </div>
+                        <div class="w-12 h-12 rounded-full flex items-center justify-center" 
+                             :class="status.container_running ? 'bg-green-100' : 'bg-red-100'">
+                            <span x-text="status.container_running ? '✓' : '✗'" 
+                                  :class="status.container_running ? 'text-green-600' : 'text-red-600'"
+                                  class="text-2xl"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Health Status -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm font-medium text-gray-600">Health Check</p>
+                            <p class="text-2xl font-bold" :class="status.health_ok ? 'text-green-600' : 'text-yellow-600'">
+                                <span x-text="status.health_ok ? 'Healthy' : 'Unknown'"></span>
+                            </p>
+                        </div>
+                        <div class="w-12 h-12 rounded-full flex items-center justify-center" 
+                             :class="status.health_ok ? 'bg-green-100' : 'bg-yellow-100'">
+                            <span x-text="status.health_ok ? '✓' : '?'" 
+                                  :class="status.health_ok ? 'text-green-600' : 'text-yellow-600'"
+                                  class="text-2xl"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Configuration -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm font-medium text-gray-600">Configuration</p>
+                            <p class="text-2xl font-bold" :class="status.config_exists ? 'text-green-600' : 'text-gray-600'">
+                                <span x-text="status.config_exists ? 'Loaded' : 'Missing'"></span>
+                            </p>
+                        </div>
+                        <div class="w-12 h-12 rounded-full flex items-center justify-center" 
+                             :class="status.config_exists ? 'bg-green-100' : 'bg-gray-100'">
+                            <span x-text="status.config_exists ? '✓' : '✗'" 
+                                  :class="status.config_exists ? 'text-green-600' : 'text-gray-600'"
+                                  class="text-2xl"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="bg-white rounded-lg shadow">
+                <div class="border-b border-gray-200">
+                    <nav class="flex -mb-px">
+                        <button @click="activeTab = 'scripts'" 
+                                :class="activeTab === 'scripts' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            Bootstrap Scripts
+                        </button>
+                        <button @click="activeTab = 'config'" 
+                                :class="activeTab === 'config' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            Configuration
+                        </button>
+                        <button @click="activeTab = 'logs'" 
+                                :class="activeTab === 'logs' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            Logs
+                        </button>
+                    </nav>
+                </div>
+
+                <!-- Bootstrap Scripts Tab -->
+                <div x-show="activeTab === 'scripts'" class="p-6">
+                    <div class="mb-4">
+                        <h2 class="text-lg font-semibold text-gray-900 mb-2">Bootstrap Scripts</h2>
+                        <p class="text-sm text-gray-600">Manage bootstrap scripts for device enrollment</p>
+                    </div>
+                    
+                    <div class="space-y-4">
+                        <template x-for="script in scripts" :key="script.name">
+                            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <h3 class="font-medium text-gray-900" x-text="script.name"></h3>
+                                        <p class="text-sm text-gray-600" x-text="formatSize(script.size) + ' • ' + formatDate(script.modified)"></p>
+                                    </div>
+                                    <button @click="viewScript(script.name)" 
+                                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm">
+                                        View
+                                    </button>
+                                </div>
+                            </div>
+                        </template>
+                        
+                        <div x-show="scripts.length === 0" class="text-center py-8 text-gray-500">
+                            No bootstrap scripts found
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Configuration Tab -->
+                <div x-show="activeTab === 'config'" class="p-6">
+                    <div class="mb-4">
+                        <h2 class="text-lg font-semibold text-gray-900 mb-2">Configuration</h2>
+                        <p class="text-sm text-gray-600">View and manage service configuration</p>
+                    </div>
+                    
+                    <div class="bg-gray-50 rounded-lg p-4">
+                        <pre class="text-sm text-gray-800 overflow-x-auto" x-text="JSON.stringify(config, null, 2)"></pre>
+                    </div>
+                </div>
+
+                <!-- Logs Tab -->
+                <div x-show="activeTab === 'logs'" class="p-6">
+                    <div class="mb-4">
+                        <h2 class="text-lg font-semibold text-gray-900 mb-2">Service Logs</h2>
+                        <p class="text-sm text-gray-600">Recent service logs</p>
+                    </div>
+                    
+                    <div class="bg-gray-900 rounded-lg p-4">
+                        <pre class="text-sm text-green-400 font-mono overflow-x-auto whitespace-pre-wrap" x-text="logs"></pre>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function dashboard() {
+            return {
+                activeTab: 'scripts',
+                status: {
+                    container_running: false,
+                    health_ok: false,
+                    config_exists: false,
+                    bootstrap_script_exists: false
+                },
+                scripts: [],
+                config: {},
+                logs: 'Loading...',
+                
+                async init() {
+                    await this.loadStatus();
+                    await this.loadScripts();
+                    await this.loadConfig();
+                    await this.loadLogs();
+                    
+                    // Auto-refresh every 5 seconds
+                    setInterval(() => {
+                        this.loadStatus();
+                        if (this.activeTab === 'logs') {
+                            this.loadLogs();
+                        }
+                    }, 5000);
+                },
+                
+                async loadStatus() {
+                    try {
+                        const response = await fetch('/api/status');
+                        this.status = await response.json();
+                    } catch (error) {
+                        console.error('Failed to load status:', error);
+                    }
+                },
+                
+                async loadScripts() {
+                    try {
+                        const response = await fetch('/api/bootstrap-scripts');
+                        const data = await response.json();
+                        this.scripts = data.scripts || [];
+                    } catch (error) {
+                        console.error('Failed to load scripts:', error);
+                    }
+                },
+                
+                async loadConfig() {
+                    try {
+                        const response = await fetch('/api/config');
+                        this.config = await response.json();
+                    } catch (error) {
+                        console.error('Failed to load config:', error);
+                    }
+                },
+                
+                async loadLogs() {
+                    try {
+                        const response = await fetch('/api/logs');
+                        const data = await response.json();
+                        this.logs = data.logs || 'No logs available';
+                    } catch (error) {
+                        console.error('Failed to load logs:', error);
+                        this.logs = 'Failed to load logs';
+                    }
+                },
+                
+                async viewScript(filename) {
+                    try {
+                        const response = await fetch(`/api/bootstrap-script/${filename}`);
+                        const data = await response.json();
+                        alert(`Script: ${data.name}\n\n${data.content.substring(0, 500)}...`);
+                    } catch (error) {
+                        alert('Failed to load script');
+                    }
+                },
+                
+                formatSize(bytes) {
+                    if (bytes < 1024) return bytes + ' B';
+                    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+                },
+                
+                formatDate(timestamp) {
+                    return new Date(timestamp * 1000).toLocaleString();
+                }
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+[Unit]
+Description=ZTP Bootstrap Service Pod
+Documentation=man:podman-systemd.unit(5)
+
+[Pod]
+# Pod name
+PodName=ztpbootstrap-pod
+
+# Network configuration - macvlan
+# Network must be created manually before starting the pod
+# Check network status: ./check-macvlan.sh
+Network=ztpbootstrap-net
+
+# IP addresses (update these to match your network)
+IP=10.0.0.10
+IP6=2001:db8::10
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

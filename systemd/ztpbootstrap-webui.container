@@ -1,0 +1,39 @@
+[Unit]
+Description=ZTP Bootstrap Web UI Container
+Documentation=man:podman-systemd.unit(5)
+PartOf=ztpbootstrap-pod.service
+Requires=ztpbootstrap-pod.service
+
+[Container]
+ContainerName=ztpbootstrap-webui
+Image=docker.io/python:alpine
+Pod=ztpbootstrap-pod
+
+# Expose Flask port directly
+PublishPort=5000:5000
+
+# Volume mounts
+Volume=/opt/containerdata/ztpbootstrap/webui:/app:ro
+Volume=/opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:ro
+
+Environment="TZ=UTC"
+Environment="ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap"
+Environment="FLASK_APP=app.py"
+Environment="FLASK_ENV=production"
+
+# Install Flask and start app
+# Use a startup script that installs dependencies and runs the app
+ExecStart=/bin/sh -c "pip install --no-cache-dir flask werkzeug && python3 /app/app.py"
+
+# Health check (using Python since wget may not be available)
+HealthCmd=["sh", "-c", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/api/status')\" || exit 1"]
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=30s
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=ztpbootstrap-pod.service

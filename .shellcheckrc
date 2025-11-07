@@ -1,0 +1,12 @@
+# ShellCheck configuration for ZTP Bootstrap project
+
+# Disable specific warnings that are acceptable in this project
+# SC2034: Variable appears unused (used in sourced scripts)
+# SC2155: Declare and assign separately (acceptable for readability)
+# SC1090: Can't follow non-constant source (we use dynamic sourcing)
+
+# Enable all checks by default
+enable=all
+
+# Exclude specific checks
+exclude=SC2034,SC2155,SC1090
