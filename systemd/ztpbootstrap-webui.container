@@ -7,7 +7,7 @@ Requires=ztpbootstrap-pod.service
 [Container]
 ContainerName=ztpbootstrap-webui
 Image=docker.io/python:alpine
-Pod=ztpbootstrap-pod
+Pod=ztpbootstrap.pod
 
 # Expose Flask port directly
 PublishPort=5000:5000

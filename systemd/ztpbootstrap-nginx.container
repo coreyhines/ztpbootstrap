@@ -7,7 +7,7 @@ Requires=ztpbootstrap-pod.service
 [Container]
 ContainerName=ztpbootstrap-nginx
 Image=docker.io/nginx:alpine
-Pod=ztpbootstrap-pod
+Pod=ztpbootstrap.pod
 
 # Expose ports directly
 PublishPort=443:443
