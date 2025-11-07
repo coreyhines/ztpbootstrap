@@ -1,8 +1,5 @@
 [Unit]
 Description=ZTP Bootstrap Web UI Container
-Documentation=man:podman-systemd.unit(5)
-PartOf=ztpbootstrap-pod.service
-Requires=ztpbootstrap-pod.service
 
 [Container]
 ContainerName=ztpbootstrap-webui
