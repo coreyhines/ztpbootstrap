@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y podman python3 curl nginx openssl
+    
+    - name: Verify Podman installation
+      run: |
+        podman --version
+        python3 --version
+        curl --version
+    
+    - name: Make test scripts executable
+      run: |
+        chmod +x ci-test.sh
+        chmod +x integration-test.sh
+        chmod +x test-service.sh
+        chmod +x setup.sh
+    
+    - name: Run CI validation tests
+      run: |
+        ./ci-test.sh
+    
+    - name: Create test directories
+      run: |
+        sudo mkdir -p /opt/containerdata/ztpbootstrap
+        sudo mkdir -p /opt/containerdata/certs/wild
+        sudo cp bootstrap.py /opt/containerdata/ztpbootstrap/
+        sudo cp nginx.conf /opt/containerdata/ztpbootstrap/
+        sudo cp setup.sh /opt/containerdata/ztpbootstrap/
+        sudo cp test-service.sh /opt/containerdata/ztpbootstrap/
+        sudo cp integration-test.sh /opt/containerdata/ztpbootstrap/
+        sudo cp ci-test.sh /opt/containerdata/ztpbootstrap/
+    
+    - name: Create test SSL certificate (for HTTPS tests)
+      run: |
+        sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+          -keyout /opt/containerdata/certs/wild/privkey.pem \
+          -out /opt/containerdata/certs/wild/fullchain.pem \
+          -subj "/C=US/ST=Test/L=Test/O=Test/CN=ztpboot.example.com" \
+          -addext "subjectAltName=DNS:ztpboot.example.com,DNS:*.example.com"
+    
+    - name: Run integration test (HTTP-only mode)
+      run: |
+        sudo ./integration-test.sh --http-only
+    
+    - name: Check for test artifacts
+      if: failure()
+      run: |
+        echo "Test failed. Checking for container logs..."
+        sudo podman ps -a || true
+        sudo podman logs ztpbootstrap-test 2>&1 || true
