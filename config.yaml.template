@@ -21,9 +21,6 @@ paths:
   
   # Nginx configuration file
   nginx_conf: "/opt/containerdata/ztpbootstrap/nginx.conf"
-  
-  # Systemd quadlet file
-  quadlet_file: "/etc/containers/systemd/ztpbootstrap/ztpbootstrap.container"
 
 # ============================================================================
 # Network Configuration

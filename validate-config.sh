@@ -296,21 +296,18 @@ validate_config() {
     local env_file
     local bootstrap_script
     local nginx_conf
-    local quadlet_file
     
     script_dir=$(get_yaml_value '.paths.script_dir')
     cert_dir=$(get_yaml_value '.paths.cert_dir')
     env_file=$(get_yaml_value '.paths.env_file')
     bootstrap_script=$(get_yaml_value '.paths.bootstrap_script')
     nginx_conf=$(get_yaml_value '.paths.nginx_conf')
-    quadlet_file=$(get_yaml_value '.paths.quadlet_file')
     
     validate_path "$script_dir" "script_dir"
     validate_path "$cert_dir" "cert_dir"
     validate_file_path "$env_file" "env_file"
     validate_file_path "$bootstrap_script" "bootstrap_script" "true"
     validate_file_path "$nginx_conf" "nginx_conf" "true"
-    validate_file_path "$quadlet_file" "quadlet_file"
     
     echo ""
     

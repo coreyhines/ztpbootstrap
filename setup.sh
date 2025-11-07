@@ -295,31 +295,6 @@ NGINX_EOF
     warn "Consider using Let's Encrypt with automated renewal instead"
 }
 
-# Update systemd quadlet for HTTP-only mode
-update_quadlet_http_only() {
-    local quadlet_file="/etc/containers/systemd/ztpbootstrap/ztpbootstrap.container"
-    
-    if [[ ! -f "$quadlet_file" ]]; then
-        warn "Quadlet file not found: $quadlet_file"
-        warn "You may need to manually update the container configuration"
-        return
-    fi
-    
-    log "Updating systemd quadlet for HTTP-only mode..."
-    
-    # Backup original quadlet file
-    if [[ ! -f "${quadlet_file}.backup" ]]; then
-        cp "$quadlet_file" "${quadlet_file}.backup"
-        log "Backed up original quadlet file to ${quadlet_file}.backup"
-    fi
-    
-    # Update quadlet file to remove certificate volume and change port
-    sed -i 's|PublishPort=443:443|PublishPort=80:80|g' "$quadlet_file"
-    sed -i '/Volume=.*certs.*wild/d' "$quadlet_file"
-    
-    log "Quadlet file updated for HTTP-only mode"
-}
-
 # Check prerequisites before setup
 check_setup_prerequisites() {
     log "Checking prerequisites..."
@@ -529,7 +504,6 @@ main() {
     
     if [[ "$HTTP_ONLY" == "true" ]]; then
         configure_http_only
-        update_quadlet_http_only
         log "HTTP-only mode configured"
         log "Remember to update your DHCP configuration to use HTTP instead of HTTPS:"
         log "  option bootfile-name \"http://$DOMAIN/bootstrap.py\";"
