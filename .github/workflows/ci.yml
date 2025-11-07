@@ -57,7 +57,7 @@ jobs:
         scan-arguments: '--scan ./setup.sh ./test-service.sh ./integration-test.sh ./ci-test.sh'
     
     - name: Upload Dependency-Check results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       if: always()
       with:
         name: dependency-check-report
@@ -80,7 +80,7 @@ jobs:
         output-file: "sbom.cyclonedx.json"
     
     - name: Upload SBOM
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v5
       with:
         name: sbom
         path: sbom.cyclonedx.json
