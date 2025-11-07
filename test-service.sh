@@ -15,6 +15,8 @@ NC='\033[0m' # No Color
 DOMAIN="ztpboot.example.com"
 IPV4="10.0.0.10"
 IPV6="2001:db8::10"
+NGINX_CONF="/opt/containerdata/ztpbootstrap/nginx.conf"
+HTTP_ONLY=false
 
 # Logging function
 log() {
@@ -48,8 +50,24 @@ test_network() {
     fi
 }
 
+# Detect HTTP-only mode
+detect_http_only() {
+    if [[ -f "$NGINX_CONF" ]]; then
+        if grep -q "HTTP-ONLY MODE" "$NGINX_CONF" || ! grep -q "listen 443 ssl" "$NGINX_CONF"; then
+            HTTP_ONLY=true
+            log "HTTP-only mode detected in nginx configuration"
+            warn "⚠️  WARNING: HTTP-only mode is insecure and should not be used in production!"
+        fi
+    fi
+}
+
 # Test SSL certificates
 test_ssl_certificates() {
+    if [[ "$HTTP_ONLY" == "true" ]]; then
+        warn "Skipping SSL certificate tests (HTTP-only mode)"
+        return 0
+    fi
+    
     log "Testing SSL certificates..."
     
     local cert_file="/opt/containerdata/certs/wild/fullchain.pem"
@@ -126,18 +144,27 @@ test_service_status() {
     if systemctl is-active ztpbootstrap.container >/dev/null 2>&1; then
         log "Service is active"
         
+        # Determine protocol and URL based on HTTP-only mode
+        local protocol="https"
+        local curl_opts="-k"
+        if [[ "$HTTP_ONLY" == "true" ]]; then
+            protocol="http"
+            curl_opts=""
+            warn "Testing HTTP endpoints (insecure mode)"
+        fi
+        
         # Test health endpoint
-        if curl -k -s -f "https://$DOMAIN/health" >/dev/null 2>&1; then
-            log "Health endpoint is responding"
+        if curl $curl_opts -s -f "$protocol://$DOMAIN/health" >/dev/null 2>&1; then
+            log "Health endpoint is responding at $protocol://$DOMAIN/health"
         else
-            warn "Health endpoint is not responding"
+            warn "Health endpoint is not responding at $protocol://$DOMAIN/health"
         fi
         
         # Test bootstrap script endpoint
-        if curl -k -s -f "https://$DOMAIN/bootstrap.py" >/dev/null 2>&1; then
-            log "Bootstrap script endpoint is responding"
+        if curl $curl_opts -s -f "$protocol://$DOMAIN/bootstrap.py" >/dev/null 2>&1; then
+            log "Bootstrap script endpoint is responding at $protocol://$DOMAIN/bootstrap.py"
         else
-            warn "Bootstrap script endpoint is not responding"
+            warn "Bootstrap script endpoint is not responding at $protocol://$DOMAIN/bootstrap.py"
         fi
     else
         warn "Service is not active"
@@ -159,6 +186,7 @@ test_dns() {
 main() {
     log "Starting ZTP Bootstrap Service tests..."
     
+    detect_http_only
     test_network
     test_ssl_certificates
     test_container_config
@@ -168,10 +196,20 @@ main() {
     
     log "Tests completed!"
     log ""
+    if [[ "$HTTP_ONLY" == "true" ]]; then
+        warn "⚠️  REMINDER: Service is running in HTTP-only mode (insecure)"
+        warn "This should only be used in isolated lab environments"
+        warn "Consider using Let's Encrypt with automated renewal for production"
+    fi
+    log ""
     log "To start the service with a valid enrollment token:"
     log "1. Edit /opt/containerdata/ztpbootstrap/ztpbootstrap.env"
     log "2. Set ENROLLMENT_TOKEN to your CVaaS enrollment token"
-    log "3. Run: sudo /opt/containerdata/ztpbootstrap/setup.sh"
+    if [[ "$HTTP_ONLY" == "true" ]]; then
+        log "3. Run: sudo /opt/containerdata/ztpbootstrap/setup.sh --http-only"
+    else
+        log "3. Run: sudo /opt/containerdata/ztpbootstrap/setup.sh"
+    fi
 }
 
 # Run main function
