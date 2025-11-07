@@ -1,0 +1,59 @@
+# Gitleaks configuration for secret detection
+title = "ztpbootstrap Secret Detection"
+
+[extend]
+# Use the default Gitleaks rules
+useDefault = true
+
+# Additional custom patterns for this project
+[[rules]]
+id = "ztpbootstrap-enrollment-token"
+description = "Arista CVaaS Enrollment Token"
+regex = '''(?i)(enrollment[_-]?token|enrollmentToken)\s*[=:]\s*['"]?[A-Za-z0-9_-]{20,}['"]?'''
+tags = ["secret", "arista", "cvaas"]
+
+[[rules]]
+id = "ztpbootstrap-jwt-token"
+description = "JWT Token Pattern"
+regex = '''eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}'''
+tags = ["secret", "jwt", "token"]
+
+[[rules]]
+id = "ztpbootstrap-ssl-private-key"
+description = "SSL Private Key"
+regex = '''-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----'''
+tags = ["secret", "ssl", "private-key"]
+
+[[rules]]
+id = "ztpbootstrap-certificate"
+description = "SSL Certificate"
+regex = '''-----BEGIN\s+CERTIFICATE-----'''
+tags = ["certificate", "ssl"]
+
+# Exclude patterns (files/directories to ignore)
+[allowlist]
+description = "Allowlist for known false positives"
+paths = [
+    '''\.git/''',
+    '''\.github/''',
+    '''\.gitleaks\.toml''',
+    '''README\.md''',
+    '''SETUP_INSTRUCTIONS\.md''',
+    '''TESTING\.md''',
+    '''\.md$''',
+    '''\.example$''',
+    '''\.template$''',
+    '''\.backup$''',
+    '''__pycache__''',
+    '''\.pyc$''',
+    '''node_modules/''',
+    '''\.env\.example''',
+    '''\.env\.template''',
+]
+
+commits = [
+    # Allow example/template values in documentation
+    '''example\.com''',
+    '''your_.*_here''',
+    '''placeholder''',
+]
