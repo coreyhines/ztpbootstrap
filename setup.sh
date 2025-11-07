@@ -371,21 +371,57 @@ setup_pod() {
         
         # Update pod file with IP addresses from config.yaml if it exists
         local pod_file="${systemd_dir}/ztpbootstrap.pod"
-        local config_file="${repo_dir}/config.yaml"
-        if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+        # Check for config.yaml in repo directory or current directory
+        local config_file=""
+        if [[ -f "${repo_dir}/config.yaml" ]]; then
+            config_file="${repo_dir}/config.yaml"
+        elif [[ -f "./config.yaml" ]]; then
+            config_file="./config.yaml"
+        elif [[ -f "config.yaml" ]]; then
+            config_file="config.yaml"
+        fi
+        
+        if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+            log "Found config.yaml at: $config_file"
             local ipv4
             local ipv6
             ipv4=$(yq eval '.network.ipv4' "$config_file" 2>/dev/null || echo "")
             ipv6=$(yq eval '.network.ipv6' "$config_file" 2>/dev/null || echo "")
             
-            if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]]; then
-                sed -i.tmp "s|^IP=.*|IP=$ipv4|" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
-                log "Updated pod IPv4 address to: $ipv4"
+            log "Reading IP addresses from config: IPv4=$ipv4, IPv6=$ipv6"
+            
+            if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]] && [[ "$ipv4" != "" ]]; then
+                if sed -i.tmp "s|^IP=.*|IP=$ipv4|" "$pod_file" 2>/dev/null; then
+                    rm -f "${pod_file}.tmp" 2>/dev/null || true
+                    log "Updated pod IPv4 address to: $ipv4"
+                    # Verify the update
+                    local current_ip
+                    current_ip=$(grep "^IP=" "$pod_file" 2>/dev/null | cut -d= -f2 || echo "")
+                    if [[ "$current_ip" == "$ipv4" ]]; then
+                        log "Verified: Pod file now has IP=$current_ip"
+                    else
+                        warn "Warning: Pod file IP verification failed. Expected: $ipv4, Found: $current_ip"
+                    fi
+                else
+                    warn "Failed to update IPv4 address in pod file"
+                fi
+            else
+                warn "IPv4 address not found or empty in config.yaml"
             fi
             
-            if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]]; then
-                sed -i.tmp "s|^IP6=.*|IP6=$ipv6|" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
-                log "Updated pod IPv6 address to: $ipv6"
+            if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]] && [[ "$ipv6" != "" ]]; then
+                if sed -i.tmp "s|^IP6=.*|IP6=$ipv6|" "$pod_file" 2>/dev/null; then
+                    rm -f "${pod_file}.tmp" 2>/dev/null || true
+                    log "Updated pod IPv6 address to: $ipv6"
+                else
+                    warn "Failed to update IPv6 address in pod file"
+                fi
+            fi
+        else
+            if [[ -z "$config_file" ]]; then
+                warn "config.yaml not found in repo directory or current directory"
+            elif ! command -v yq >/dev/null 2>&1; then
+                warn "yq not found - cannot read IP addresses from config.yaml"
             fi
         fi
     else
