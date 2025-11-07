@@ -357,29 +357,33 @@ check_setup_prerequisites() {
 setup_pod() {
     log "Setting up Podman pod with containers..."
     
+    # Get the directory where this script is located (repository directory)
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
     local systemd_dir="/etc/containers/systemd/ztpbootstrap"
     mkdir -p "$systemd_dir"
     
-    # Copy pod and container files
-    if [[ -f "${SCRIPT_DIR}/systemd/ztpbootstrap.pod" ]]; then
-        cp "${SCRIPT_DIR}/systemd/ztpbootstrap.pod" "$systemd_dir/"
+    # Copy pod and container files from repository
+    if [[ -f "${repo_dir}/systemd/ztpbootstrap.pod" ]]; then
+        cp "${repo_dir}/systemd/ztpbootstrap.pod" "$systemd_dir/"
         log "Pod configuration installed"
     else
-        error "Pod configuration file not found: ${SCRIPT_DIR}/systemd/ztpbootstrap.pod"
+        error "Pod configuration file not found: ${repo_dir}/systemd/ztpbootstrap.pod"
         return 1
     fi
     
-    if [[ -f "${SCRIPT_DIR}/systemd/ztpbootstrap-nginx.container" ]]; then
-        cp "${SCRIPT_DIR}/systemd/ztpbootstrap-nginx.container" "$systemd_dir/"
+    if [[ -f "${repo_dir}/systemd/ztpbootstrap-nginx.container" ]]; then
+        cp "${repo_dir}/systemd/ztpbootstrap-nginx.container" "$systemd_dir/"
         log "Nginx container configuration installed"
     else
-        error "Nginx container configuration not found"
+        error "Nginx container configuration not found: ${repo_dir}/systemd/ztpbootstrap-nginx.container"
         return 1
     fi
     
     # Copy Web UI container if webui directory exists
-    if [[ -d "${SCRIPT_DIR}/webui" ]] && [[ -f "${SCRIPT_DIR}/systemd/ztpbootstrap-webui.container" ]]; then
-        cp "${SCRIPT_DIR}/systemd/ztpbootstrap-webui.container" "$systemd_dir/"
+    if [[ -d "${repo_dir}/webui" ]] && [[ -f "${repo_dir}/systemd/ztpbootstrap-webui.container" ]]; then
+        cp "${repo_dir}/systemd/ztpbootstrap-webui.container" "$systemd_dir/"
         log "Web UI container configuration installed"
     else
         warn "Web UI directory not found, Web UI container will not be included"
