@@ -2,22 +2,15 @@
 Description=ZTP Bootstrap Nginx Container
 
 [Container]
-ContainerName=ztpbootstrap-nginx
 Image=docker.io/nginx:alpine
+ContainerName=ztpbootstrap-nginx
 Pod=ztpbootstrap.pod
-
-# Expose ports directly
 PublishPort=443:443
 PublishPort=80:80
-
-# Volume mounts
 Volume=/opt/containerdata/ztpbootstrap:/usr/share/nginx/html:ro
 Volume=/opt/containerdata/ztpbootstrap/nginx.conf:/etc/nginx/conf.d/default.conf:ro
 Volume=/opt/containerdata/certs/wild:/etc/nginx/ssl:ro
-
-Environment="TZ=UTC"
-
-# Health check
+Environment=TZ=UTC
 HealthCmd=["sh", "-c", "pgrep nginx > /dev/null || exit 1"]
 HealthInterval=30s
 HealthTimeout=10s
@@ -25,7 +18,7 @@ HealthRetries=3
 HealthStartPeriod=60s
 
 [Service]
-Restart=on-failure
+Restart=always
 
 [Install]
-WantedBy=ztpbootstrap-pod.service
+WantedBy=multi-user.target default.target
