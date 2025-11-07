@@ -429,8 +429,8 @@ paths:
 # ============================================================================
 network:
   domain: "$DOMAIN"
-  ipv4: "$IPV4"
-  ipv6: "$IPV6"
+  ipv4: "${IPV4:-}"
+  ipv6: "${IPV6:-}"
   https_port: $HTTPS_PORT
   http_port: $HTTP_PORT
   http_only: $HTTP_ONLY
