@@ -16,6 +16,7 @@ SCRIPT_DIR="/opt/containerdata/ztpbootstrap"
 ENV_FILE="${SCRIPT_DIR}/ztpbootstrap.env"
 BOOTSTRAP_SCRIPT="${SCRIPT_DIR}/bootstrap.py"
 CONFIGURED_SCRIPT="${SCRIPT_DIR}/bootstrap_configured.py"
+NGINX_CONF="${SCRIPT_DIR}/nginx.conf"
 CERT_DIR="/opt/containerdata/certs/wild"
 DOMAIN="ztpboot.example.com"
 
