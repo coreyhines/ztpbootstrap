@@ -395,14 +395,15 @@ setup_pod() {
 
 # Reload systemd and start service
 start_service() {
-    log "Reloading systemd daemon..."
-    systemctl daemon-reload
-    
-    # Setup pod configuration
+    # Setup pod configuration first (copy files)
     if ! setup_pod; then
         error "Pod setup failed. Please create the macvlan network first."
         exit 1
     fi
+    
+    # Reload systemd daemon after copying files so it recognizes the new services
+    log "Reloading systemd daemon..."
+    systemctl daemon-reload
     
     log "Starting ztpbootstrap pod..."
     if systemctl start ztpbootstrap-pod; then
