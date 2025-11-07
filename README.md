@@ -75,15 +75,14 @@ The service runs as a **Podman pod** with multiple containers sharing a macvlan 
 └────────┬────────┘
          │
          │ 1. DHCP Request
-         │    DHCP Option 67: https://ztpboot.example.com/bootstrap.py
          ▼
 ┌─────────────────┐
 │  DHCP Server    │
 │  (Provides URL) │
-└─────────────────┘
+└────────┬────────┘
          │
-         │ 2. DHCP Response with bootstrap URL
-         │
+         │ 2. DHCP Response
+         │    DHCP Option 67: https://ztpboot.example.com/bootstrap.py
          ▼
 ┌─────────────────┐
 │  Arista Switch  │
