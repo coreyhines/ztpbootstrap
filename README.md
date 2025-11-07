@@ -74,14 +74,24 @@ The service runs as a **Podman pod** with multiple containers sharing a macvlan 
 │   (DHCP Client) │
 └────────┬────────┘
          │
-         │ DHCP Option 67: https://ztpboot.example.com/bootstrap.py
+         │ 1. DHCP Request
+         │    DHCP Option 67: https://ztpboot.example.com/bootstrap.py
          ▼
 ┌─────────────────┐
 │  DHCP Server    │
+│  (Provides URL) │
 └─────────────────┘
          │
-         │ HTTPS GET /bootstrap.py
-         │ HTTP GET /ui/ (Web UI)
+         │ 2. DHCP Response with bootstrap URL
+         │
+         ▼
+┌─────────────────┐
+│  Arista Switch  │
+│   (DHCP Client) │
+└────────┬────────┘
+         │
+         │ 3. HTTPS GET /bootstrap.py
+         │    HTTP GET /ui/ (Web UI)
          ▼
 ┌─────────────────────────────────────────────────────────┐
 │  ztpbootstrap-pod (Podman Pod)                         │
@@ -99,7 +109,7 @@ The service runs as a **Podman pod** with multiple containers sharing a macvlan 
 │  └──────────────────────────┘  └───────────────────┘  │
 └─────────────────────────────────────────────────────────┘
          │
-         │ Executes bootstrap.py
+         │ 4. Executes bootstrap.py
          ▼
 ┌─────────────────┐
 │  CVaaS          │
