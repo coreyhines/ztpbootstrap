@@ -495,6 +495,46 @@ EOF
     log "Updated systemd quadlet file"
 }
 
+# Update pod file with network configuration
+update_pod_file() {
+    local pod_file
+    pod_file="/etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod"
+    
+    if [[ ! -f "$pod_file" ]]; then
+        warn "Pod file not found: $pod_file (will be created by setup.sh)"
+        return 0
+    fi
+    
+    log "Updating pod file with network configuration..."
+    
+    local ipv4
+    local ipv6
+    
+    ipv4=$(get_yaml_value '.network.ipv4')
+    ipv6=$(get_yaml_value '.network.ipv6')
+    
+    # Update IP addresses in pod file
+    if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]]; then
+        # Use sed to update IP= line
+        if sed -i.tmp "s|^IP=.*|IP=$ipv4|" "$pod_file" 2>/dev/null; then
+            log "Updated IPv4 address to: $ipv4"
+            rm -f "${pod_file}.tmp" 2>/dev/null || true
+        else
+            warn "Failed to update IPv4 address in pod file"
+        fi
+    fi
+    
+    if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]]; then
+        # Use sed to update IP6= line
+        if sed -i.tmp "s|^IP6=.*|IP6=$ipv6|" "$pod_file" 2>/dev/null; then
+            log "Updated IPv6 address to: $ipv6"
+            rm -f "${pod_file}.tmp" 2>/dev/null || true
+        else
+            warn "Failed to update IPv6 address in pod file"
+        fi
+    fi
+}
+
 # Update setup.sh with new paths
 update_setup_sh() {
     local setup_file="setup.sh"
@@ -578,6 +618,7 @@ main() {
     update_nginx_conf
     update_env_file
     update_quadlet_file
+    update_pod_file
     update_setup_sh
     
     log ""

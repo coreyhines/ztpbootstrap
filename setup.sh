@@ -368,6 +368,26 @@ setup_pod() {
     if [[ -f "${repo_dir}/systemd/ztpbootstrap.pod" ]]; then
         cp "${repo_dir}/systemd/ztpbootstrap.pod" "$systemd_dir/"
         log "Pod configuration installed"
+        
+        # Update pod file with IP addresses from config.yaml if it exists
+        local pod_file="${systemd_dir}/ztpbootstrap.pod"
+        local config_file="${repo_dir}/config.yaml"
+        if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+            local ipv4
+            local ipv6
+            ipv4=$(yq eval '.network.ipv4' "$config_file" 2>/dev/null || echo "")
+            ipv6=$(yq eval '.network.ipv6' "$config_file" 2>/dev/null || echo "")
+            
+            if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]]; then
+                sed -i.tmp "s|^IP=.*|IP=$ipv4|" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
+                log "Updated pod IPv4 address to: $ipv4"
+            fi
+            
+            if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]]; then
+                sed -i.tmp "s|^IP6=.*|IP6=$ipv6|" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
+                log "Updated pod IPv6 address to: $ipv6"
+            fi
+        fi
     else
         error "Pod configuration file not found: ${repo_dir}/systemd/ztpbootstrap.pod"
         return 1
