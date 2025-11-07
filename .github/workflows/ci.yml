@@ -21,8 +21,6 @@ jobs:
       uses: gitleaks/gitleaks-action@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        config-path: .gitleaks.toml
     
     - name: Check if commits differ (for push events)
       id: check_commits
@@ -132,10 +130,6 @@ jobs:
         chmod +x test-service.sh
         chmod +x setup.sh
     
-    - name: Run CI validation tests
-      run: |
-        ./ci-test.sh
-    
     - name: Create test directories
       run: |
         sudo mkdir -p /opt/containerdata/ztpbootstrap
@@ -146,6 +140,10 @@ jobs:
         sudo cp test-service.sh /opt/containerdata/ztpbootstrap/
         sudo cp integration-test.sh /opt/containerdata/ztpbootstrap/
         sudo cp ci-test.sh /opt/containerdata/ztpbootstrap/
+    
+    - name: Run CI validation tests
+      run: |
+        /opt/containerdata/ztpbootstrap/ci-test.sh
     
     - name: Create test SSL certificate (for HTTPS tests)
       run: |
