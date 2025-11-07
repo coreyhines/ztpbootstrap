@@ -131,13 +131,11 @@ create_directories() {
     local script_dir
     local cert_dir
     local env_file
-    local quadlet_file
     local dirs_to_create=()
     
     script_dir=$(get_yaml_value '.paths.script_dir')
     cert_dir=$(get_yaml_value '.paths.cert_dir')
     env_file=$(get_yaml_value '.paths.env_file')
-    quadlet_file=$(get_yaml_value '.paths.quadlet_file')
     
     # Collect all directories that need to be created
     if [[ -n "$script_dir" ]] && [[ "$script_dir" != "null" ]]; then
@@ -154,11 +152,9 @@ create_directories() {
         dirs_to_create+=("$env_dir")
     fi
     
-    if [[ -n "$quadlet_file" ]] && [[ "$quadlet_file" != "null" ]]; then
-        local quadlet_dir
-        quadlet_dir=$(dirname "$quadlet_file")
-        dirs_to_create+=("$quadlet_dir")
-    fi
+    # Systemd pod directory
+    local pod_dir="/etc/containers/systemd/ztpbootstrap"
+    dirs_to_create+=("$pod_dir")
     
     # Create directories (mkdir -p creates parent directories automatically)
     for dir in "${dirs_to_create[@]}"; do
@@ -633,7 +629,6 @@ main() {
     update_bootstrap_py
     update_nginx_conf
     update_env_file
-    update_quadlet_file
     update_pod_file
     update_setup_sh
     

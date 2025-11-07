@@ -143,7 +143,6 @@ interactive_config() {
     prompt_with_default "Bootstrap script path" "${SCRIPT_DIR}/bootstrap.py" BOOTSTRAP_SCRIPT
     prompt_with_default "Configured script path" "${SCRIPT_DIR}/bootstrap_configured.py" CONFIGURED_SCRIPT
     prompt_with_default "Nginx config file" "${SCRIPT_DIR}/nginx.conf" NGINX_CONF
-    prompt_with_default "Systemd quadlet file" "/etc/containers/systemd/ztpbootstrap/ztpbootstrap.container" QUADLET_FILE
     
     echo ""
     
@@ -330,15 +329,12 @@ create_directories() {
         dirs_to_create+=("$CERT_DIR")
     fi
     
-    # Systemd quadlet directory (may need sudo)
-    if [[ -n "${QUADLET_FILE:-}" ]]; then
-        local quadlet_dir
-        quadlet_dir=$(dirname "$QUADLET_FILE")
-        if [[ "$quadlet_dir" == /etc/* ]]; then
-            need_sudo=true
-        fi
-        dirs_to_create+=("$quadlet_dir")
+    # Systemd pod directory (may need sudo)
+    local pod_dir="/etc/containers/systemd/ztpbootstrap"
+    if [[ "$pod_dir" == /etc/* ]] && [[ $EUID -ne 0 ]]; then
+        need_sudo=true
     fi
+    dirs_to_create+=("$pod_dir")
     
     # Create directories (mkdir -p creates parent directories automatically)
     for dir in "${dirs_to_create[@]}"; do
@@ -422,7 +418,6 @@ paths:
   bootstrap_script: "$BOOTSTRAP_SCRIPT"
   configured_script: "$CONFIGURED_SCRIPT"
   nginx_conf: "$NGINX_CONF"
-  quadlet_file: "$QUADLET_FILE"
 
 # ============================================================================
 # Network Configuration
