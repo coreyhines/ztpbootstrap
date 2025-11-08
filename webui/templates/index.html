@@ -127,16 +127,16 @@
                             <h2 class="text-lg font-semibold text-gray-900 mb-2">Bootstrap Scripts</h2>
                             <p class="text-sm text-gray-600">Manage bootstrap scripts for device enrollment</p>
                         </div>
-                        <div class="flex items-center space-x-2">
-                            <button @click="showRestoreDialog = !showRestoreDialog" 
-                                    class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium transition-colors">
-                                Restore Backup
-                            </button>
-                            <label class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium transition-colors cursor-pointer">
-                                <input type="file" @change="uploadScript($event)" accept=".py" class="hidden">
-                                Upload Script
-                            </label>
-                        </div>
+            <div class="flex items-center space-x-2">
+                <button @click="showRestoreDialog = !showRestoreDialog" 
+                        class="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-sm font-medium transition-colors">
+                    Restore Backup
+                </button>
+                <label class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium transition-colors cursor-pointer">
+                    <input type="file" @change="uploadScript($event)" accept=".py" class="hidden">
+                    Upload Script
+                </label>
+            </div>
                     </div>
                     
                     <!-- Restore Backup Dialog -->
@@ -163,14 +163,14 @@
                                 </template>
                             </select>
                             <div x-show="selectedBackup" class="flex items-center space-x-2">
-                                <button @click="restoreBackup(selectedBackup, 'new')" 
-                                        class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium transition-colors">
-                                    Restore as New Script
-                                </button>
-                                <button @click="restoreBackup(selectedBackup, 'active')" 
-                                        class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium transition-colors">
-                                    Restore as Active (bootstrap.py)
-                                </button>
+                    <button @click="restoreBackup(selectedBackup, 'new')" 
+                            class="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-sm font-medium transition-colors">
+                        Restore as New Script
+                    </button>
+                    <button @click="restoreBackup(selectedBackup, 'active')" 
+                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium transition-colors">
+                        Restore as Active (bootstrap.py)
+                    </button>
                             </div>
                         </div>
                     </div>
@@ -197,7 +197,7 @@
                                     <div class="flex items-center space-x-1">
                                         <!-- View Button with icon on right -->
                                         <button @click="viewScript(script.name)" 
-                                                class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-xs font-medium transition-colors flex items-center space-x-1.5">
+                                                class="px-3 py-1.5 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-xs font-medium transition-colors flex items-center space-x-1.5">
                                             <span>View</span>
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
@@ -207,7 +207,7 @@
                                         
                                         <!-- Set Active Button with icon on right -->
                                         <button x-show="!script.active" @click="setActiveScript(script.name)" 
-                                                class="px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-xs font-medium transition-colors flex items-center space-x-1.5">
+                                                class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-xs font-medium transition-colors flex items-center space-x-1.5">
                                             <span>Set Active</span>
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
@@ -216,7 +216,7 @@
                                         
                                         <!-- Rename Button with icon on right -->
                                         <button x-show="!script.active" @click="renameScript(script.name)" 
-                                                class="px-3 py-1.5 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 text-xs font-medium transition-colors flex items-center space-x-1.5">
+                                                class="px-3 py-1.5 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-xs font-medium transition-colors flex items-center space-x-1.5">
                                             <span>Rename</span>
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
