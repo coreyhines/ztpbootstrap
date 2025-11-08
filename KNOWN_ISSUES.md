@@ -109,4 +109,3 @@ This document tracks known issues, their workarounds, and planned fixes.
 - **VM Creation:** Works correctly on ARM64 macOS with Fedora 43 Cloud images
 - **x86_64 Testing:** Skipped on ARM64 macOS (would require emulation, slow)
 - **Fresh Setup:** All fixes verified to work correctly in fresh VM deployment
-

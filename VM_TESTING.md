@@ -301,6 +301,28 @@ VMware Fusion supports Apple Silicon and can run ARM64 VMs. However, it's a paid
 
 Parallels Desktop also supports Apple Silicon and ARM64 VMs. It's a paid product with good performance.
 
+## Fresh Setup Testing
+
+The service has been tested with a complete fresh VM setup:
+
+1. ✅ VM created with `vm-create-native.sh`
+2. ✅ Cloud-init completes successfully
+3. ✅ Repository cloned automatically
+4. ✅ Macvlan network created automatically
+5. ✅ Interactive setup or manual configuration
+6. ✅ Service deployment with `setup.sh`
+7. ✅ All containers start successfully
+8. ✅ All endpoints accessible
+9. ✅ WebUI fully functional
+
+**Critical Bugs Found and Fixed:**
+- Missing logs directory creation - ✅ Fixed
+- Logs directory permissions - ✅ Fixed
+
+All fixes have been verified in fresh VM deployments. See [TEST_RESULTS.md](../TEST_RESULTS.md) for details.
+
+---
+
 ## Test Script
 
 The `test-vm-deployment.sh` script automates the entire test process:

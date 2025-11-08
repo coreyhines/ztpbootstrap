@@ -4,6 +4,17 @@ A containerized service that provides a secure HTTPS endpoint for serving Arista
 
 ---
 
+## Tested Platforms
+
+**Architecture:** ARM64 (aarch64) - ✅ Fully tested  
+**OS:** Fedora 43 Cloud - ✅ Fully tested  
+**Podman:** 5.6.2 - ✅ Fully tested  
+**Systemd:** Full quadlet support - ✅ Fully tested
+
+**Note:** x86_64 not tested on ARM64 macOS (would require emulation). See [ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md) for details.
+
+---
+
 ## 🚀 START HERE - Choose Your Setup Method
 
 **New to this project?** Follow this decision tree:

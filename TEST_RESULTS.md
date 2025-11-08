@@ -240,12 +240,18 @@
 
 #### Tested Versions
 
-- **Fedora 43:** ✅ Tested and working (ARM64)
+- **Fedora 43 (ARM64):** ✅ Tested and working
+  - OS: Fedora Linux 43
+  - Architecture: aarch64
+  - Podman: 5.6.2
+  - Systemd: Full quadlet support
+  - All features working correctly
 
 #### Notes
 
-- Fedora 42 and 41 testing pending (if available)
-- Current testing focused on Fedora 43 (latest)
+- **Fedora 42 and 41:** Not tested (Fedora 43 is latest, testing focused on current version)
+- **Version Compatibility:** Fedora 43 has full systemd quadlet support and Podman 5.6.2
+- **Recommendation:** Use Fedora 41+ for best compatibility (systemd quadlet support)
 
 ---
 
@@ -264,19 +270,21 @@
 
 ## Critical Issues
 
-1. **Missing Logs Directory in setup.sh** ✅ FIXED
+All critical issues have been **FIXED** and **VERIFIED** in fresh VM setup.
+
+1. **Missing Logs Directory in setup.sh** ✅ FIXED and VERIFIED
    - **Issue:** `/opt/containerdata/ztpbootstrap/logs` directory not created by `setup.sh`
    - **Error:** `Error: statfs /opt/containerdata/ztpbootstrap/logs: no such file or directory`
    - **Impact:** Nginx container fails to start because it cannot mount the logs volume
    - **Fix:** Added `mkdir -p "${SCRIPT_DIR}/logs"` and proper permission setup in `setup.sh`
-   - **Status:** ✅ FIXED and committed
+   - **Status:** ✅ FIXED, committed, and verified in fresh setup
 
-2. **Logs Directory Permissions** ✅ FIXED
+2. **Logs Directory Permissions** ✅ FIXED and VERIFIED
    - **Issue:** Nginx container fails with: `open() "/var/log/nginx/error.log" failed (13: Permission denied)`
    - **Root Cause:** Logs directory permissions not correctly set for nginx user (UID 101 in alpine)
    - **Fix:** Added `chown 101:101` and `chmod 777` to logs directory creation in `setup.sh`
-   - **Status:** ✅ FIXED and committed
-   - **Note:** Fresh setup with updated code should work correctly
+   - **Status:** ✅ FIXED, committed, and verified in fresh setup
+   - **Verification:** Fresh VM setup creates logs directory with correct permissions automatically
 
 ## Minor Issues
 
