@@ -41,8 +41,8 @@
                     <p class="text-xs text-gray-500 dark:text-gray-400">Configuration and Monitoring Dashboard</p>
                 </div>
                 <div class="flex items-center space-x-2">
-                    <label class="text-xs text-gray-600 dark:text-gray-300">Theme:</label>
-                    <select x-model="theme" @change="applyTheme()" class="px-2 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    <label for="theme-select" class="text-xs font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Theme:</label>
+                    <select id="theme-select" x-model="theme" @change="applyTheme()" class="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm">
                         <option value="tomorrow">Tomorrow (Dark)</option>
                         <option value="dracula">Dracula (Dark)</option>
                         <option value="okaidia">Okaidia (Dark)</option>
