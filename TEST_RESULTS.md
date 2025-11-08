@@ -134,16 +134,20 @@
 - All containers (pod infra, nginx, webui) start and run correctly
 - **Status:** ✅ ALL FIXES VERIFIED - Fresh setup with fixed code works end-to-end
 
-**Fresh VM Verification Results:**
+**Fresh VM Verification Results (Final):**
 - ✅ Fresh VM created successfully (ARM64, Fedora 43)
 - ✅ Cloud-init completed (with minor deprecation warnings)
+- ✅ SSH access working (password authentication)
+- ✅ Repository cloned automatically
 - ✅ Setup scripts executed successfully
-- ✅ Logs directory created with correct permissions automatically
+- ✅ Logs directory created with correct permissions automatically (`chown 101:101`, `chmod 777`)
 - ✅ All containers running (pod infra, nginx, webui)
+- ✅ No permission errors in nginx logs
 - ✅ All endpoints accessible (health, bootstrap.py, WebUI, API)
 - ✅ WebUI fully functional (status, scripts, config, logs, device connections)
 - ✅ API endpoints working correctly
 - ✅ Port forwarding working (localhost:8080 from host)
+- ✅ **All fixes verified in fresh deployment**
 
 ---
 
