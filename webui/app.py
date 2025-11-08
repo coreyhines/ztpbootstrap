@@ -92,13 +92,14 @@ def regenerate_nginx_config():
                     scripts_as_filename.append(filename)
         
         # Remove any existing specific location blocks for scripts (to avoid duplicates)
-        # Pattern matches: comment line + location block for any bootstrap*.py
+        # Pattern matches: comment line + full location block for any bootstrap*.py
         # Match both 4-space and 8-space indented blocks (same level and nested)
-        existing_pattern = r'    # Serve bootstrap.*?\.py as its filename\n    location = /bootstrap.*?\.py \{[^}]+\}\n\n?'
-        config_content = re.sub(existing_pattern, '', config_content, flags=re.MULTILINE)
+        # Need to match the full block including all content and closing brace
+        existing_pattern = r'    # Serve bootstrap.*?\.py as its filename\n    location = /bootstrap.*?\.py \{[^}]*add_header[^}]*Content-Disposition[^}]*filename=bootstrap.*?\.py[^}]*try_files[^}]*\}\n\n?'
+        config_content = re.sub(existing_pattern, '', config_content, flags=re.MULTILINE | re.DOTALL)
         # Also remove 8-space indented (nested) blocks
-        existing_pattern_nested = r'        # Serve bootstrap.*?\.py as its filename\n        location = /bootstrap.*?\.py \{[^}]+\}\n\n?'
-        config_content = re.sub(existing_pattern_nested, '', config_content, flags=re.MULTILINE)
+        existing_pattern_nested = r'        # Serve bootstrap.*?\.py as its filename\n        location = /bootstrap.*?\.py \{[^}]*add_header[^}]*Content-Disposition[^}]*filename=bootstrap.*?\.py[^}]*try_files[^}]*\}\n\n?'
+        config_content = re.sub(existing_pattern_nested, '', config_content, flags=re.MULTILINE | re.DOTALL)
         
         # Generate location blocks for scripts that should be served as their filename
         # These need to come BEFORE the location / block (at the same level, not nested)
