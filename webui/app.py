@@ -129,6 +129,9 @@ def regenerate_nginx_config():
     location = /{filename} {{
         add_header Content-Type "text/plain; charset=utf-8" always;
         add_header Content-Disposition "attachment; filename={filename}" always;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        add_header Expires "0" always;
         try_files $uri =404;
     }}''')
         
