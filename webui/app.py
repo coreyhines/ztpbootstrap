@@ -764,22 +764,37 @@ def get_logs():
         logs = []
         
         if log_source == 'nginx_access':
-            if NGINX_ACCESS_LOG.exists():
-                try:
-                    with open(NGINX_ACCESS_LOG, 'r') as f:
-                        all_lines = f.readlines()
-                        recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
-                        # Filter out UI/API requests to reduce noise
-                        filtered_lines = []
-                        for line in recent_lines:
-                            # Skip UI and API requests (they're not interesting for device tracking)
-                            if '/ui/' not in line and '/api/' not in line and ' /ui ' not in line and ' /api ' not in line:
-                                filtered_lines.append(line)
-                        logs = ''.join(filtered_lines) if filtered_lines else "No device requests found in recent log entries (UI/API requests filtered out)"
-                except Exception as e:
-                    logs = f"Error reading nginx access log: {str(e)}"
-            else:
-                # Try to read from nginx container
+            # Try multiple paths - works with both host networking and macvlan
+            # The logs are mounted as a volume, so we should be able to read them directly
+            log_paths = [
+                Path('/var/log/nginx/ztpbootstrap_access.log'),  # Mounted volume path
+                CONFIG_DIR / 'logs' / 'ztpbootstrap_access.log',  # Alternative path
+            ]
+            
+            log_found = False
+            for log_path in log_paths:
+                if log_path.exists():
+                    try:
+                        with open(log_path, 'r') as f:
+                            all_lines = f.readlines()
+                            recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+                            # Filter out UI/API requests to reduce noise
+                            filtered_lines = []
+                            for line in recent_lines:
+                                # Skip UI and API requests (they're not interesting for device tracking)
+                                if '/ui/' not in line and '/api/' not in line and ' /ui ' not in line and ' /api ' not in line:
+                                    filtered_lines.append(line)
+                            logs = ''.join(filtered_lines) if filtered_lines else "No device requests found in recent log entries (UI/API requests filtered out)"
+                            log_found = True
+                            break
+                    except Exception as e:
+                        logs = f"Error reading nginx access log from {log_path}: {str(e)}"
+                        log_found = True
+                        break
+            
+            if not log_found:
+                # Fallback: Try to read from nginx container via podman exec
+                # This works regardless of networking mode if podman is accessible
                 try:
                     result = subprocess.run(
                         ['podman', 'exec', 'ztpbootstrap-nginx', 'tail', '-n', str(lines), '/var/log/nginx/ztpbootstrap_access.log'],
@@ -787,27 +802,44 @@ def get_logs():
                         text=True,
                         timeout=5
                     )
-                    if result.returncode == 0:
+                    if result.returncode == 0 and result.stdout.strip():
                         # Filter out UI/API requests
                         all_lines = result.stdout.split('\n')
                         filtered_lines = [line for line in all_lines if '/ui/' not in line and '/api/' not in line and ' /ui ' not in line and ' /api ' not in line]
                         logs = '\n'.join(filtered_lines) if filtered_lines else "No device requests found in recent log entries (UI/API requests filtered out)"
                     else:
-                        logs = f"Error: {result.stderr}"
-                except:
-                    logs = "Nginx access log not accessible. Logs may be in container at /var/log/nginx/ztpbootstrap_access.log"
+                        logs = f"Nginx access log not found. Checked paths: {', '.join(str(p) for p in log_paths)}"
+                except FileNotFoundError:
+                    logs = f"Nginx access log not accessible. Podman not available. Checked paths: {', '.join(str(p) for p in log_paths)}"
+                except Exception as e:
+                    logs = f"Error accessing nginx access log: {str(e)}"
         
         elif log_source == 'nginx_error':
-            if NGINX_ERROR_LOG.exists():
-                try:
-                    with open(NGINX_ERROR_LOG, 'r') as f:
-                        all_lines = f.readlines()
-                        recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
-                        logs = ''.join(recent_lines)
-                except Exception as e:
-                    logs = f"Error reading nginx error log: {str(e)}"
-            else:
-                # Try to read from nginx container
+            # Try multiple paths - works with both host networking and macvlan
+            # The logs are mounted as a volume, so we should be able to read them directly
+            log_paths = [
+                Path('/var/log/nginx/ztpbootstrap_error.log'),  # Mounted volume path
+                CONFIG_DIR / 'logs' / 'ztpbootstrap_error.log',  # Alternative path
+            ]
+            
+            log_found = False
+            for log_path in log_paths:
+                if log_path.exists():
+                    try:
+                        with open(log_path, 'r') as f:
+                            all_lines = f.readlines()
+                            recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+                            logs = ''.join(recent_lines)
+                            log_found = True
+                            break
+                    except Exception as e:
+                        logs = f"Error reading nginx error log from {log_path}: {str(e)}"
+                        log_found = True
+                        break
+            
+            if not log_found:
+                # Fallback: Try to read from nginx container via podman exec
+                # This works regardless of networking mode if podman is accessible
                 try:
                     result = subprocess.run(
                         ['podman', 'exec', 'ztpbootstrap-nginx', 'tail', '-n', str(lines), '/var/log/nginx/ztpbootstrap_error.log'],
@@ -815,9 +847,11 @@ def get_logs():
                         text=True,
                         timeout=5
                     )
-                    logs = result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
-                except:
-                    logs = "Nginx error log not accessible. Logs may be in container at /var/log/nginx/ztpbootstrap_error.log"
+                    logs = result.stdout if result.returncode == 0 and result.stdout.strip() else f"Error: {result.stderr or 'No log content'}"
+                except FileNotFoundError:
+                    logs = f"Nginx error log not accessible. Podman not available. Checked paths: {', '.join(str(p) for p in log_paths)}"
+                except Exception as e:
+                    logs = f"Error accessing nginx error log: {str(e)}"
         
         # Also highlight MARK lines in error logs
         if log_source == 'nginx_error' and logs:
