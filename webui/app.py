@@ -853,12 +853,8 @@ def get_logs():
                 except Exception as e:
                     logs = f"Error accessing nginx error log: {str(e)}"
         
-        # Also highlight MARK lines in error logs
-        if log_source == 'nginx_error' and logs:
-            # MARK lines are already in the log, just need to make sure they're visible
-            pass
-        
-        else:  # container logs (default)
+        # Handle container logs (default) - only if not nginx_access or nginx_error
+        if log_source not in ['nginx_access', 'nginx_error']:
             # Try to get container logs using podman logs
             # Since we're in a container, we can't use podman directly, but we can try
             # to read from the host's podman socket or use alternative methods
