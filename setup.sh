@@ -484,10 +484,20 @@ setup_pod() {
         return 1
     fi
     
-    # Copy Web UI container if webui directory exists
+    # Copy Web UI container and directory if webui exists
     if [[ -d "${repo_dir}/webui" ]] && [[ -f "${repo_dir}/systemd/ztpbootstrap-webui.container" ]]; then
         cp "${repo_dir}/systemd/ztpbootstrap-webui.container" "$systemd_dir/"
         log "Web UI container configuration installed"
+        
+        # Copy webui directory to script directory
+        local webui_dest="${SCRIPT_DIR}/webui"
+        if [[ ! -d "$webui_dest" ]]; then
+            mkdir -p "$webui_dest"
+        fi
+        cp -r "${repo_dir}/webui"/* "$webui_dest/" 2>/dev/null || {
+            warn "Failed to copy webui directory, Web UI may not work"
+        }
+        log "Web UI directory copied to: $webui_dest"
     else
         warn "Web UI directory not found, Web UI container will not be included"
         warn "Service will run without Web UI"
