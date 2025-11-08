@@ -362,15 +362,6 @@
                 },
                 
                 async uploadScript(event) {
-                    // Show upload workflow when user clicks upload for the first time
-                    if (!this.showUploadWorkflow) {
-                        this.showUploadWorkflow = true;
-                        await this.loadBackups();
-                        // Don't proceed with upload yet, just show the workflow
-                        event.target.value = '';
-                        return;
-                    }
-                    
                     const file = event.target.files[0];
                     if (!file) return;
                     
@@ -386,8 +377,6 @@
                         if (data.success) {
                             await this.loadScripts();
                             await this.loadBackups();
-                            this.showUploadWorkflow = false;
-                            this.selectedBackup = null;
                         } else {
                             alert('Upload failed: ' + (data.error || 'Unknown error'));
                         }
