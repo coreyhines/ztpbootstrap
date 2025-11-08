@@ -825,48 +825,16 @@ def get_logs():
             pass
         
         else:  # container logs (default)
-            # Try to get logs from containers via journalctl
-            # We mount the journal directories and install systemd package for journalctl
-            services = ['ztpbootstrap-pod.service', 'ztpbootstrap-nginx.service', 'ztpbootstrap-webui.service']
-            log_parts = []
-            
-            for service in services:
-                try:
-                    # Use journalctl with DOCKER_HOST or direct journal access
-                    journal_result = subprocess.run(
-                        ['journalctl', '-D', '/run/log/journal', '-u', service, '-n', str(lines // len(services)), '--no-pager', '--no-hostname'],
-                        capture_output=True,
-                        text=True,
-                        timeout=3
-                    )
-                    if journal_result.returncode == 0 and journal_result.stdout.strip():
-                        log_parts.append(f"=== {service} ===")
-                        log_parts.append(journal_result.stdout)
-                except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-                    # Try without -D flag (systemd might auto-detect)
-                    try:
-                        journal_result = subprocess.run(
-                            ['journalctl', '-u', service, '-n', str(lines // len(services)), '--no-pager', '--no-hostname'],
-                            capture_output=True,
-                            text=True,
-                            timeout=3
-                        )
-                        if journal_result.returncode == 0 and journal_result.stdout.strip():
-                            log_parts.append(f"=== {service} ===")
-                            log_parts.append(journal_result.stdout)
-                    except:
-                        pass
-                except Exception as e:
-                    pass
-            
-            if not log_parts:
-                logs = 'No logs available. journalctl may not be accessible from within the container.\n'
-                logs += 'To view logs from the host:\n'
-                logs += '  sudo journalctl -u ztpbootstrap-nginx.service\n'
-                logs += '  sudo journalctl -u ztpbootstrap-webui.service\n'
-                logs += '  sudo journalctl -u ztpbootstrap-pod.service\n'
-            else:
-                logs = '\n'.join(log_parts)
+            # Container logs are not directly accessible from within the container
+            # Provide helpful message with commands to view logs from the host
+            logs = 'Container logs are not available from within the container.\n\n'
+            logs += 'To view logs from the host, use:\n'
+            logs += '  sudo journalctl -u ztpbootstrap-pod.service -n 50\n'
+            logs += '  sudo journalctl -u ztpbootstrap-nginx.service -n 50\n'
+            logs += '  sudo journalctl -u ztpbootstrap-webui.service -n 50\n\n'
+            logs += 'Or use podman logs:\n'
+            logs += '  sudo podman logs ztpbootstrap-nginx --tail 50\n'
+            logs += '  sudo podman logs ztpbootstrap-webui --tail 50\n'
         
         if not logs:
             logs = 'No logs available'
