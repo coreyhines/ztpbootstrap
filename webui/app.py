@@ -92,14 +92,34 @@ def regenerate_nginx_config():
                     scripts_as_filename.append(filename)
         
         # Remove any existing specific location blocks for scripts (to avoid duplicates)
-        # Pattern matches: comment line + full location block for any bootstrap*.py
-        # Match both 4-space and 8-space indented blocks (same level and nested)
-        # Need to match the full block including all content and closing brace
-        existing_pattern = r'    # Serve bootstrap.*?\.py as its filename\n    location = /bootstrap.*?\.py \{[^}]*add_header[^}]*Content-Disposition[^}]*filename=bootstrap.*?\.py[^}]*try_files[^}]*\}\n\n?'
-        config_content = re.sub(existing_pattern, '', config_content, flags=re.MULTILINE | re.DOTALL)
-        # Also remove 8-space indented (nested) blocks
-        existing_pattern_nested = r'        # Serve bootstrap.*?\.py as its filename\n        location = /bootstrap.*?\.py \{[^}]*add_header[^}]*Content-Disposition[^}]*filename=bootstrap.*?\.py[^}]*try_files[^}]*\}\n\n?'
-        config_content = re.sub(existing_pattern_nested, '', config_content, flags=re.MULTILINE | re.DOTALL)
+        # Use a more robust approach: find all location blocks for bootstrap*.py and remove them
+        # Match from comment to closing brace, handling nested braces correctly
+        lines = config_content.split('\n')
+        new_lines = []
+        skip_until_brace = False
+        brace_count = 0
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            # Check if this is a location block we want to remove
+            if re.match(r'\s*# Serve bootstrap.*?\.py as its filename', line):
+                # Skip the comment line
+                i += 1
+                # Skip the location line and count braces
+                if i < len(lines) and 'location = /bootstrap' in lines[i] and '{' in lines[i]:
+                    brace_count = lines[i].count('{') - lines[i].count('}')
+                    i += 1
+                    # Skip until we find the matching closing brace
+                    while i < len(lines) and brace_count > 0:
+                        brace_count += lines[i].count('{') - lines[i].count('}')
+                        i += 1
+                    # Skip the blank line after if present
+                    if i < len(lines) and lines[i].strip() == '':
+                        i += 1
+                    continue
+            new_lines.append(line)
+            i += 1
+        config_content = '\n'.join(new_lines)
         
         # Generate location blocks for scripts that should be served as their filename
         # These need to come BEFORE the location / block (at the same level, not nested)
