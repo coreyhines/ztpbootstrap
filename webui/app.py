@@ -152,20 +152,6 @@ def regenerate_nginx_config():
     location = /{filename} {{
         # Redirect to hash-based URL that doesn't expose filename in path
         return 302 /d/{filehash};
-    }}
-    # Hash-based download endpoint for {filename}
-    location = /d/{filehash} {{
-        proxy_pass http://127.0.0.1:5000/d/{filehash};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_connect_timeout 5s;
-        proxy_send_timeout 5s;
-        proxy_read_timeout 5s;
-        # Ensure Flask's headers are passed through
-        proxy_pass_header Content-Disposition;
-        proxy_pass_header Content-Type;
     }}''')
         
         # Pattern to match the location / block (we need to insert before it)
