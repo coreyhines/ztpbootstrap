@@ -201,6 +201,10 @@
                                                 class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium transition-colors">
                                             View
                                         </button>
+                                        <button x-show="!script.active" @click="renameScript(script.name)" 
+                                                class="px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 text-sm font-medium transition-colors">
+                                            Rename
+                                        </button>
                                         <button x-show="!script.active" @click="setActiveScript(script.name)" 
                                                 class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium transition-colors">
                                             Set Active
@@ -403,6 +407,45 @@
                         }
                     } catch (error) {
                         alert('Failed to set active: ' + error.message);
+                    }
+                },
+                
+                async renameScript(filename) {
+                    const newName = prompt(`Enter new name for ${filename}:`, filename);
+                    if (!newName || newName === filename) {
+                        return;
+                    }
+                    
+                    // Validate name
+                    if (!newName.endsWith('.py')) {
+                        alert('Script name must end with .py');
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch(`/api/bootstrap-script/${filename}/rename`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                new_name: newName
+                            })
+                        });
+                        const data = await response.json();
+                        if (data.success) {
+                            // Refresh scripts list immediately
+                            await this.loadScripts();
+                            // Close modal if viewing the renamed script
+                            if (this.viewingScript && this.viewingScript.name === filename) {
+                                this.showScriptModal = false;
+                                this.viewingScript = null;
+                            }
+                        } else {
+                            alert('Failed to rename: ' + (data.error || 'Unknown error'));
+                        }
+                    } catch (error) {
+                        alert('Failed to rename: ' + error.message);
                     }
                 },
                 

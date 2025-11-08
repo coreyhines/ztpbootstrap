@@ -307,6 +307,67 @@ def set_active_script(filename):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/bootstrap-script/<filename>/rename', methods=['POST'])
+def rename_bootstrap_script(filename):
+    """Rename a bootstrap script"""
+    try:
+        script_path = CONFIG_DIR / filename
+        if not script_path.exists() or not script_path.suffix == '.py':
+            return jsonify({'error': 'Script not found'}), 404
+        
+        data = request.get_json()
+        new_name = data.get('new_name', '').strip()
+        
+        if not new_name:
+            return jsonify({'error': 'New name is required'}), 400
+        
+        # Validate new name
+        if not new_name.endswith('.py'):
+            return jsonify({'error': 'New name must end with .py'}), 400
+        
+        # Ensure it starts with bootstrap
+        if not new_name.startswith('bootstrap'):
+            new_name = f'bootstrap_{new_name}'
+        
+        # Check if new name already exists
+        new_path = CONFIG_DIR / new_name
+        if new_path.exists() and new_path != script_path:
+            return jsonify({'error': f'A script with the name {new_name} already exists'}), 400
+        
+        # Prevent renaming the active script (bootstrap.py)
+        active_path = BOOTSTRAP_SCRIPT
+        if active_path.exists():
+            try:
+                if active_path.is_symlink():
+                    resolved = active_path.resolve()
+                    if resolved == script_path.resolve():
+                        return jsonify({'error': 'Cannot rename the active script. Set another script as active first.'}), 400
+                elif active_path.resolve() == script_path.resolve():
+                    return jsonify({'error': 'Cannot rename bootstrap.py when it is the active script. Set another script as active first.'}), 400
+            except (OSError, RuntimeError):
+                pass
+        
+        # Rename the file
+        try:
+            script_path.rename(new_path)
+            
+            # Update metadata if it exists
+            metadata = load_scripts_metadata()
+            if filename in metadata:
+                metadata[new_name] = metadata.pop(filename)
+                save_scripts_metadata(metadata)
+            
+            return jsonify({
+                'success': True,
+                'message': f'Script renamed from {filename} to {new_name}',
+                'old_name': filename,
+                'new_name': new_name
+            })
+        except OSError as e:
+            return jsonify({'error': f'Failed to rename file: {str(e)}'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/bootstrap-script/<filename>', methods=['DELETE'])
 def delete_bootstrap_script(filename):
     """Delete a bootstrap script"""
