@@ -6,8 +6,11 @@ Lightweight Flask application for configuration and monitoring
 
 import json
 import os
+import re
 import subprocess
 import time
+from collections import defaultdict
+from datetime import datetime, timedelta
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_from_directory
 
@@ -19,6 +22,9 @@ CONFIG_FILE = CONFIG_DIR / 'config.yaml'
 BOOTSTRAP_SCRIPT = CONFIG_DIR / 'bootstrap.py'
 NGINX_CONF = CONFIG_DIR / 'nginx.conf'
 SCRIPTS_METADATA = CONFIG_DIR / 'scripts_metadata.json'
+DEVICE_CONNECTIONS_FILE = CONFIG_DIR / 'device_connections.json'
+NGINX_ACCESS_LOG = Path('/var/log/nginx/ztpbootstrap_access.log')
+NGINX_ERROR_LOG = Path('/var/log/nginx/ztpbootstrap_error.log')
 
 @app.route('/')
 def index():
@@ -580,32 +586,243 @@ def get_status():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def load_device_connections():
+    """Load device connection data from JSON file"""
+    if DEVICE_CONNECTIONS_FILE.exists():
+        try:
+            with open(DEVICE_CONNECTIONS_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_device_connections(connections):
+    """Save device connection data to JSON file"""
+    try:
+        with open(DEVICE_CONNECTIONS_FILE, 'w') as f:
+            json.dump(connections, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving device connections: {e}")
+        return False
+
+def parse_nginx_access_log():
+    """Parse nginx access log to track device connections"""
+    connections = load_device_connections()
+    current_time = time.time()
+    
+    # Nginx log format: IP - - [timestamp] "method path protocol" status size "referer" "user-agent"
+    # Example: 10.0.2.15 - - [08/Nov/2025:12:00:00 +0000] "GET /bootstrap.py HTTP/1.1" 200 1234 "-" "Arista-ZTP/1.0"
+    
+    if not NGINX_ACCESS_LOG.exists():
+        return connections
+    
+    try:
+        # Read last 1000 lines to avoid processing too much
+        with open(NGINX_ACCESS_LOG, 'r') as f:
+            lines = f.readlines()
+            recent_lines = lines[-1000:] if len(lines) > 1000 else lines
+        
+        for line in recent_lines:
+            # Parse log line
+            # Match: IP - - [timestamp] "method path protocol" status size "referer" "user-agent"
+            match = re.match(r'^(\S+) - - \[([^\]]+)\] "(\S+) (\S+) ([^"]+)" (\d+) (\S+) "([^"]*)" "([^"]*)"', line)
+            if not match:
+                continue
+            
+            ip = match.group(1)
+            timestamp_str = match.group(2)
+            method = match.group(3)
+            path = match.group(4)
+            status = int(match.group(6))
+            user_agent = match.group(9)
+            
+            # Skip health checks and UI requests
+            if path in ['/health', '/ui', '/api'] or path.startswith('/ui/') or path.startswith('/api/'):
+                continue
+            
+            # Parse timestamp (format: 08/Nov/2025:12:00:00 +0000)
+            try:
+                dt = datetime.strptime(timestamp_str.split()[0], '%d/%b/%Y:%H:%M:%S')
+                timestamp = dt.timestamp()
+            except:
+                continue
+            
+            # Initialize device entry if not exists
+            if ip not in connections:
+                connections[ip] = {
+                    'ip': ip,
+                    'first_seen': timestamp,
+                    'last_seen': timestamp,
+                    'bootstrap_downloaded': False,
+                    'bootstrap_download_time': None,
+                    'session_start': timestamp,
+                    'session_end': timestamp,
+                    'total_requests': 0,
+                    'user_agent': user_agent,
+                    'sessions': []
+                }
+            
+            device = connections[ip]
+            device['last_seen'] = timestamp
+            device['total_requests'] = device.get('total_requests', 0) + 1
+            
+            # Track bootstrap.py downloads
+            if path == '/bootstrap.py' and status == 200:
+                device['bootstrap_downloaded'] = True
+                if not device['bootstrap_download_time'] or timestamp > device['bootstrap_download_time']:
+                    device['bootstrap_download_time'] = timestamp
+            
+            # Track sessions (requests within 5 minutes are considered same session)
+            if device['sessions']:
+                last_session = device['sessions'][-1]
+                if timestamp - last_session['end'] < 300:  # 5 minutes
+                    last_session['end'] = timestamp
+                    last_session['requests'] += 1
+                else:
+                    # New session
+                    device['sessions'].append({
+                        'start': timestamp,
+                        'end': timestamp,
+                        'requests': 1
+                    })
+            else:
+                device['sessions'].append({
+                    'start': timestamp,
+                    'end': timestamp,
+                    'requests': 1
+                })
+            
+            # Keep only last 50 sessions per device
+            if len(device['sessions']) > 50:
+                device['sessions'] = device['sessions'][-50:]
+        
+        # Clean up old devices (not seen in 24 hours)
+        cutoff_time = current_time - 86400  # 24 hours
+        connections = {ip: data for ip, data in connections.items() 
+                      if data['last_seen'] > cutoff_time}
+        
+        save_device_connections(connections)
+        return connections
+    except Exception as e:
+        print(f"Error parsing nginx log: {e}")
+        return connections
+
 @app.route('/api/logs')
 def get_logs():
-    """Get recent logs"""
+    """Get recent logs from specified source"""
     try:
-        # Try to get logs from systemd services
-        logs = []
-        services = ['ztpbootstrap-pod.service', 'ztpbootstrap-nginx.service', 'ztpbootstrap-webui.service']
+        log_source = request.args.get('source', 'container')
+        lines = int(request.args.get('lines', 100))
         
-        for service in services:
-            try:
-                result = subprocess.run(
-                    ['journalctl', '-u', service, '-n', '20', '--no-pager', '--no-hostname'],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-                if result.stdout.strip():
-                    logs.append(f"=== {service} ===")
-                    logs.append(result.stdout)
-            except:
-                pass
+        logs = []
+        
+        if log_source == 'nginx_access':
+            if NGINX_ACCESS_LOG.exists():
+                try:
+                    with open(NGINX_ACCESS_LOG, 'r') as f:
+                        all_lines = f.readlines()
+                        recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+                        logs = ''.join(recent_lines)
+                except Exception as e:
+                    logs = f"Error reading nginx access log: {str(e)}"
+            else:
+                # Try to read from nginx container
+                try:
+                    result = subprocess.run(
+                        ['podman', 'exec', 'ztpbootstrap-nginx', 'tail', '-n', str(lines), '/var/log/nginx/ztpbootstrap_access.log'],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    logs = result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+                except:
+                    logs = "Nginx access log not accessible. Logs may be in container at /var/log/nginx/ztpbootstrap_access.log"
+        
+        elif log_source == 'nginx_error':
+            if NGINX_ERROR_LOG.exists():
+                try:
+                    with open(NGINX_ERROR_LOG, 'r') as f:
+                        all_lines = f.readlines()
+                        recent_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+                        logs = ''.join(recent_lines)
+                except Exception as e:
+                    logs = f"Error reading nginx error log: {str(e)}"
+            else:
+                # Try to read from nginx container
+                try:
+                    result = subprocess.run(
+                        ['podman', 'exec', 'ztpbootstrap-nginx', 'tail', '-n', str(lines), '/var/log/nginx/ztpbootstrap_error.log'],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    logs = result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
+                except:
+                    logs = "Nginx error log not accessible. Logs may be in container at /var/log/nginx/ztpbootstrap_error.log"
+        
+        else:  # container logs (default)
+            # Try to get logs from systemd services
+            services = ['ztpbootstrap-pod.service', 'ztpbootstrap-nginx.service', 'ztpbootstrap-webui.service']
+            
+            for service in services:
+                try:
+                    result = subprocess.run(
+                        ['journalctl', '-u', service, '-n', str(lines // len(services)), '--no-pager', '--no-hostname'],
+                        capture_output=True,
+                        text=True,
+                        timeout=2
+                    )
+                    if result.stdout.strip():
+                        logs.append(f"=== {service} ===")
+                        logs.append(result.stdout)
+                except:
+                    pass
+            
+            if not logs:
+                logs = ['No logs available. Services may not be running or journalctl is not accessible.']
+            else:
+                logs = '\n'.join(logs)
         
         if not logs:
-            logs = ['No logs available. Services may not be running or journalctl is not accessible.']
+            logs = 'No logs available'
         
-        return jsonify({'logs': '\n'.join(logs)})
+        return jsonify({'logs': logs, 'source': log_source})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/device-connections')
+def get_device_connections():
+    """Get device connection data"""
+    try:
+        # Parse nginx logs to update connection data
+        connections = parse_nginx_access_log()
+        
+        # Format for frontend
+        devices = []
+        for ip, data in connections.items():
+            # Calculate session duration
+            sessions = data.get('sessions', [])
+            total_duration = sum(s['end'] - s['start'] for s in sessions)
+            last_session_duration = sessions[-1]['end'] - sessions[-1]['start'] if sessions else 0
+            
+            devices.append({
+                'ip': ip,
+                'first_seen': data['first_seen'],
+                'last_seen': data['last_seen'],
+                'bootstrap_downloaded': data.get('bootstrap_downloaded', False),
+                'bootstrap_download_time': data.get('bootstrap_download_time'),
+                'total_requests': data.get('total_requests', 0),
+                'total_sessions': len(sessions),
+                'total_duration': total_duration,
+                'last_session_duration': last_session_duration,
+                'user_agent': data.get('user_agent', 'Unknown')
+            })
+        
+        # Sort by last seen (most recent first)
+        devices.sort(key=lambda x: x['last_seen'], reverse=True)
+        
+        return jsonify({'devices': devices})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
