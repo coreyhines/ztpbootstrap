@@ -617,6 +617,16 @@ def parse_nginx_access_log():
     connections = load_device_connections()
     current_time = time.time()
     
+    # Track which log lines we've already processed
+    processed_lines_file = CONFIG_DIR / 'processed_log_lines.txt'
+    processed_lines = set()
+    if processed_lines_file.exists():
+        try:
+            with open(processed_lines_file, 'r') as f:
+                processed_lines = set(line.strip() for line in f if line.strip())
+        except:
+            pass
+    
     # Nginx log format: IP - - [timestamp] "method path protocol" status size "referer" "user-agent"
     # Example: 10.0.2.15 - - [08/Nov/2025:12:00:00 +0000] "GET /bootstrap.py HTTP/1.1" 200 1234 "-" "Arista-ZTP/1.0"
     
@@ -629,11 +639,19 @@ def parse_nginx_access_log():
             lines = f.readlines()
             recent_lines = lines[-1000:] if len(lines) > 1000 else lines
         
+        new_processed_lines = set()
         for line in recent_lines:
+            line_stripped = line.strip()
+            # Skip if we've already processed this line
+            if line_stripped in processed_lines:
+                new_processed_lines.add(line_stripped)
+                continue
+            
             # Parse log line
             # Match: IP - - [timestamp] "method path protocol" status size "referer" "user-agent"
             match = re.match(r'^(\S+) - - \[([^\]]+)\] "(\S+) (\S+) ([^"]+)" (\d+) (\S+) "([^"]*)" "([^"]*)"', line)
             if not match:
+                new_processed_lines.add(line_stripped)
                 continue
             
             ip = match.group(1)
@@ -643,8 +661,14 @@ def parse_nginx_access_log():
             status = int(match.group(6))
             user_agent = match.group(9)
             
-            # Skip health checks and UI requests
-            if path in ['/health', '/ui', '/api'] or path.startswith('/ui/') or path.startswith('/api/'):
+            # Skip health checks, UI requests, and API requests (WebUI's own requests)
+            if (path in ['/health', '/ui', '/api'] or 
+                path.startswith('/ui/') or 
+                path.startswith('/api/') or
+                '/api/' in path or
+                user_agent and ('Mozilla' in user_agent or 'Gecko' in user_agent or 'Chrome' in user_agent or 'Safari' in user_agent)):
+                # Mark as processed but don't count
+                new_processed_lines.add(line_stripped)
                 continue
             
             # Parse timestamp (format: 08/Nov/2025:12:00:00 +0000)
@@ -702,6 +726,22 @@ def parse_nginx_access_log():
             # Keep only last 50 sessions per device
             if len(device['sessions']) > 50:
                 device['sessions'] = device['sessions'][-50:]
+            
+            # Mark this line as processed
+            new_processed_lines.add(line_stripped)
+        
+        # Save processed lines (keep only last 2000 to avoid file growing too large)
+        all_processed = processed_lines | new_processed_lines
+        if len(all_processed) > 2000:
+            # Keep only the most recent 2000
+            all_processed = set(list(all_processed)[-2000:])
+        
+        try:
+            with open(processed_lines_file, 'w') as f:
+                for line in sorted(all_processed):
+                    f.write(line + '\n')
+        except Exception as e:
+            print(f"Error saving processed lines: {e}")
         
         # Clean up old devices (not seen in 24 hours)
         cutoff_time = current_time - 86400  # 24 hours
