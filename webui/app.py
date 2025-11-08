@@ -23,8 +23,14 @@ BOOTSTRAP_SCRIPT = CONFIG_DIR / 'bootstrap.py'
 NGINX_CONF = CONFIG_DIR / 'nginx.conf'
 SCRIPTS_METADATA = CONFIG_DIR / 'scripts_metadata.json'
 DEVICE_CONNECTIONS_FILE = CONFIG_DIR / 'device_connections.json'
+# Try shared volume first, then container path
 NGINX_ACCESS_LOG = Path('/var/log/nginx/ztpbootstrap_access.log')
 NGINX_ERROR_LOG = Path('/var/log/nginx/ztpbootstrap_error.log')
+# Fallback to config directory if mounted there
+if not NGINX_ACCESS_LOG.exists():
+    NGINX_ACCESS_LOG = CONFIG_DIR / 'logs' / 'ztpbootstrap_access.log'
+if not NGINX_ERROR_LOG.exists():
+    NGINX_ERROR_LOG = CONFIG_DIR / 'logs' / 'ztpbootstrap_error.log'
 
 @app.route('/')
 def index():
