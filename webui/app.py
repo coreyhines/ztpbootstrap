@@ -46,6 +46,26 @@ def get_config():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def load_scripts_metadata():
+    """Load scripts metadata from JSON file"""
+    if SCRIPTS_METADATA.exists():
+        try:
+            with open(SCRIPTS_METADATA, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_scripts_metadata(metadata):
+    """Save scripts metadata to JSON file"""
+    try:
+        with open(SCRIPTS_METADATA, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving metadata: {e}")
+        return False
+
 @app.route('/api/bootstrap-scripts')
 def list_bootstrap_scripts():
     """List available bootstrap scripts"""
@@ -289,6 +309,33 @@ def delete_bootstrap_script(filename):
             'success': True,
             'message': f'Script {filename} deleted successfully'
         })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bootstrap-script/<filename>/serve-as-filename', methods=['POST'])
+def set_serve_as_filename(filename):
+    """Set whether a script should be served as its filename or as bootstrap.py"""
+    try:
+        script_path = CONFIG_DIR / filename
+        if not script_path.exists() or not script_path.suffix == '.py':
+            return jsonify({'error': 'Script not found'}), 404
+        
+        data = request.get_json()
+        serve_as_filename = data.get('serve_as_filename', False)
+        
+        metadata = load_scripts_metadata()
+        if filename not in metadata:
+            metadata[filename] = {}
+        metadata[filename]['serve_as_filename'] = bool(serve_as_filename)
+        
+        if save_scripts_metadata(metadata):
+            return jsonify({
+                'success': True,
+                'message': f'Script will be served as {"its filename" if serve_as_filename else "bootstrap.py"}',
+                'serve_as_filename': serve_as_filename
+            })
+        else:
+            return jsonify({'error': 'Failed to save metadata'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
