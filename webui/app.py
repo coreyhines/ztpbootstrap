@@ -143,15 +143,20 @@ def regenerate_nginx_config():
             filename_encoded = urllib.parse.quote(filename, safe='')
             # Also encode for standard format to handle special characters like hyphens
             filename_quoted = urllib.parse.quote(filename, safe='')
-            location_blocks.append(f'''    # Serve {filename} as its filename
+            # Proxy to Flask app's download endpoint for reliable filename handling
+            location_blocks.append(f'''    # Serve {filename} as its filename via Flask download endpoint
     location = /{filename} {{
-        add_header Content-Type "text/plain; charset=utf-8" always;
-        add_header Content-Disposition "attachment; filename=\\"{filename}\\"; filename*=UTF-8\\'\\'{filename_encoded}" always;
-        add_header X-Content-Type-Options "nosniff" always;
+        proxy_pass http://127.0.0.1:5000/download/{filename};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 5s;
+        proxy_read_timeout 5s;
         add_header Cache-Control "no-cache, no-store, must-revalidate" always;
         add_header Pragma "no-cache" always;
         add_header Expires "0" always;
-        try_files $uri =404;
     }}''')
         
         # Pattern to match the location / block (we need to insert before it)
