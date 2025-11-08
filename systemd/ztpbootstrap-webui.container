@@ -13,7 +13,8 @@ Volume=/run/log/journal:/run/log/journal:ro
 Volume=/run/podman:/run/podman:ro
 Volume=/usr/bin/journalctl:/usr/bin/journalctl:ro
 Volume=/lib64/libsystemd.so.0:/lib64/libsystemd.so.0:ro
-Volume=/lib64/libsystemd.so.0.39.0:/lib64/libsystemd.so.0.39.0:ro
+Volume=/lib64/libsystemd.so.0.41.0:/lib64/libsystemd.so.0.41.0:ro
+Volume=/usr/lib64/systemd:/usr/lib64/systemd:ro
 Environment=TZ=UTC
 Environment=ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap
 Environment=FLASK_APP=app.py
