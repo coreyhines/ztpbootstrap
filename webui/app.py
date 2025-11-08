@@ -819,6 +819,11 @@ def get_logs():
                 except:
                     logs = "Nginx error log not accessible. Logs may be in container at /var/log/nginx/ztpbootstrap_error.log"
         
+        # Also highlight MARK lines in error logs
+        if log_source == 'nginx_error' and logs:
+            # MARK lines are already in the log, just need to make sure they're visible
+            pass
+        
         else:  # container logs (default)
             # Try to get logs from systemd services
             services = ['ztpbootstrap-pod.service', 'ztpbootstrap-nginx.service', 'ztpbootstrap-webui.service']
