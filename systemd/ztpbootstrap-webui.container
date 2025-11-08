@@ -5,7 +5,6 @@ Description=ZTP Bootstrap Web UI Container
 Image=docker.io/python:alpine
 ContainerName=ztpbootstrap-webui
 Pod=ztpbootstrap.pod
-PublishPort=5000:5000
 Volume=/opt/containerdata/ztpbootstrap/webui:/app:ro
 Volume=/opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw
 Volume=/opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw
