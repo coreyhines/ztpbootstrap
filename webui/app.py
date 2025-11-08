@@ -92,29 +92,29 @@ def regenerate_nginx_config():
                     scripts_as_filename.append(filename)
         
         # Remove any existing specific location blocks for scripts (to avoid duplicates)
-        # Pattern matches: comment line + location block for bootstrap*.py (but not bootstrap.py itself)
-        existing_pattern = r'        # Serve bootstrap[^.]*?\.py as its filename\n        location = /bootstrap[^.]*?\.py \{[^}]+\}\n\n?'
-        config_content = re.sub(existing_pattern, '', config_content)
+        # Pattern matches: comment line + location block for any bootstrap*.py
+        existing_pattern = r'        # Serve bootstrap.*?\.py as its filename\n        location = /bootstrap.*?\.py \{[^}]+\}\n\n?'
+        config_content = re.sub(existing_pattern, '', config_content, flags=re.MULTILINE)
         
         # Generate location blocks for scripts that should be served as their filename
-        # These need to come BEFORE the generic .py$ location block
+        # These need to come BEFORE the location / block (at the same level, not nested)
         location_blocks = []
         for filename in sorted(scripts_as_filename):
-            location_blocks.append(f'''        # Serve {filename} as its filename
-        location = /{filename} {{
-            add_header Content-Type "text/plain; charset=utf-8";
-            add_header Content-Disposition "attachment; filename={filename}";
-            try_files $uri =404;
-        }}''')
+            location_blocks.append(f'''    # Serve {filename} as its filename
+    location = /{filename} {{
+        add_header Content-Type "text/plain; charset=utf-8";
+        add_header Content-Disposition "attachment; filename={filename}";
+        try_files $uri =404;
+    }}''')
         
-        # Pattern to match the generic .py$ location block (with its comment)
-        # We need to insert our specific blocks before this
-        py_location_pattern = r'(        # Set proper MIME type for Python scripts\n        location ~\* \\\.py\$ \{)'
+        # Pattern to match the location / block (we need to insert before it)
+        # Look for "location / {" that's at the start of a line with proper indentation
+        location_root_pattern = r'(    # Main location block[^\n]*\n    location / \{)'
         
-        # Insert location blocks before the generic .py$ block
+        # Insert location blocks before the location / block
         if location_blocks:
-            replacement = '\n'.join(location_blocks) + '\n\n' + r'\1'
-            new_config = re.sub(py_location_pattern, replacement, config_content)
+            replacement = '\n'.join(location_blocks) + '\n\n    ' + r'\1'
+            new_config = re.sub(location_root_pattern, replacement, config_content, flags=re.MULTILINE)
         else:
             new_config = config_content
         
