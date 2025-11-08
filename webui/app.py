@@ -117,6 +117,19 @@ def regenerate_nginx_config():
                     if i < len(lines) and lines[i].strip() == '':
                         i += 1
                     continue
+            
+            # Also update the nested location ~* \.py$ block in default server block
+            # to exclude scripts that have specific location blocks
+            if 'location ~* \\.py$' in line and 'Set proper MIME type for Python scripts' in '\n'.join(lines[max(0, i-3):i]):
+                # This is the nested location block in default server block
+                # We need to add the if statement to skip scripts with specific location blocks
+                # Find the scripts that should be excluded
+                scripts_to_exclude = []
+                for filename, meta in metadata.items():
+                    if meta.get('serve_as_filename', False):
+                        scripts_to_exclude.append(filename.replace('.py', '').replace('bootstrap-', 'bootstrap-').replace('bootstrap', 'bootstrap'))
+                # We'll handle this after we've processed all lines
+                pass
             new_lines.append(line)
             i += 1
         config_content = '\n'.join(new_lines)
