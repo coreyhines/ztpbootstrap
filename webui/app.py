@@ -66,6 +66,33 @@ def save_scripts_metadata(metadata):
         print(f"Error saving metadata: {e}")
         return False
 
+def cleanup_old_backups():
+    """Keep only the 5 most recent backup files, delete older ones"""
+    try:
+        script_dir = CONFIG_DIR
+        backup_files = []
+        
+        # Find all backup files
+        for file in script_dir.glob('bootstrap_backup_*.py'):
+            try:
+                backup_files.append((file.stat().st_mtime, file))
+            except OSError:
+                continue
+        
+        # Sort by modification time (newest first)
+        backup_files.sort(key=lambda x: x[0], reverse=True)
+        
+        # Keep only the 5 most recent, delete the rest
+        if len(backup_files) > 5:
+            for mtime, backup_file in backup_files[5:]:
+                try:
+                    backup_file.unlink()
+                    print(f"Deleted old backup: {backup_file.name}")
+                except OSError as e:
+                    print(f"Error deleting backup {backup_file.name}: {e}")
+    except Exception as e:
+        print(f"Error cleaning up backups: {e}")
+
 @app.route('/api/bootstrap-scripts')
 def list_bootstrap_scripts():
     """List available bootstrap scripts"""
