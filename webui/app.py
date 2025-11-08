@@ -150,7 +150,36 @@ def set_active_script(filename):
         if not script_path.exists() or not script_path.suffix == '.py':
             return jsonify({'error': 'Script not found'}), 404
         
-        # Create symlink or copy to bootstrap.py
+        # Special case: if setting bootstrap.py as active, ensure it's a regular file
+        if filename == 'bootstrap.py':
+            target = BOOTSTRAP_SCRIPT
+            # If it's a symlink, remove it and copy the file content
+            if target.exists() and target.is_symlink():
+                try:
+                    # Check if symlink points to itself (loop)
+                    resolved = target.resolve()
+                    if resolved == target:
+                        # Symlink loop - remove it
+                        target.unlink()
+                    else:
+                        # Symlink points to another file - remove it
+                        target.unlink()
+                except (OSError, RuntimeError):
+                    # Error resolving, just remove the symlink
+                    target.unlink()
+            
+            # If bootstrap.py doesn't exist or was a symlink, copy the file
+            if not target.exists() or target.is_symlink():
+                import shutil
+                shutil.copy2(script_path, target)
+            
+            return jsonify({
+                'success': True,
+                'message': 'bootstrap.py is now the active bootstrap script',
+                'active': 'bootstrap.py'
+            })
+        
+        # For other scripts, create symlink to bootstrap.py
         target = BOOTSTRAP_SCRIPT
         if target.exists() and target.is_symlink():
             target.unlink()
