@@ -190,6 +190,13 @@ create_self_signed_cert() {
     local key_file="${CERT_DIR}/privkey.pem"
     
     # Create certificate directory if it doesn't exist
+    # Create logs directory for nginx logs
+    mkdir -p "${SCRIPT_DIR}/logs" || {
+        warn "Failed to create logs directory: ${SCRIPT_DIR}/logs"
+    }
+    # Set permissions for nginx to write logs (nginx runs as UID 101 in alpine image)
+    chmod 777 "${SCRIPT_DIR}/logs" 2>/dev/null || true
+    log "Created logs directory: ${SCRIPT_DIR}/logs"
     mkdir -p "$CERT_DIR"
     
     # Generate self-signed certificate
