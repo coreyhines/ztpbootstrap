@@ -492,12 +492,18 @@ setup_pod() {
         # Copy webui directory to script directory
         local webui_dest="${SCRIPT_DIR}/webui"
         if [[ ! -d "$webui_dest" ]]; then
-            mkdir -p "$webui_dest"
+            mkdir -p "$webui_dest" || {
+                warn "Failed to create webui directory: $webui_dest"
+                return 1
+            }
         fi
-        cp -r "${repo_dir}/webui"/* "$webui_dest/" 2>/dev/null || {
+        if cp -r "${repo_dir}/webui"/* "$webui_dest/" 2>/dev/null; then
+            log "Web UI directory copied to: $webui_dest"
+        else
             warn "Failed to copy webui directory, Web UI may not work"
-        }
-        log "Web UI directory copied to: $webui_dest"
+            warn "Source: ${repo_dir}/webui"
+            warn "Destination: $webui_dest"
+        fi
     else
         warn "Web UI directory not found, Web UI container will not be included"
         warn "Service will run without Web UI"
@@ -577,9 +583,10 @@ main() {
         # Check SSL certificates
         if ! check_ssl_certificates; then
             warn "SSL certificates not found or invalid"
-            warn "Skipping SSL certificate setup"
-            warn "You will need to obtain valid SSL certificates before starting the service"
-            warn "Consider using Let's Encrypt with certbot (can be automated)"
+            warn "Creating self-signed certificate for testing..."
+            create_self_signed_cert
+            warn "⚠️  Using self-signed certificate - not suitable for production"
+            warn "Consider using Let's Encrypt with certbot for production (can be automated)"
         fi
     fi
     
