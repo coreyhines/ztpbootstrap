@@ -66,24 +66,25 @@ def list_bootstrap_scripts():
             # bootstrap.py is a regular file, so it's the active one
             active_script = active_path.name
     
-    # Get the resolved path of the active script for comparison
+    # Get the resolved path and name of the active script for comparison
     active_resolved_path = None
+    active_resolved_name = None
     if active_script:
         try:
             active_file = script_dir / active_script
             if active_file.exists():
                 active_resolved_path = active_file.resolve()
+                active_resolved_name = active_resolved_path.name
         except:
             pass
     
     for file in script_dir.glob('bootstrap*.py'):
-        # Only mark as active if this file is the one bootstrap.py points to
+        # Only mark as active if this file's NAME matches the resolved target name
+        # This ensures only the actual target file is marked active, not the symlink
         is_active = False
-        if active_resolved_path:
-            try:
-                is_active = file.resolve() == active_resolved_path
-            except:
-                is_active = file.name == active_script
+        if active_resolved_name:
+            # Compare by name, not by resolved path, to avoid marking symlinks as active
+            is_active = file.name == active_resolved_name
         else:
             is_active = file.name == active_script
         
