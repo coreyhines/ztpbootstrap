@@ -321,8 +321,7 @@ def list_bootstrap_scripts():
                 'path': str(file),
                 'size': file_stat.st_size,
                 'modified': file_stat.st_mtime,
-                'active': is_active,
-                'serve_as_filename': script_meta.get('serve_as_filename', False)
+                'active': is_active
             })
         except OSError as e:
             # Skip files that can't be stat'd (e.g., symlink loops)
@@ -354,8 +353,7 @@ def list_bootstrap_scripts():
                 'path': str(bootstrap_py_path),
                 'size': file_stat.st_size,
                 'modified': file_stat.st_mtime,
-                'active': is_active,
-                'serve_as_filename': script_meta.get('serve_as_filename', False)
+                'active': is_active
             })
         except OSError:
             pass
@@ -391,112 +389,6 @@ def get_bootstrap_script(filename):
             'path': str(script_path),
             'active': is_active
         })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/download/<filename>')
-def download_bootstrap_script(filename):
-    """Download bootstrap script with correct filename in Content-Disposition header"""
-    try:
-        script_path = CONFIG_DIR / filename
-        if not script_path.exists() or not script_path.suffix == '.py':
-            return jsonify({'error': 'Script not found'}), 404
-        
-        # Check metadata to see if this should be served as its filename
-        metadata = load_scripts_metadata()
-        script_meta = metadata.get(filename, {})
-        serve_as_filename = script_meta.get('serve_as_filename', False)
-        
-        # Use Flask's send_file with as_attachment and download_name
-        from flask import send_file, Response
-        import urllib.parse
-        import hashlib
-        
-        download_name = filename if serve_as_filename else 'bootstrap.py'
-        
-        # Read the file content
-        with open(script_path, 'rb') as f:
-            content = f.read()
-        
-        # Create response with explicit Content-Disposition header
-        # Use both standard format (with quotes) and RFC 5987 format for maximum compatibility
-        # Browsers extract filename from URL path, so we need to be very explicit
-        filename_encoded = urllib.parse.quote(download_name, safe='')
-        # Use both formats: standard with quotes, and RFC 5987
-        # Some browsers prefer the RFC 5987 format when there are special characters
-        content_disposition = f'attachment; filename="{download_name}"; filename*=UTF-8\'\'{filename_encoded}'
-        
-        response = Response(
-            content,
-            mimetype='text/plain; charset=utf-8',
-            headers={
-                'Content-Disposition': content_disposition,
-                'X-Content-Type-Options': 'nosniff',
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache',
-                'Expires': '0',
-                'Content-Length': str(len(content))
-            }
-        )
-        return response
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/d/<filehash>')
-def download_by_hash(filehash):
-    """Download script by hash - URL doesn't expose filename to prevent browser extraction"""
-    try:
-        import hashlib
-        # Find the file by hash
-        script_dir = CONFIG_DIR
-        target_file = None
-        
-        # Calculate hash for each .py file and match
-        for file in script_dir.glob('*.py'):
-            if file.name.startswith('bootstrap_backup_'):
-                continue
-            file_hash = hashlib.md5(file.name.encode()).hexdigest()[:8]
-            if file_hash == filehash:
-                target_file = file
-                break
-        
-        if not target_file or not target_file.exists():
-            return jsonify({'error': 'File not found'}), 404
-        
-        filename = target_file.name
-        
-        # Check metadata to see if this should be served as its filename
-        metadata = load_scripts_metadata()
-        script_meta = metadata.get(filename, {})
-        serve_as_filename = script_meta.get('serve_as_filename', False)
-        
-        from flask import Response
-        import urllib.parse
-        
-        download_name = filename if serve_as_filename else 'bootstrap.py'
-        
-        # Read the file content
-        with open(target_file, 'rb') as f:
-            content = f.read()
-        
-        # Create response with explicit Content-Disposition header
-        # URL doesn't contain filename, so browser can't extract it
-        filename_encoded = urllib.parse.quote(download_name, safe='')
-        content_disposition = f'attachment; filename="{download_name}"; filename*=UTF-8\'\'{filename_encoded}'
-        
-        response = Response(
-            content,
-            mimetype='text/plain; charset=utf-8',
-            headers={
-                'Content-Disposition': content_disposition,
-                'X-Content-Type-Options': 'nosniff',
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
-                'Pragma': 'no-cache',
-                'Expires': '0',
-                'Content-Length': str(len(content))
-            }
-        )
-        return response
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -672,41 +564,6 @@ def delete_bootstrap_script(filename):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/bootstrap-script/<filename>/serve-as-filename', methods=['POST'])
-def set_serve_as_filename(filename):
-    """Set whether a script should be served as its filename or as bootstrap.py"""
-    try:
-        script_path = CONFIG_DIR / filename
-        if not script_path.exists() or not script_path.suffix == '.py':
-            return jsonify({'error': 'Script not found'}), 404
-        
-        data = request.get_json()
-        serve_as_filename = data.get('serve_as_filename', False)
-        
-        metadata = load_scripts_metadata()
-        if filename not in metadata:
-            metadata[filename] = {}
-        metadata[filename]['serve_as_filename'] = bool(serve_as_filename)
-        
-        if save_scripts_metadata(metadata):
-            # Regenerate nginx config based on updated metadata
-            if regenerate_nginx_config():
-                return jsonify({
-                    'success': True,
-                    'message': f'Script will be served as {"its filename" if serve_as_filename else "bootstrap.py"}',
-                    'serve_as_filename': serve_as_filename
-                })
-            else:
-                return jsonify({
-                    'success': True,
-                    'message': f'Metadata updated, but nginx config update failed. Script will be served as {"its filename" if serve_as_filename else "bootstrap.py"} after manual nginx reload.',
-                    'serve_as_filename': serve_as_filename,
-                    'warning': 'nginx config update failed'
-                })
-        else:
-            return jsonify({'error': 'Failed to save metadata'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/bootstrap-scripts/backups')
 def list_backup_scripts():
