@@ -373,6 +373,29 @@
                     }
                 },
                 
+                async toggleServeAsFilename(filename, serveAsFilename) {
+                    try {
+                        const response = await fetch(`/api/bootstrap-script/${filename}/serve-as-filename`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                serve_as_filename: serveAsFilename
+                            })
+                        });
+                        const data = await response.json();
+                        if (data.success) {
+                            // Refresh scripts list to show updated status
+                            await this.loadScripts();
+                        } else {
+                            alert('Failed to update setting: ' + (data.error || 'Unknown error'));
+                        }
+                    } catch (error) {
+                        alert('Failed to update setting: ' + error.message);
+                    }
+                },
+                
                 async loadConfig() {
                     try {
                         const response = await fetch('/api/config');
