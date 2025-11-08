@@ -519,6 +519,16 @@ setup_pod() {
                     rm -f "${webui_container_file}.tmp" 2>/dev/null || true
                     log "Removed PublishPort directives from webui container (host network mode)"
                 fi
+                
+                # Update nginx.conf to use localhost instead of container name for host networking
+                if [[ -f "$NGINX_CONF" ]]; then
+                    if sed -i.tmp "s|ztpbootstrap-webui:5000|127.0.0.1:5000|g" "$NGINX_CONF" 2>/dev/null; then
+                        # Remove resolver lines (not needed with host networking)
+                        sed -i.tmp "/resolver 127.0.0.11/d" "$NGINX_CONF" 2>/dev/null || true
+                        rm -f "${NGINX_CONF}.tmp" 2>/dev/null || true
+                        log "Updated nginx.conf for host networking (using localhost:5000 for webui)"
+                    fi
+                fi
             fi
         fi
         
