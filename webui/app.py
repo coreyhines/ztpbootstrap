@@ -100,16 +100,49 @@ def list_bootstrap_scripts():
             is_active = file.name == active_script
         
         try:
+            # For bootstrap.py, if it's a symlink, we still want to show it
+            # but we'll mark the target as active instead
+            file_stat = file.stat()
             scripts.append({
                 'name': file.name,
                 'path': str(file),
-                'size': file.stat().st_size,
-                'modified': file.stat().st_mtime,
+                'size': file_stat.st_size,
+                'modified': file_stat.st_mtime,
                 'active': is_active
             })
         except OSError as e:
             # Skip files that can't be stat'd (e.g., symlink loops)
             continue
+    
+    # Always include bootstrap.py in the list if it exists (even as symlink)
+    # This ensures it's visible even when it's a symlink to another file
+    bootstrap_py_path = script_dir / 'bootstrap.py'
+    if bootstrap_py_path.exists() and not any(s['name'] == 'bootstrap.py' for s in scripts):
+        try:
+            is_active = False
+            if active_resolved_name:
+                # If bootstrap.py is a symlink, check if its target matches
+                if bootstrap_py_path.is_symlink():
+                    try:
+                        resolved = bootstrap_py_path.resolve()
+                        is_active = resolved.name == active_resolved_name
+                    except:
+                        pass
+                else:
+                    is_active = 'bootstrap.py' == active_resolved_name
+            else:
+                is_active = 'bootstrap.py' == active_script
+            
+            file_stat = bootstrap_py_path.stat()
+            scripts.append({
+                'name': 'bootstrap.py',
+                'path': str(bootstrap_py_path),
+                'size': file_stat.st_size,
+                'modified': file_stat.st_mtime,
+                'active': is_active
+            })
+        except OSError:
+            pass
     
     # Sort scripts: active script first, then by name
     scripts.sort(key=lambda x: (not x['active'], x['name']))
@@ -156,15 +189,23 @@ def set_active_script(filename):
         # Special case: if setting bootstrap.py as active, ensure it's a regular file
         if filename == 'bootstrap.py':
             target = BOOTSTRAP_SCRIPT
+            
+            # If bootstrap.py doesn't exist, we need to find what it should point to
+            # or create it from another file. But if the user is clicking on bootstrap.py,
+            # it should exist (either as file or symlink)
+            if not script_path.exists():
+                return jsonify({'error': 'bootstrap.py not found. Please set another script as active first.'}), 404
+            
             # Resolve the source file path before potentially removing the symlink
             source_file = script_path
             if script_path.is_symlink():
                 try:
                     # Get the actual target file that the symlink points to
                     source_file = script_path.resolve()
-                except (OSError, RuntimeError):
-                    # If we can't resolve, use the original path
-                    source_file = script_path
+                    if not source_file.exists():
+                        return jsonify({'error': f'Symlink target not found: {source_file}'}), 404
+                except (OSError, RuntimeError) as e:
+                    return jsonify({'error': f'Cannot resolve symlink: {str(e)}'}), 500
             
             # If bootstrap.py is a symlink, remove it first
             if target.exists() and target.is_symlink():
@@ -173,12 +214,12 @@ def set_active_script(filename):
                 except (OSError, RuntimeError):
                     pass
             
-            # Copy the source file to bootstrap.py (or create it if it doesn't exist)
+            # Copy the source file to bootstrap.py
             import shutil
-            if source_file.exists():
+            try:
                 shutil.copy2(source_file, target)
-            else:
-                return jsonify({'error': f'Source file not found: {source_file}'}), 404
+            except (OSError, shutil.Error) as e:
+                return jsonify({'error': f'Failed to copy file: {str(e)}'}), 500
             
             return jsonify({
                 'success': True,
