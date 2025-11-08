@@ -122,30 +122,46 @@
 
                 <!-- Bootstrap Scripts Tab -->
                 <div x-show="activeTab === 'scripts'" class="p-6">
-                    <div class="mb-4">
-                        <h2 class="text-lg font-semibold text-gray-900 mb-2">Bootstrap Scripts</h2>
-                        <p class="text-sm text-gray-600">Manage bootstrap scripts for device enrollment</p>
+                    <div class="mb-4 flex items-center justify-between">
+                        <div>
+                            <h2 class="text-lg font-semibold text-gray-900 mb-2">Bootstrap Scripts</h2>
+                            <p class="text-sm text-gray-600">Manage bootstrap scripts for device enrollment</p>
+                        </div>
+                        <label class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium transition-colors cursor-pointer">
+                            <input type="file" @change="uploadScript($event)" accept=".py" class="hidden">
+                            Upload Script
+                        </label>
                     </div>
                     
                     <div class="space-y-3">
                         <template x-for="script in scripts" :key="script.name">
-                            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 hover:shadow-sm transition-shadow">
+                            <div class="border rounded-lg p-4 hover:bg-gray-50 hover:shadow-sm transition-shadow" 
+                                 :class="script.active ? 'border-green-500 bg-green-50' : 'border-gray-200'">
                                 <div class="flex items-center justify-between">
-                                    <div class="flex items-center space-x-3">
+                                    <div class="flex items-center space-x-3 flex-1">
                                         <div class="flex-shrink-0">
-                                            <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <svg class="w-8 h-8" :class="script.active ? 'text-green-600' : 'text-blue-500'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
                                             </svg>
                                         </div>
-                                        <div>
-                                            <h3 class="font-semibold text-gray-900" x-text="script.name"></h3>
+                                        <div class="flex-1">
+                                            <div class="flex items-center space-x-2">
+                                                <h3 class="font-semibold text-gray-900" x-text="script.name"></h3>
+                                                <span x-show="script.active" class="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded">Active</span>
+                                            </div>
                                             <p class="text-sm text-gray-500" x-text="formatSize(script.size) + ' • Modified ' + formatDate(script.modified)"></p>
                                         </div>
                                     </div>
-                                    <button @click="viewScript(script.name)" 
-                                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium transition-colors">
-                                        View
-                                    </button>
+                                    <div class="flex items-center space-x-2">
+                                        <button @click="viewScript(script.name)" 
+                                                class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium transition-colors">
+                                            View
+                                        </button>
+                                        <button x-show="!script.active" @click="setActiveScript(script.name)" 
+                                                class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium transition-colors">
+                                            Set Active
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </template>
@@ -155,7 +171,7 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
                             </svg>
                             <h3 class="mt-2 text-sm font-medium text-gray-900">No bootstrap scripts</h3>
-                            <p class="mt-1 text-sm text-gray-500">Get started by adding a bootstrap script to the service directory.</p>
+                            <p class="mt-1 text-sm text-gray-500">Get started by uploading a bootstrap script.</p>
                         </div>
                     </div>
                 </div>
@@ -167,24 +183,60 @@
                         <p class="text-sm text-gray-600">View and manage service configuration</p>
                     </div>
                     
-                    <div class="bg-gray-50 rounded-lg p-4">
-                        <pre class="text-sm text-gray-800 overflow-x-auto" x-text="JSON.stringify(config, null, 2)"></pre>
+                    <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                        <div x-show="config.error" class="text-red-600" x-text="config.error"></div>
+                        <pre x-show="config.raw && !config.error" class="text-sm text-gray-800 overflow-x-auto whitespace-pre-wrap font-mono" x-text="config.raw"></pre>
+                        <pre x-show="config.parsed && !config.error" class="text-sm text-gray-800 overflow-x-auto" x-text="JSON.stringify(config.parsed, null, 2)"></pre>
                     </div>
                 </div>
 
                 <!-- Logs Tab -->
                 <div x-show="activeTab === 'logs'" class="p-6">
-                    <div class="mb-4">
-                        <h2 class="text-lg font-semibold text-gray-900 mb-2">Service Logs</h2>
-                        <p class="text-sm text-gray-600">Recent service logs</p>
+                    <div class="mb-4 flex items-center justify-between">
+                        <div>
+                            <h2 class="text-lg font-semibold text-gray-900 mb-2">Service Logs</h2>
+                            <p class="text-sm text-gray-600">Recent service logs</p>
+                        </div>
+                        <button @click="loadLogs()" class="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-sm font-medium transition-colors">
+                            Refresh
+                        </button>
                     </div>
                     
-                    <div class="bg-gray-900 rounded-lg p-4">
+                    <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto" x-ref="logsContainer">
                         <pre class="text-sm text-green-400 font-mono overflow-x-auto whitespace-pre-wrap" x-text="logs"></pre>
                     </div>
                 </div>
             </div>
         </main>
+
+        <!-- Script Viewer Modal -->
+        <div x-show="showScriptModal" 
+             @click.away="showScriptModal = false"
+             class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
+             style="display: none;">
+            <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold text-gray-900" x-text="'Script: ' + (viewingScript?.name || '')"></h3>
+                    <button @click="showScriptModal = false" class="text-gray-400 hover:text-gray-600">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="bg-gray-900 rounded-lg p-4 max-h-96 overflow-y-auto">
+                    <pre class="text-sm text-green-400 font-mono whitespace-pre-wrap" x-text="viewingScript?.content || ''"></pre>
+                </div>
+                <div class="mt-4 flex justify-end space-x-2">
+                    <button @click="showScriptModal = false" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 text-sm font-medium">
+                        Close
+                    </button>
+                    <button x-show="viewingScript && !viewingScript.active" @click="setActiveScript(viewingScript.name); showScriptModal = false" 
+                            class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
+                        Set Active
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -200,6 +252,8 @@
                 scripts: [],
                 config: {},
                 logs: 'Loading...',
+                showScriptModal: false,
+                viewingScript: null,
                 
                 async init() {
                     await this.loadStatus();
@@ -235,6 +289,48 @@
                     }
                 },
                 
+                async uploadScript(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    
+                    try {
+                        const response = await fetch('/api/bootstrap-script/upload', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        const data = await response.json();
+                        if (data.success) {
+                            alert(data.message);
+                            await this.loadScripts();
+                        } else {
+                            alert('Upload failed: ' + (data.error || 'Unknown error'));
+                        }
+                    } catch (error) {
+                        alert('Upload failed: ' + error.message);
+                    }
+                    event.target.value = ''; // Reset file input
+                },
+                
+                async setActiveScript(filename) {
+                    try {
+                        const response = await fetch(`/api/bootstrap-script/${filename}/set-active`, {
+                            method: 'POST'
+                        });
+                        const data = await response.json();
+                        if (data.success) {
+                            alert(data.message);
+                            await this.loadScripts();
+                        } else {
+                            alert('Failed to set active: ' + (data.error || 'Unknown error'));
+                        }
+                    } catch (error) {
+                        alert('Failed to set active: ' + error.message);
+                    }
+                },
+                
                 async loadConfig() {
                     try {
                         const response = await fetch('/api/config');
@@ -249,6 +345,12 @@
                         const response = await fetch('/api/logs');
                         const data = await response.json();
                         this.logs = data.logs || 'No logs available';
+                        // Auto-scroll to bottom
+                        this.$nextTick(() => {
+                            if (this.$refs.logsContainer) {
+                                this.$refs.logsContainer.scrollTop = this.$refs.logsContainer.scrollHeight;
+                            }
+                        });
                     } catch (error) {
                         console.error('Failed to load logs:', error);
                         this.logs = 'Failed to load logs';
@@ -259,9 +361,10 @@
                     try {
                         const response = await fetch(`/api/bootstrap-script/${filename}`);
                         const data = await response.json();
-                        alert(`Script: ${data.name}\n\n${data.content.substring(0, 500)}...`);
+                        this.viewingScript = data;
+                        this.showScriptModal = true;
                     } catch (error) {
-                        alert('Failed to load script');
+                        alert('Failed to load script: ' + error.message);
                     }
                 },
                 

@@ -36,10 +36,10 @@ def get_config():
                     text=True,
                     check=True
                 )
-                return jsonify(json.loads(result.stdout))
+                return jsonify({'parsed': json.loads(result.stdout), 'raw': CONFIG_FILE.read_text()})
             except (subprocess.CalledProcessError, FileNotFoundError):
                 # Fallback: read as text
-                return jsonify({'raw': CONFIG_FILE.read_text()})
+                return jsonify({'raw': CONFIG_FILE.read_text(), 'parsed': None})
         else:
             return jsonify({'error': 'Config file not found'}), 404
     except Exception as e:
@@ -50,16 +50,27 @@ def list_bootstrap_scripts():
     """List available bootstrap scripts"""
     scripts = []
     script_dir = CONFIG_DIR
+    active_script = None
+    
+    # Check which script is currently active (bootstrap.py is the active one)
+    active_path = BOOTSTRAP_SCRIPT
+    if active_path.exists():
+        if active_path.is_symlink():
+            active_script = active_path.resolve().name
+        else:
+            active_script = active_path.name
     
     for file in script_dir.glob('bootstrap*.py'):
+        is_active = file.name == active_script or (file.resolve() == active_path.resolve())
         scripts.append({
             'name': file.name,
             'path': str(file),
             'size': file.stat().st_size,
-            'modified': file.stat().st_mtime
+            'modified': file.stat().st_mtime,
+            'active': is_active
         })
     
-    return jsonify({'scripts': scripts})
+    return jsonify({'scripts': scripts, 'active': active_script})
 
 @app.route('/api/bootstrap-script/<filename>')
 def get_bootstrap_script(filename):
@@ -69,10 +80,76 @@ def get_bootstrap_script(filename):
         if not script_path.exists() or not script_path.suffix == '.py':
             return jsonify({'error': 'Script not found'}), 404
         
+        active_path = BOOTSTRAP_SCRIPT
+        is_active = script_path.name == active_path.name or (script_path.resolve() == active_path.resolve())
+        
         return jsonify({
             'name': filename,
             'content': script_path.read_text(),
-            'path': str(script_path)
+            'path': str(script_path),
+            'active': is_active
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bootstrap-script/<filename>/set-active', methods=['POST'])
+def set_active_script(filename):
+    """Set a bootstrap script as active"""
+    try:
+        script_path = CONFIG_DIR / filename
+        if not script_path.exists() or not script_path.suffix == '.py':
+            return jsonify({'error': 'Script not found'}), 404
+        
+        # Create symlink or copy to bootstrap.py
+        target = BOOTSTRAP_SCRIPT
+        if target.exists() and target.is_symlink():
+            target.unlink()
+        elif target.exists():
+            # Backup existing bootstrap.py
+            backup = CONFIG_DIR / f'bootstrap_backup_{int(target.stat().st_mtime)}.py'
+            target.rename(backup)
+        
+        # Create symlink to the selected script
+        target.symlink_to(script_path.name)
+        
+        return jsonify({
+            'success': True,
+            'message': f'{filename} is now the active bootstrap script',
+            'active': filename
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bootstrap-script/upload', methods=['POST'])
+def upload_bootstrap_script():
+    """Upload a new bootstrap script"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if not file.filename.endswith('.py'):
+            return jsonify({'error': 'File must be a Python script (.py)'}), 400
+        
+        # Save file
+        filename = file.filename
+        if not filename.startswith('bootstrap'):
+            filename = f'bootstrap_{filename}'
+        
+        file_path = CONFIG_DIR / filename
+        file.save(str(file_path))
+        
+        # Set permissions
+        file_path.chmod(0o644)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Script {filename} uploaded successfully',
+            'filename': filename,
+            'path': str(file_path)
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
