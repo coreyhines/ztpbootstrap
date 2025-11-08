@@ -460,6 +460,7 @@ def download_bootstrap_script(filename):
 def download_by_hash(filehash):
     """Download script by hash - URL doesn't expose filename to prevent browser extraction"""
     try:
+        import hashlib
         # Find the file by hash
         script_dir = CONFIG_DIR
         target_file = None
