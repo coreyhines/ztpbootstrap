@@ -17,6 +17,7 @@ CONFIG_DIR = Path(os.environ.get('ZTP_CONFIG_DIR', '/opt/containerdata/ztpbootst
 CONFIG_FILE = CONFIG_DIR / 'config.yaml'
 BOOTSTRAP_SCRIPT = CONFIG_DIR / 'bootstrap.py'
 NGINX_CONF = CONFIG_DIR / 'nginx.conf'
+SCRIPTS_METADATA = CONFIG_DIR / 'scripts_metadata.json'
 
 @app.route('/')
 def index():
@@ -103,12 +104,14 @@ def list_bootstrap_scripts():
             # For bootstrap.py, if it's a symlink, we still want to show it
             # but we'll mark the target as active instead
             file_stat = file.stat()
+            script_meta = metadata.get(file.name, {})
             scripts.append({
                 'name': file.name,
                 'path': str(file),
                 'size': file_stat.st_size,
                 'modified': file_stat.st_mtime,
-                'active': is_active
+                'active': is_active,
+                'serve_as_filename': script_meta.get('serve_as_filename', False)
             })
         except OSError as e:
             # Skip files that can't be stat'd (e.g., symlink loops)
@@ -134,12 +137,14 @@ def list_bootstrap_scripts():
                 is_active = 'bootstrap.py' == active_script
             
             file_stat = bootstrap_py_path.stat()
+            script_meta = metadata.get('bootstrap.py', {})
             scripts.append({
                 'name': 'bootstrap.py',
                 'path': str(bootstrap_py_path),
                 'size': file_stat.st_size,
                 'modified': file_stat.st_mtime,
-                'active': is_active
+                'active': is_active,
+                'serve_as_filename': script_meta.get('serve_as_filename', False)
             })
         except OSError:
             pass
