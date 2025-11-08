@@ -127,8 +127,8 @@ def regenerate_nginx_config():
         for filename in sorted(scripts_as_filename):
             location_blocks.append(f'''    # Serve {filename} as its filename
     location = /{filename} {{
-        add_header Content-Type "text/plain; charset=utf-8";
-        add_header Content-Disposition "attachment; filename={filename}";
+        add_header Content-Type "text/plain; charset=utf-8" always;
+        add_header Content-Disposition "attachment; filename={filename}" always;
         try_files $uri =404;
     }}''')
         
