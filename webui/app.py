@@ -111,6 +111,9 @@ def list_bootstrap_scripts():
             # Skip files that can't be stat'd (e.g., symlink loops)
             continue
     
+    # Sort scripts: active script first, then by name
+    scripts.sort(key=lambda x: (not x['active'], x['name']))
+    
     return jsonify({'scripts': scripts, 'active': active_script})
 
 @app.route('/api/bootstrap-script/<filename>')
