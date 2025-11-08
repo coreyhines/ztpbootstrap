@@ -488,6 +488,18 @@ setup_pod() {
     if [[ -f "${repo_dir}/systemd/ztpbootstrap-nginx.container" ]]; then
         cp "${repo_dir}/systemd/ztpbootstrap-nginx.container" "$systemd_dir/"
         log "Nginx container configuration installed"
+        
+        # Remove PublishPort lines if using host networking
+        local nginx_container_file="${systemd_dir}/ztpbootstrap-nginx.container"
+        if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+            local host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
+            if [[ "$host_network" == "true" ]]; then
+                if sed -i.tmp "/^PublishPort=/d" "$nginx_container_file" 2>/dev/null; then
+                    rm -f "${nginx_container_file}.tmp" 2>/dev/null || true
+                    log "Removed PublishPort directives from nginx container (host network mode)"
+                fi
+            fi
+        fi
     else
         error "Nginx container configuration not found: ${repo_dir}/systemd/ztpbootstrap-nginx.container"
         return 1
@@ -497,6 +509,18 @@ setup_pod() {
     if [[ -d "${repo_dir}/webui" ]] && [[ -f "${repo_dir}/systemd/ztpbootstrap-webui.container" ]]; then
         cp "${repo_dir}/systemd/ztpbootstrap-webui.container" "$systemd_dir/"
         log "Web UI container configuration installed"
+        
+        # Remove PublishPort lines if using host networking
+        local webui_container_file="${systemd_dir}/ztpbootstrap-webui.container"
+        if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+            local host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
+            if [[ "$host_network" == "true" ]]; then
+                if sed -i.tmp "/^PublishPort=/d" "$webui_container_file" 2>/dev/null; then
+                    rm -f "${webui_container_file}.tmp" 2>/dev/null || true
+                    log "Removed PublishPort directives from webui container (host network mode)"
+                fi
+            fi
+        fi
         
         # Copy webui directory to script directory
         local webui_dest="${SCRIPT_DIR}/webui"
