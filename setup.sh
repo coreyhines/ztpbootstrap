@@ -196,6 +196,10 @@ create_self_signed_cert() {
     }
     # Set permissions for nginx to write logs (nginx runs as UID 101 in alpine image)
     chmod 777 "${SCRIPT_DIR}/logs" 2>/dev/null || true
+    # Try to set ownership to nginx user (UID 101) if possible
+    if command -v chown >/dev/null 2>&1; then
+        chown 101:101 "${SCRIPT_DIR}/logs" 2>/dev/null || chmod 777 "${SCRIPT_DIR}/logs" 2>/dev/null || true
+    fi
     log "Created logs directory: ${SCRIPT_DIR}/logs"
     mkdir -p "$CERT_DIR"
     

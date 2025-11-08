@@ -102,6 +102,36 @@
 - **Host Networking:** Pod correctly configured with `Network=host` from config.yaml
 - **Container Services:** Nginx and WebUI containers need to be started after pod creation
 
+### Phase 1.4: Full Functionality Verification 🔄
+
+**Date:** 2025-11-08  
+**Status:** IN PROGRESS
+
+#### Test Results
+
+**HTTP/HTTPS Endpoints:**
+- ✅ Health endpoint: `/health` - Working
+- ✅ Bootstrap endpoint: `/bootstrap.py` - Working  
+- ⚠️ WebUI endpoints: `/ui/` - Testing...
+- ⚠️ API endpoints: `/api/*` - Testing...
+
+**WebUI Functionality:**
+- ⚠️ Status display - Testing...
+- ⚠️ Script management - Testing...
+- ⚠️ Configuration display - Testing...
+- ⚠️ Logs viewing - Testing...
+- ⚠️ Device connections - Testing...
+
+**Port Forwarding:**
+- ⚠️ Access from host via localhost:8080 - Testing...
+
+**⚠️ ISSUE - Logs Directory Permissions**
+- Nginx container fails with: `open() "/var/log/nginx/error.log" failed (13: Permission denied)`
+- **Root Cause:** Logs directory permissions not correctly set for nginx user (UID 101)
+- **Temporary Fix:** Manually set `chmod 777` and `chown 101:101` on logs directory
+- **Permanent Fix Needed:** Update `setup.sh` to properly set ownership to UID 101 (nginx user in alpine)
+- **Status:** ⚠️ WORKAROUND APPLIED - Needs code fix
+
 ---
 
 ### Phase 1.2: Interactive Setup Testing ✓
@@ -145,11 +175,11 @@
 
 ## Test Status Summary
 
-- **Phase 1.1:** ✅ COMPLETE
-- **Phase 1.2:** 🔄 IN PROGRESS
-- **Phase 1.3:** ⏳ PENDING
-- **Phase 1.4:** ⏳ PENDING
-- **Phase 1.5:** ⏳ PENDING
+- **Phase 1.1:** ✅ COMPLETE - VM creation and cloud-init successful
+- **Phase 1.2:** ✅ COMPLETE - Interactive setup script validated (syntax, structure)
+- **Phase 1.3:** ✅ COMPLETE - Service deployment tested, critical bug found and fixed
+- **Phase 1.4:** ⏳ PENDING - Full functionality verification
+- **Phase 1.5:** ⏳ PENDING - Final documentation
 
 ---
 
@@ -162,4 +192,3 @@ None found so far.
 1. Cloud-init deprecation warnings (documented above)
 2. README_VM_SETUP.txt missing (documented above)
 3. Cloud-init status shows "degraded" (documented above)
-
