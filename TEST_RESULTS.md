@@ -177,18 +177,53 @@
 
 - **Phase 1.1:** ✅ COMPLETE - VM creation and cloud-init successful
 - **Phase 1.2:** ✅ COMPLETE - Interactive setup script validated (syntax, structure)
-- **Phase 1.3:** ✅ COMPLETE - Service deployment tested, critical bug found and fixed
-- **Phase 1.4:** ⏳ PENDING - Full functionality verification
+- **Phase 1.3:** ✅ COMPLETE - Service deployment tested, critical bugs found and fixed
+- **Phase 1.4:** 🔄 IN PROGRESS - Full functionality verification (containers need to be running)
 - **Phase 1.5:** ⏳ PENDING - Final documentation
+
+**Note:** Phase 1.4 testing is partially complete. Containers are experiencing permission issues that have been fixed in code, but the current VM setup needs a fresh deployment with the updated code to fully verify functionality.
 
 ---
 
 ## Critical Issues
 
-None found so far.
+1. **Missing Logs Directory in setup.sh** ✅ FIXED
+   - **Issue:** `/opt/containerdata/ztpbootstrap/logs` directory not created by `setup.sh`
+   - **Error:** `Error: statfs /opt/containerdata/ztpbootstrap/logs: no such file or directory`
+   - **Impact:** Nginx container fails to start because it cannot mount the logs volume
+   - **Fix:** Added `mkdir -p "${SCRIPT_DIR}/logs"` and proper permission setup in `setup.sh`
+   - **Status:** ✅ FIXED and committed
+
+2. **Logs Directory Permissions** ✅ FIXED
+   - **Issue:** Nginx container fails with: `open() "/var/log/nginx/error.log" failed (13: Permission denied)`
+   - **Root Cause:** Logs directory permissions not correctly set for nginx user (UID 101 in alpine)
+   - **Fix:** Added `chown 101:101` and `chmod 777` to logs directory creation in `setup.sh`
+   - **Status:** ✅ FIXED and committed
+   - **Note:** Fresh setup with updated code should work correctly
 
 ## Minor Issues
 
-1. Cloud-init deprecation warnings (documented above)
-2. README_VM_SETUP.txt missing (documented above)
-3. Cloud-init status shows "degraded" (documented above)
+1. **Cloud-init Deprecation Warnings** (documented in Phase 1.1)
+   - Non-critical, but should be updated in `vm-create-native.sh` cloud-init configuration
+   - **Action:** Document for later fix (not blocking)
+
+2. **README_VM_SETUP.txt Missing** (documented in Phase 1.1)
+   - Expected file `/home/fedora/README_VM_SETUP.txt` not found
+   - **Impact:** Low - documentation file, not required for functionality
+   - **Action:** Check if this was supposed to be created by cloud-init
+
+3. **Cloud-init Status "Degraded"** (documented in Phase 1.1)
+   - Extended status shows `degraded done` instead of just `done`
+   - Likely due to deprecation warnings
+   - **Impact:** Non-critical - cloud-init completed successfully
+
+4. **Interactive Setup Script Piped Input** (documented in Phase 1.2)
+   - Yes/no prompts do not handle piped input correctly
+   - **Impact:** Cannot fully automate testing of interactive script
+   - **Action:** Test manually or use `expect` script for automation
+   - **Note:** This is a limitation of the interactive script design, not a critical bug
+
+5. **SSH Key Setup Not Automated** (noted by user)
+   - SSH key setup (ssh-copy-id) could be automated in cloud-init
+   - **Impact:** Low - manual step required
+   - **Action:** Enhancement for future improvement
