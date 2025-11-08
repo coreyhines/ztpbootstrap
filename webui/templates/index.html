@@ -347,15 +347,15 @@
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4" x-show="showMultiColumn && logSource === 'container'">
                         <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto">
                             <div class="text-xs text-gray-400 mb-2 font-semibold">Pod Service</div>
-                            <pre class="text-sm text-green-400 font-mono overflow-x-auto whitespace-pre-wrap" x-text="logsPod"></pre>
+                            <pre class="text-sm text-green-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="formatLogsWithMarks(logsPod)"></pre>
                         </div>
                         <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto">
                             <div class="text-xs text-gray-400 mb-2 font-semibold">Nginx Service</div>
-                            <pre class="text-sm text-blue-400 font-mono overflow-x-auto whitespace-pre-wrap" x-text="logsNginx"></pre>
+                            <pre class="text-sm text-blue-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="formatLogsWithMarks(logsNginx)"></pre>
                         </div>
                         <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto lg:col-span-2">
                             <div class="text-xs text-gray-400 mb-2 font-semibold">WebUI Service</div>
-                            <pre class="text-sm text-yellow-400 font-mono overflow-x-auto whitespace-pre-wrap" x-text="logsWebUI"></pre>
+                            <pre class="text-sm text-yellow-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="formatLogsWithMarks(logsWebUI)"></pre>
                         </div>
                     </div>
                     
