@@ -321,8 +321,11 @@
                         });
                         const data = await response.json();
                         if (data.success) {
-                            alert(data.message);
+                            // Refresh scripts list immediately to show updated active status
                             await this.loadScripts();
+                            // Close modal if open
+                            this.showScriptModal = false;
+                            this.viewingScript = null;
                         } else {
                             alert('Failed to set active: ' + (data.error || 'Unknown error'));
                         }
