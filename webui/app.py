@@ -56,12 +56,37 @@ def list_bootstrap_scripts():
     active_path = BOOTSTRAP_SCRIPT
     if active_path.exists():
         if active_path.is_symlink():
-            active_script = active_path.resolve().name
+            # Resolve symlink to get the actual target file
+            try:
+                resolved = active_path.resolve()
+                active_script = resolved.name
+            except:
+                active_script = active_path.name
         else:
+            # bootstrap.py is a regular file, so it's the active one
             active_script = active_path.name
     
+    # Get the resolved path of the active script for comparison
+    active_resolved_path = None
+    if active_script:
+        try:
+            active_file = script_dir / active_script
+            if active_file.exists():
+                active_resolved_path = active_file.resolve()
+        except:
+            pass
+    
     for file in script_dir.glob('bootstrap*.py'):
-        is_active = file.name == active_script or (file.resolve() == active_path.resolve())
+        # Only mark as active if this file is the one bootstrap.py points to
+        is_active = False
+        if active_resolved_path:
+            try:
+                is_active = file.resolve() == active_resolved_path
+            except:
+                is_active = file.name == active_script
+        else:
+            is_active = file.name == active_script
+        
         scripts.append({
             'name': file.name,
             'path': str(file),
@@ -80,8 +105,17 @@ def get_bootstrap_script(filename):
         if not script_path.exists() or not script_path.suffix == '.py':
             return jsonify({'error': 'Script not found'}), 404
         
+        # Check if this script is the active one
         active_path = BOOTSTRAP_SCRIPT
-        is_active = script_path.name == active_path.name or (script_path.resolve() == active_path.resolve())
+        is_active = False
+        if active_path.exists():
+            try:
+                if active_path.is_symlink():
+                    is_active = script_path.resolve() == active_path.resolve()
+                else:
+                    is_active = script_path.name == active_path.name
+            except:
+                is_active = script_path.name == active_path.name
         
         return jsonify({
             'name': filename,
