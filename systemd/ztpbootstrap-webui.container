@@ -9,6 +9,7 @@ PublishPort=5000:5000
 Volume=/opt/containerdata/ztpbootstrap/webui:/app:ro
 Volume=/opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw
 Volume=/opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw
+Volume=/run/systemd/journal:/run/systemd/journal:ro
 Environment=TZ=UTC
 Environment=ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap
 Environment=FLASK_APP=app.py
