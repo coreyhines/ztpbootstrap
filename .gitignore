@@ -31,3 +31,5 @@ __pycache__/
 # Logs
 *.log
 SANITIZATION_NOTES.md
+*.qcow2
+*.raw

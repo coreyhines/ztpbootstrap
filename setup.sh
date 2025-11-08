@@ -199,6 +199,15 @@ create_self_signed_cert() {
         -subj "/C=US/ST=State/L=City/O=Organization/CN=$DOMAIN" \
         -addext "subjectAltName=DNS:$DOMAIN"
     
+    # Set proper permissions and SELinux context (if SELinux is enabled)
+    chmod 644 "$cert_file" 2>/dev/null || true
+    chmod 644 "$key_file" 2>/dev/null || true
+    if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
+        # Set container_file_t context for container access (works with NFS too)
+        chcon -R -t container_file_t "$CERT_DIR" 2>/dev/null || true
+        log "Set SELinux context for certificate directory"
+    fi
+    
     log "Self-signed certificate created for testing"
     warn "This is a self-signed certificate and should not be used in production"
 }
