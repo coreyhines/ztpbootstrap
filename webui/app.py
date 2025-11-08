@@ -399,6 +399,31 @@ def get_bootstrap_script(filename):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/download/<filename>')
+def download_bootstrap_script(filename):
+    """Download bootstrap script with correct filename in Content-Disposition header"""
+    try:
+        script_path = CONFIG_DIR / filename
+        if not script_path.exists() or not script_path.suffix == '.py':
+            return jsonify({'error': 'Script not found'}), 404
+        
+        # Check metadata to see if this should be served as its filename
+        metadata = load_scripts_metadata()
+        script_meta = metadata.get(filename, {})
+        serve_as_filename = script_meta.get('serve_as_filename', False)
+        
+        # Use Flask's send_file with as_attachment and download_name
+        from flask import send_file
+        download_name = filename if serve_as_filename else 'bootstrap.py'
+        return send_file(
+            str(script_path),
+            mimetype='text/plain',
+            as_attachment=True,
+            download_name=download_name
+        )
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/bootstrap-script/<filename>/set-active', methods=['POST'])
 def set_active_script(filename):
     """Set a bootstrap script as active"""
