@@ -461,8 +461,16 @@
                 showRestoreDialog: false,
                 selectedBackup: null,
                 viewingScript: null,
+                theme: 'tomorrow',
                 
                 async init() {
+                    // Load theme preference
+                    const savedTheme = localStorage.getItem('ztpbootstrap-theme');
+                    if (savedTheme) {
+                        this.theme = savedTheme;
+                    }
+                    this.applyTheme();
+                    
                     await this.loadStatus();
                     await this.loadScripts();
                     await this.loadBackups();
