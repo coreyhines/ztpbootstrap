@@ -140,10 +140,20 @@ def upload_bootstrap_script():
             filename = f'bootstrap_{filename}'
         
         file_path = CONFIG_DIR / filename
-        file.save(str(file_path))
         
-        # Set permissions
-        file_path.chmod(0o644)
+        # Try to save with proper error handling
+        try:
+            file.save(str(file_path))
+            # Set permissions - try with subprocess if direct chmod fails
+            try:
+                file_path.chmod(0o644)
+            except PermissionError:
+                # Try using chmod command
+                subprocess.run(['chmod', '644', str(file_path)], check=False)
+        except PermissionError as e:
+            return jsonify({'error': f'Permission denied: {str(e)}. Directory may need write permissions.'}), 500
+        except OSError as e:
+            return jsonify({'error': f'File system error: {str(e)}'}), 500
         
         return jsonify({
             'success': True,
