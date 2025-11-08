@@ -143,10 +143,19 @@ def regenerate_nginx_config():
             filename_encoded = urllib.parse.quote(filename, safe='')
             # Also encode for standard format to handle special characters like hyphens
             filename_quoted = urllib.parse.quote(filename, safe='')
-            # Proxy to Flask app's download endpoint for reliable filename handling
-            location_blocks.append(f'''    # Serve {filename} as its filename via Flask download endpoint
+            # Use hash-based URL to prevent browser filename extraction from URL path
+            # Calculate hash for the filename
+            import hashlib
+            filehash = hashlib.md5(filename.encode()).hexdigest()[:8]
+            
+            location_blocks.append(f'''    # Serve {filename} as its filename via hash-based URL (prevents browser extraction)
     location = /{filename} {{
-        proxy_pass http://127.0.0.1:5000/download/{filename};
+        # Redirect to hash-based URL that doesn't expose filename in path
+        return 302 /d/{filehash};
+    }}
+    # Hash-based download endpoint for {filename}
+    location = /d/{filehash} {{
+        proxy_pass http://127.0.0.1:5000/d/{filehash};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -415,6 +424,7 @@ def download_bootstrap_script(filename):
         # Use Flask's send_file with as_attachment and download_name
         from flask import send_file, Response
         import urllib.parse
+        import hashlib
         
         download_name = filename if serve_as_filename else 'bootstrap.py'
         
@@ -424,10 +434,67 @@ def download_bootstrap_script(filename):
         
         # Create response with explicit Content-Disposition header
         # Use both standard format (with quotes) and RFC 5987 format for maximum compatibility
-        # For filenames with hyphens, browsers may extract from URL, so we need to be very explicit
+        # Browsers extract filename from URL path, so we need to be very explicit
         filename_encoded = urllib.parse.quote(download_name, safe='')
         # Use both formats: standard with quotes, and RFC 5987
         # Some browsers prefer the RFC 5987 format when there are special characters
+        content_disposition = f'attachment; filename="{download_name}"; filename*=UTF-8\'\'{filename_encoded}'
+        
+        response = Response(
+            content,
+            mimetype='text/plain; charset=utf-8',
+            headers={
+                'Content-Disposition': content_disposition,
+                'X-Content-Type-Options': 'nosniff',
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0',
+                'Content-Length': str(len(content))
+            }
+        )
+        return response
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/d/<filehash>')
+def download_by_hash(filehash):
+    """Download script by hash - URL doesn't expose filename to prevent browser extraction"""
+    try:
+        # Find the file by hash
+        script_dir = CONFIG_DIR
+        target_file = None
+        
+        # Calculate hash for each .py file and match
+        for file in script_dir.glob('*.py'):
+            if file.name.startswith('bootstrap_backup_'):
+                continue
+            file_hash = hashlib.md5(file.name.encode()).hexdigest()[:8]
+            if file_hash == filehash:
+                target_file = file
+                break
+        
+        if not target_file or not target_file.exists():
+            return jsonify({'error': 'File not found'}), 404
+        
+        filename = target_file.name
+        
+        # Check metadata to see if this should be served as its filename
+        metadata = load_scripts_metadata()
+        script_meta = metadata.get(filename, {})
+        serve_as_filename = script_meta.get('serve_as_filename', False)
+        
+        from flask import Response
+        import urllib.parse
+        
+        download_name = filename if serve_as_filename else 'bootstrap.py'
+        
+        # Read the file content
+        with open(target_file, 'rb') as f:
+            content = f.read()
+        
+        # Create response with explicit Content-Disposition header
+        # URL doesn't contain filename, so browser can't extract it
+        filename_encoded = urllib.parse.quote(download_name, safe='')
         content_disposition = f'attachment; filename="{download_name}"; filename*=UTF-8\'\'{filename_encoded}'
         
         response = Response(
