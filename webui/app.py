@@ -910,13 +910,32 @@ def get_logs():
                 logs = '\n'.join(log_parts)
                 # Only show help message if no logs were retrieved
                 if "Logs not available from within container" in logs:
-                    logs += '\nTo view logs from the host:\n'
-                    logs += '  sudo journalctl -u ztpbootstrap-pod.service -n 50\n'
-                    logs += '  sudo journalctl -u ztpbootstrap-nginx.service -n 50\n'
-                    logs += '  sudo journalctl -u ztpbootstrap-webui.service -n 50\n\n'
-                    logs += 'Or use podman logs:\n'
-                    logs += '  sudo podman logs ztpbootstrap-nginx --tail 50\n'
-                    logs += '  sudo podman logs ztpbootstrap-webui --tail 50\n'
+                    # Try to get hostname for better instructions
+                    import socket
+                    try:
+                        hostname = socket.gethostname()
+                    except:
+                        hostname = "the host server"
+                    
+                    logs = '\n' + '='*70 + '\n'
+                    logs += 'CONTAINER LOGS ARE NOT AVAILABLE FROM WITHIN THE CONTAINER\n'
+                    logs += '='*70 + '\n\n'
+                    logs += 'Container logs require host-level access to systemd journal and podman.\n'
+                    logs += 'To view container logs, you need to SSH to the host server where this\n'
+                    logs += 'service is running and execute the commands below.\n\n'
+                    logs += f'SSH to the host server (hostname: {hostname}):\n'
+                    logs += f'  ssh user@{hostname}\n\n'
+                    logs += 'Once connected, run one of these commands:\n\n'
+                    logs += 'Using journalctl (recommended):\n'
+                    logs += '  sudo journalctl -u ztpbootstrap-pod.service -n 50 -f\n'
+                    logs += '  sudo journalctl -u ztpbootstrap-nginx.service -n 50 -f\n'
+                    logs += '  sudo journalctl -u ztpbootstrap-webui.service -n 50 -f\n\n'
+                    logs += 'Or using podman logs:\n'
+                    logs += '  sudo podman logs ztpbootstrap-nginx --tail 50 -f\n'
+                    logs += '  sudo podman logs ztpbootstrap-webui --tail 50 -f\n\n'
+                    logs += 'Note: The -f flag follows the logs in real-time. Remove it to see\n'
+                    logs += '      only the last N lines without following.\n'
+                    logs += '='*70 + '\n'
             else:
                 logs = 'Container logs are not available from within the container.'
         
