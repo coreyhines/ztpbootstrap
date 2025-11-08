@@ -298,11 +298,11 @@
                     <pre class="text-sm text-green-400 font-mono whitespace-pre-wrap" x-text="viewingScript?.content || ''"></pre>
                 </div>
                 <div class="mt-4 flex justify-end space-x-2">
-                    <button @click="showScriptModal = false" class="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 text-sm font-medium">
+                    <button @click="showScriptModal = false" class="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 text-sm font-medium">
                         Close
                     </button>
                     <button x-show="viewingScript && !viewingScript.active" @click="setActiveScript(viewingScript.name); showScriptModal = false" 
-                            class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium">
+                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                         Set Active
                     </button>
                 </div>
