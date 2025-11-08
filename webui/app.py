@@ -79,6 +79,17 @@ def list_bootstrap_scripts():
             pass
     
     for file in script_dir.glob('bootstrap*.py'):
+        # Skip symlink loops (symlinks pointing to themselves)
+        try:
+            if file.is_symlink():
+                resolved = file.resolve()
+                if resolved == file:
+                    # Symlink loop detected, skip this file
+                    continue
+        except (OSError, RuntimeError):
+            # Error resolving symlink (loop or broken), skip this file
+            continue
+        
         # Only mark as active if this file's NAME matches the resolved target name
         # This ensures only the actual target file is marked active, not the symlink
         is_active = False
@@ -88,13 +99,17 @@ def list_bootstrap_scripts():
         else:
             is_active = file.name == active_script
         
-        scripts.append({
-            'name': file.name,
-            'path': str(file),
-            'size': file.stat().st_size,
-            'modified': file.stat().st_mtime,
-            'active': is_active
-        })
+        try:
+            scripts.append({
+                'name': file.name,
+                'path': str(file),
+                'size': file.stat().st_size,
+                'modified': file.stat().st_mtime,
+                'active': is_active
+            })
+        except OSError as e:
+            # Skip files that can't be stat'd (e.g., symlink loops)
+            continue
     
     return jsonify({'scripts': scripts, 'active': active_script})
 
