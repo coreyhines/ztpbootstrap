@@ -156,25 +156,29 @@ def set_active_script(filename):
         # Special case: if setting bootstrap.py as active, ensure it's a regular file
         if filename == 'bootstrap.py':
             target = BOOTSTRAP_SCRIPT
-            # If it's a symlink, remove it and copy the file content
+            # Resolve the source file path before potentially removing the symlink
+            source_file = script_path
+            if script_path.is_symlink():
+                try:
+                    # Get the actual target file that the symlink points to
+                    source_file = script_path.resolve()
+                except (OSError, RuntimeError):
+                    # If we can't resolve, use the original path
+                    source_file = script_path
+            
+            # If bootstrap.py is a symlink, remove it first
             if target.exists() and target.is_symlink():
                 try:
-                    # Check if symlink points to itself (loop)
-                    resolved = target.resolve()
-                    if resolved == target:
-                        # Symlink loop - remove it
-                        target.unlink()
-                    else:
-                        # Symlink points to another file - remove it
-                        target.unlink()
-                except (OSError, RuntimeError):
-                    # Error resolving, just remove the symlink
                     target.unlink()
+                except (OSError, RuntimeError):
+                    pass
             
-            # If bootstrap.py doesn't exist or was a symlink, copy the file
-            if not target.exists() or target.is_symlink():
-                import shutil
-                shutil.copy2(script_path, target)
+            # Copy the source file to bootstrap.py (or create it if it doesn't exist)
+            import shutil
+            if source_file.exists():
+                shutil.copy2(source_file, target)
+            else:
+                return jsonify({'error': f'Source file not found: {source_file}'}), 404
             
             return jsonify({
                 'success': True,
