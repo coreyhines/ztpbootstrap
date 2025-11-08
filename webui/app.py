@@ -72,6 +72,7 @@ def list_bootstrap_scripts():
     scripts = []
     script_dir = CONFIG_DIR
     active_script = None
+    metadata = load_scripts_metadata()
     
     # Check which script is currently active (bootstrap.py is the active one)
     active_path = BOOTSTRAP_SCRIPT
