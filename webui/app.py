@@ -827,6 +827,7 @@ def get_logs():
         else:  # container logs (default)
             # Try to get logs from systemd services
             services = ['ztpbootstrap-pod.service', 'ztpbootstrap-nginx.service', 'ztpbootstrap-webui.service']
+            log_parts = []
             
             for service in services:
                 try:
@@ -837,15 +838,15 @@ def get_logs():
                         timeout=2
                     )
                     if result.stdout.strip():
-                        logs.append(f"=== {service} ===")
-                        logs.append(result.stdout)
+                        log_parts.append(f"=== {service} ===")
+                        log_parts.append(result.stdout)
                 except:
                     pass
             
-            if not logs:
-                logs = ['No logs available. Services may not be running or journalctl is not accessible.']
+            if not log_parts:
+                logs = 'No logs available. Services may not be running or journalctl is not accessible.'
             else:
-                logs = '\n'.join(logs)
+                logs = '\n'.join(log_parts)
         
         if not logs:
             logs = 'No logs available'
