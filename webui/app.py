@@ -758,7 +758,7 @@ def parse_nginx_access_log():
 def get_logs():
     """Get recent logs from specified source"""
     try:
-        log_source = request.args.get('source', 'container')
+        log_source = request.args.get('source', 'nginx_access')
         lines = int(request.args.get('lines', 100))
         
         logs = []
