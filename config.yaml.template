@@ -132,4 +132,3 @@ service:
   
   # Restart policy
   restart_policy: "on-failure"
-
