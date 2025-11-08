@@ -34,24 +34,10 @@
 <body class="bg-gray-50">
     <div x-data="dashboard()" x-init="init()" x-cloak class="min-h-screen">
         <!-- Header -->
-        <header class="bg-white dark:bg-gray-800 shadow-sm transition-colors">
+        <header class="bg-white shadow-sm">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
-                <div class="flex items-center justify-between flex-wrap gap-2">
-                    <div>
-                        <h1 class="text-xl font-bold text-gray-900 dark:text-white">ZTP Bootstrap Service</h1>
-                        <p class="text-xs text-gray-500 dark:text-gray-400">Configuration and Monitoring Dashboard</p>
-                    </div>
-                    <div class="flex items-center space-x-2 flex-shrink-0">
-                        <label for="theme-select" class="text-xs font-medium text-gray-600 dark:text-gray-300 whitespace-nowrap">Theme:</label>
-                        <select id="theme-select" x-model="theme" @change="applyTheme()" class="px-3 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm">
-                            <option value="tomorrow">Tomorrow (Dark)</option>
-                            <option value="dracula">Dracula (Dark)</option>
-                            <option value="okaidia">Okaidia (Dark)</option>
-                            <option value="solarizedlight">Solarized Light</option>
-                            <option value="coy">Coy (Light)</option>
-                        </select>
-                    </div>
-                </div>
+                <h1 class="text-xl font-bold text-gray-900">ZTP Bootstrap Service</h1>
+                <p class="text-xs text-gray-500">Configuration and Monitoring Dashboard</p>
             </div>
         </header>
 
@@ -338,9 +324,20 @@
 
                 <!-- Configuration Tab -->
                 <div x-show="activeTab === 'config'" class="p-6">
-                    <div class="mb-4">
-                        <h2 class="text-lg font-semibold text-gray-900 mb-2">Configuration</h2>
-                        <p class="text-sm text-gray-600">View and manage service configuration</p>
+                    <div class="mb-4 flex items-center justify-between flex-wrap gap-4">
+                        <div>
+                            <h2 class="text-lg font-semibold text-gray-900 mb-2">Configuration</h2>
+                            <p class="text-sm text-gray-600">View and manage service configuration</p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <label for="theme-select" class="text-sm font-medium text-gray-700 whitespace-nowrap">Syntax Theme:</label>
+                            <select id="theme-select" x-model="theme" @change="applyTheme()" class="px-3 py-2 text-sm border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm">
+                                <option value="tomorrow">Tomorrow (Dark)</option>
+                                <option value="okaidia">Okaidia (Dark)</option>
+                                <option value="solarizedlight">Solarized Light</option>
+                                <option value="coy">Coy (Light)</option>
+                            </select>
+                        </div>
                     </div>
                     
                     <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
@@ -726,7 +723,6 @@
                     // Map theme names to Prism theme URLs
                     const themes = {
                         'tomorrow': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css',
-                        'dracula': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-dracula.min.css',
                         'okaidia': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-okaidia.min.css',
                         'solarizedlight': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-solarizedlight.min.css',
                         'coy': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-coy.min.css'
@@ -739,7 +735,7 @@
                     }
                     
                     // Apply dark/light mode to body
-                    const isDark = ['tomorrow', 'dracula', 'okaidia'].includes(this.theme);
+                    const isDark = ['tomorrow', 'okaidia'].includes(this.theme);
                     document.body.classList.toggle('theme-dark', isDark);
                     document.body.classList.toggle('theme-light', !isDark);
                     
