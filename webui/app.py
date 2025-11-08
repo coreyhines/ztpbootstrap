@@ -247,6 +247,46 @@ def set_active_script(filename):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/bootstrap-script/<filename>', methods=['DELETE'])
+def delete_bootstrap_script(filename):
+    """Delete a bootstrap script"""
+    try:
+        script_path = CONFIG_DIR / filename
+        if not script_path.exists() or not script_path.suffix == '.py':
+            return jsonify({'error': 'Script not found'}), 404
+        
+        # Prevent deleting bootstrap.py if it's the active script (not a symlink)
+        if filename == 'bootstrap.py':
+            target = BOOTSTRAP_SCRIPT
+            if target.exists() and not target.is_symlink():
+                return jsonify({'error': 'Cannot delete bootstrap.py when it is the active script. Set another script as active first.'}), 400
+        
+        # Check if this script is currently active
+        active_path = BOOTSTRAP_SCRIPT
+        if active_path.exists():
+            try:
+                if active_path.is_symlink():
+                    resolved = active_path.resolve()
+                    if resolved == script_path.resolve():
+                        return jsonify({'error': 'Cannot delete the active script. Set another script as active first.'}), 400
+                elif active_path.resolve() == script_path.resolve():
+                    return jsonify({'error': 'Cannot delete the active script. Set another script as active first.'}), 400
+            except (OSError, RuntimeError):
+                pass
+        
+        # Delete the file
+        try:
+            script_path.unlink()
+        except OSError as e:
+            return jsonify({'error': f'Failed to delete file: {str(e)}'}), 500
+        
+        return jsonify({
+            'success': True,
+            'message': f'Script {filename} deleted successfully'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/bootstrap-script/upload', methods=['POST'])
 def upload_bootstrap_script():
     """Upload a new bootstrap script"""
