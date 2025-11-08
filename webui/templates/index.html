@@ -735,7 +735,9 @@
                 
                 async markLogs() {
                     try {
-                        const response = await fetch('/api/logs/mark', {
+                        // Mark the currently selected log source (or both if container logs)
+                        const source = this.logSource === 'container' ? 'both' : this.logSource;
+                        const response = await fetch(`/api/logs/mark?source=${source}`, {
                             method: 'POST'
                         });
                         const data = await response.json();

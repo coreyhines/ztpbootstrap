@@ -851,32 +851,62 @@ def get_logs():
 
 @app.route('/api/logs/mark', methods=['POST'])
 def mark_logs():
-    """Insert a MARK line into the nginx access log"""
+    """Insert a MARK line into the nginx logs"""
     try:
         from datetime import datetime
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')
         mark_line = f'===== MARK: {timestamp} =====\n'
         
+        # Get which log source to mark (default to both)
+        log_source = request.args.get('source', 'both')
+        errors = []
+        
         # Write MARK to nginx access log
-        if NGINX_ACCESS_LOG.exists():
-            try:
-                with open(NGINX_ACCESS_LOG, 'a') as f:
-                    f.write(mark_line)
-            except Exception as e:
-                return jsonify({'error': f'Failed to write MARK to access log: {str(e)}'}), 500
-        else:
-            # Try to write via podman exec
-            try:
-                result = subprocess.run(
-                    ['podman', 'exec', 'ztpbootstrap-nginx', 'sh', '-c', f'echo "{mark_line.strip()}" >> /var/log/nginx/ztpbootstrap_access.log'],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if result.returncode != 0:
-                    return jsonify({'error': f'Failed to write MARK: {result.stderr}'}), 500
-            except Exception as e:
-                return jsonify({'error': f'Failed to write MARK: {str(e)}'}), 500
+        if log_source in ['both', 'nginx_access', 'access']:
+            if NGINX_ACCESS_LOG.exists():
+                try:
+                    with open(NGINX_ACCESS_LOG, 'a') as f:
+                        f.write(mark_line)
+                except Exception as e:
+                    errors.append(f'Failed to write MARK to access log: {str(e)}')
+            else:
+                # Try to write via podman exec
+                try:
+                    result = subprocess.run(
+                        ['podman', 'exec', 'ztpbootstrap-nginx', 'sh', '-c', f'echo "{mark_line.strip()}" >> /var/log/nginx/ztpbootstrap_access.log'],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if result.returncode != 0:
+                        errors.append(f'Failed to write MARK to access log: {result.stderr}')
+                except Exception as e:
+                    errors.append(f'Failed to write MARK to access log: {str(e)}')
+        
+        # Write MARK to nginx error log
+        if log_source in ['both', 'nginx_error', 'error']:
+            if NGINX_ERROR_LOG.exists():
+                try:
+                    with open(NGINX_ERROR_LOG, 'a') as f:
+                        f.write(mark_line)
+                except Exception as e:
+                    errors.append(f'Failed to write MARK to error log: {str(e)}')
+            else:
+                # Try to write via podman exec
+                try:
+                    result = subprocess.run(
+                        ['podman', 'exec', 'ztpbootstrap-nginx', 'sh', '-c', f'echo "{mark_line.strip()}" >> /var/log/nginx/ztpbootstrap_error.log'],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if result.returncode != 0:
+                        errors.append(f'Failed to write MARK to error log: {result.stderr}')
+                except Exception as e:
+                    errors.append(f'Failed to write MARK to error log: {str(e)}')
+        
+        if errors:
+            return jsonify({'error': '; '.join(errors)}), 500
         
         return jsonify({
             'success': True,
