@@ -319,6 +319,7 @@
                 async init() {
                     await this.loadStatus();
                     await this.loadScripts();
+                    await this.loadBackups();
                     await this.loadConfig();
                     await this.loadLogs();
                     
