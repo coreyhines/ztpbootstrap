@@ -81,23 +81,33 @@ def get_bootstrap_script(filename):
 def get_status():
     """Get service status"""
     try:
-        # Check if container is running
-        result = subprocess.run(
-            ['podman', 'ps', '--filter', 'name=ztpbootstrap', '--format', '{{.Names}}'],
-            capture_output=True,
-            text=True
-        )
-        container_running = 'ztpbootstrap' in result.stdout
+        # Check if pod service is running via systemd
+        container_running = False
+        try:
+            result = subprocess.run(
+                ['systemctl', 'is-active', '--quiet', 'ztpbootstrap-pod.service'],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            container_running = result.returncode == 0
+        except:
+            # Fallback: check if we can reach nginx
+            try:
+                import urllib.request
+                urllib.request.urlopen('http://127.0.0.1/health', timeout=1)
+                container_running = True
+            except:
+                pass
         
         # Check health endpoint
         health_ok = False
-        if container_running:
-            try:
-                import urllib.request
-                response = urllib.request.urlopen('http://localhost/health', timeout=2)
-                health_ok = response.status == 200
-            except:
-                pass
+        try:
+            import urllib.request
+            response = urllib.request.urlopen('http://127.0.0.1/health', timeout=2)
+            health_ok = response.status == 200 and response.read().decode().strip() == 'healthy'
+        except:
+            pass
         
         return jsonify({
             'container_running': container_running,
@@ -112,12 +122,28 @@ def get_status():
 def get_logs():
     """Get recent logs"""
     try:
-        result = subprocess.run(
-            ['journalctl', '-u', 'ztpbootstrap', '-n', '50', '--no-pager'],
-            capture_output=True,
-            text=True
-        )
-        return jsonify({'logs': result.stdout})
+        # Try to get logs from systemd services
+        logs = []
+        services = ['ztpbootstrap-pod.service', 'ztpbootstrap-nginx.service', 'ztpbootstrap-webui.service']
+        
+        for service in services:
+            try:
+                result = subprocess.run(
+                    ['journalctl', '-u', service, '-n', '20', '--no-pager', '--no-hostname'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                if result.stdout.strip():
+                    logs.append(f"=== {service} ===")
+                    logs.append(result.stdout)
+            except:
+                pass
+        
+        if not logs:
+            logs = ['No logs available. Services may not be running or journalctl is not accessible.']
+        
+        return jsonify({'logs': '\n'.join(logs)})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

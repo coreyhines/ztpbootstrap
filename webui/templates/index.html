@@ -24,56 +24,75 @@
         <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             <!-- Status Cards -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <!-- Container Status -->
-                <div class="bg-white rounded-lg shadow p-6">
+                <!-- Service Status -->
+                <div class="bg-white rounded-lg shadow-md p-6 border-l-4" 
+                     :class="status.container_running ? 'border-green-500' : 'border-red-500'">
                     <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-sm font-medium text-gray-600">Container Status</p>
-                            <p class="text-2xl font-bold" :class="status.container_running ? 'text-green-600' : 'text-red-600'">
+                        <div class="flex-1">
+                            <p class="text-sm font-medium text-gray-600 mb-1">Service Status</p>
+                            <p class="text-3xl font-bold" :class="status.container_running ? 'text-green-600' : 'text-red-600'">
                                 <span x-text="status.container_running ? 'Running' : 'Stopped'"></span>
                             </p>
+                            <p class="text-xs text-gray-500 mt-1">Pod & Containers</p>
                         </div>
-                        <div class="w-12 h-12 rounded-full flex items-center justify-center" 
+                        <div class="w-16 h-16 rounded-full flex items-center justify-center shadow-sm" 
                              :class="status.container_running ? 'bg-green-100' : 'bg-red-100'">
-                            <span x-text="status.container_running ? '✓' : '✗'" 
-                                  :class="status.container_running ? 'text-green-600' : 'text-red-600'"
-                                  class="text-2xl"></span>
+                            <svg x-show="status.container_running" class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            <svg x-show="!status.container_running" class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
                         </div>
                     </div>
                 </div>
 
                 <!-- Health Status -->
-                <div class="bg-white rounded-lg shadow p-6">
+                <div class="bg-white rounded-lg shadow-md p-6 border-l-4" 
+                     :class="status.health_ok ? 'border-green-500' : (status.container_running ? 'border-yellow-500' : 'border-gray-300')">
                     <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-sm font-medium text-gray-600">Health Check</p>
-                            <p class="text-2xl font-bold" :class="status.health_ok ? 'text-green-600' : 'text-yellow-600'">
-                                <span x-text="status.health_ok ? 'Healthy' : 'Unknown'"></span>
+                        <div class="flex-1">
+                            <p class="text-sm font-medium text-gray-600 mb-1">Health Check</p>
+                            <p class="text-3xl font-bold" 
+                               :class="status.health_ok ? 'text-green-600' : (status.container_running ? 'text-yellow-600' : 'text-gray-500')">
+                                <span x-text="status.health_ok ? 'Healthy' : (status.container_running ? 'Checking...' : 'Unknown')"></span>
                             </p>
+                            <p class="text-xs text-gray-500 mt-1">Nginx Endpoint</p>
                         </div>
-                        <div class="w-12 h-12 rounded-full flex items-center justify-center" 
-                             :class="status.health_ok ? 'bg-green-100' : 'bg-yellow-100'">
-                            <span x-text="status.health_ok ? '✓' : '?'" 
-                                  :class="status.health_ok ? 'text-green-600' : 'text-yellow-600'"
-                                  class="text-2xl"></span>
+                        <div class="w-16 h-16 rounded-full flex items-center justify-center shadow-sm" 
+                             :class="status.health_ok ? 'bg-green-100' : (status.container_running ? 'bg-yellow-100' : 'bg-gray-100')">
+                            <svg x-show="status.health_ok" class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            <svg x-show="!status.health_ok && status.container_running" class="w-8 h-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <svg x-show="!status.health_ok && !status.container_running" class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
                         </div>
                     </div>
                 </div>
 
                 <!-- Configuration -->
-                <div class="bg-white rounded-lg shadow p-6">
+                <div class="bg-white rounded-lg shadow-md p-6 border-l-4" 
+                     :class="status.config_exists ? 'border-green-500' : 'border-gray-300'">
                     <div class="flex items-center justify-between">
-                        <div>
-                            <p class="text-sm font-medium text-gray-600">Configuration</p>
-                            <p class="text-2xl font-bold" :class="status.config_exists ? 'text-green-600' : 'text-gray-600'">
+                        <div class="flex-1">
+                            <p class="text-sm font-medium text-gray-600 mb-1">Configuration</p>
+                            <p class="text-3xl font-bold" :class="status.config_exists ? 'text-green-600' : 'text-gray-500'">
                                 <span x-text="status.config_exists ? 'Loaded' : 'Missing'"></span>
                             </p>
+                            <p class="text-xs text-gray-500 mt-1">config.yaml</p>
                         </div>
-                        <div class="w-12 h-12 rounded-full flex items-center justify-center" 
+                        <div class="w-16 h-16 rounded-full flex items-center justify-center shadow-sm" 
                              :class="status.config_exists ? 'bg-green-100' : 'bg-gray-100'">
-                            <span x-text="status.config_exists ? '✓' : '✗'" 
-                                  :class="status.config_exists ? 'text-green-600' : 'text-gray-600'"
-                                  class="text-2xl"></span>
+                            <svg x-show="status.config_exists" class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            <svg x-show="!status.config_exists" class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
                         </div>
                     </div>
                 </div>
@@ -108,24 +127,35 @@
                         <p class="text-sm text-gray-600">Manage bootstrap scripts for device enrollment</p>
                     </div>
                     
-                    <div class="space-y-4">
+                    <div class="space-y-3">
                         <template x-for="script in scripts" :key="script.name">
-                            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50">
+                            <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 hover:shadow-sm transition-shadow">
                                 <div class="flex items-center justify-between">
-                                    <div>
-                                        <h3 class="font-medium text-gray-900" x-text="script.name"></h3>
-                                        <p class="text-sm text-gray-600" x-text="formatSize(script.size) + ' • ' + formatDate(script.modified)"></p>
+                                    <div class="flex items-center space-x-3">
+                                        <div class="flex-shrink-0">
+                                            <svg class="w-8 h-8 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
+                                            </svg>
+                                        </div>
+                                        <div>
+                                            <h3 class="font-semibold text-gray-900" x-text="script.name"></h3>
+                                            <p class="text-sm text-gray-500" x-text="formatSize(script.size) + ' • Modified ' + formatDate(script.modified)"></p>
+                                        </div>
                                     </div>
                                     <button @click="viewScript(script.name)" 
-                                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm">
+                                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium transition-colors">
                                         View
                                     </button>
                                 </div>
                             </div>
                         </template>
                         
-                        <div x-show="scripts.length === 0" class="text-center py-8 text-gray-500">
-                            No bootstrap scripts found
+                        <div x-show="scripts.length === 0" class="text-center py-12">
+                            <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            <h3 class="mt-2 text-sm font-medium text-gray-900">No bootstrap scripts</h3>
+                            <p class="mt-1 text-sm text-gray-500">Get started by adding a bootstrap script to the service directory.</p>
                         </div>
                     </div>
                 </div>
