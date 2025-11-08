@@ -182,6 +182,34 @@ setup_ssl_certificates() {
     fi
 }
 
+# Create logs directory with proper permissions and SELinux context
+setup_logs_directory() {
+    log "Setting up logs directory..."
+    
+    # Create logs directory for nginx logs
+    mkdir -p "${SCRIPT_DIR}/logs" || {
+        warn "Failed to create logs directory: ${SCRIPT_DIR}/logs"
+        return 1
+    }
+    
+    # Set permissions for nginx to write logs (nginx runs as UID 101 in alpine image)
+    chmod 777 "${SCRIPT_DIR}/logs" 2>/dev/null || true
+    
+    # Try to set ownership to nginx user (UID 101) if possible
+    if command -v chown >/dev/null 2>&1; then
+        chown 101:101 "${SCRIPT_DIR}/logs" 2>/dev/null || chmod 777 "${SCRIPT_DIR}/logs" 2>/dev/null || true
+    fi
+    
+    # Set SELinux context for logs directory (if SELinux is enabled)
+    if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
+        chcon -R -t container_file_t "${SCRIPT_DIR}/logs" 2>/dev/null || true
+        log "Set SELinux context for logs directory"
+    fi
+    
+    log "Created logs directory: ${SCRIPT_DIR}/logs"
+    return 0
+}
+
 # Create a simple self-signed certificate for testing
 create_self_signed_cert() {
     log "Creating self-signed certificate for testing..."
@@ -190,17 +218,6 @@ create_self_signed_cert() {
     local key_file="${CERT_DIR}/privkey.pem"
     
     # Create certificate directory if it doesn't exist
-    # Create logs directory for nginx logs
-    mkdir -p "${SCRIPT_DIR}/logs" || {
-        warn "Failed to create logs directory: ${SCRIPT_DIR}/logs"
-    }
-    # Set permissions for nginx to write logs (nginx runs as UID 101 in alpine image)
-    chmod 777 "${SCRIPT_DIR}/logs" 2>/dev/null || true
-    # Try to set ownership to nginx user (UID 101) if possible
-    if command -v chown >/dev/null 2>&1; then
-        chown 101:101 "${SCRIPT_DIR}/logs" 2>/dev/null || chmod 777 "${SCRIPT_DIR}/logs" 2>/dev/null || true
-    fi
-    log "Created logs directory: ${SCRIPT_DIR}/logs"
     mkdir -p "$CERT_DIR"
     
     # Generate self-signed certificate
@@ -549,21 +566,27 @@ setup_pod() {
             fi
         fi
         
-        # Copy webui directory to script directory
-        local webui_dest="${SCRIPT_DIR}/webui"
-        if [[ ! -d "$webui_dest" ]]; then
-            mkdir -p "$webui_dest" || {
-                warn "Failed to create webui directory: $webui_dest"
-                return 1
-            }
-        fi
-        if cp -r "${repo_dir}/webui"/* "$webui_dest/" 2>/dev/null; then
-            log "Web UI directory copied to: $webui_dest"
-        else
-            warn "Failed to copy webui directory, Web UI may not work"
-            warn "Source: ${repo_dir}/webui"
-            warn "Destination: $webui_dest"
-        fi
+    # Copy webui directory to script directory
+    local webui_dest="${SCRIPT_DIR}/webui"
+    if [[ ! -d "$webui_dest" ]]; then
+        mkdir -p "$webui_dest" || {
+            warn "Failed to create webui directory: $webui_dest"
+            return 1
+        }
+    fi
+    if cp -r "${repo_dir}/webui"/* "$webui_dest/" 2>/dev/null; then
+        log "Web UI directory copied to: $webui_dest"
+    else
+        warn "Failed to copy webui directory, Web UI may not work"
+        warn "Source: ${repo_dir}/webui"
+        warn "Destination: $webui_dest"
+    fi
+    
+    # Ensure systemd recognizes the webui container file
+    # This is important because systemd-quadlet needs to generate the service
+    if [[ -f "${systemd_dir}/ztpbootstrap-webui.container" ]]; then
+        log "Web UI container file installed: ${systemd_dir}/ztpbootstrap-webui.container"
+    fi
     else
         warn "Web UI directory not found, Web UI container will not be included"
         warn "Service will run without Web UI"
@@ -584,11 +607,38 @@ start_service() {
     log "Reloading systemd daemon..."
     systemctl daemon-reload
     
+    # Wait a moment for systemd to fully process the new services
+    sleep 1
+    
     log "Starting ztpbootstrap pod..."
     if systemctl start ztpbootstrap-pod; then
         log "Pod started successfully"
+        # Wait a moment for pod to be ready
+        sleep 2
     else
         error "Failed to start pod. Check logs with: journalctl -u ztpbootstrap-pod -f"
+        return 1
+    fi
+    
+    # Start nginx container
+    log "Starting nginx container..."
+    if systemctl start ztpbootstrap-nginx; then
+        log "Nginx container started successfully"
+        sleep 2
+    else
+        warn "Failed to start nginx container. Check logs with: journalctl -u ztpbootstrap-nginx -f"
+    fi
+    
+    # Start webui container if it exists
+    if systemctl list-unit-files | grep -q ztpbootstrap-webui.service; then
+        log "Starting webui container..."
+        if systemctl start ztpbootstrap-webui; then
+            log "Webui container started successfully"
+        else
+            warn "Failed to start webui container. Check logs with: journalctl -u ztpbootstrap-webui -f"
+        fi
+    else
+        log "Webui container service not found (this is OK if webui directory doesn't exist)"
     fi
 }
 
@@ -633,6 +683,11 @@ main() {
     check_env_file
     load_env
     generate_bootstrap_script
+    
+    # Always set up logs directory (required for nginx container)
+    if ! setup_logs_directory; then
+        warn "Failed to set up logs directory - nginx container may fail to start"
+    fi
     
     if [[ "$HTTP_ONLY" == "true" ]]; then
         configure_http_only

@@ -398,6 +398,30 @@ runcmd:
     # Install required packages
     dnf install -y git podman curl yq
   - |
+    # Set up SSH authorized_keys from host if available
+    # This allows passwordless SSH access from the host machine
+    # Cloud-init mounts the ISO at /dev/sr0 or /dev/cdrom, we need to find it
+    for mount_point in /mnt /media/cdrom /media/cdrom0 /run/media/*/cidata; do
+      if [ -f "$mount_point/host_ssh_key.pub" ]; then
+        mkdir -p /home/fedora/.ssh
+        cat "$mount_point/host_ssh_key.pub" >> /home/fedora/.ssh/authorized_keys
+        chmod 700 /home/fedora/.ssh
+        chmod 600 /home/fedora/.ssh/authorized_keys
+        chown -R fedora:fedora /home/fedora/.ssh
+        echo "SSH key from host added to authorized_keys"
+        break
+      fi
+    done
+    # Also check if cloud-init copied it to /tmp (fallback)
+    if [ -f /tmp/host_ssh_key.pub ]; then
+      mkdir -p /home/fedora/.ssh
+      cat /tmp/host_ssh_key.pub >> /home/fedora/.ssh/authorized_keys
+      chmod 700 /home/fedora/.ssh
+      chmod 600 /home/fedora/.ssh/authorized_keys
+      chown -R fedora:fedora /home/fedora/.ssh
+      echo "SSH key from host added to authorized_keys (from /tmp)"
+    fi
+  - |
     # Clone the repository
     if [ ! -d /home/fedora/ztpbootstrap ]; then
       sudo -u fedora git clone https://github.com/coreyhines/ztpbootstrap.git /home/fedora/ztpbootstrap || \
@@ -453,6 +477,22 @@ runcmd:
     fi
 CLOUDINITEOF
         
+        # Copy host SSH public key to cloud-init directory if available
+        # This allows passwordless SSH access from the host machine
+        local host_ssh_key=""
+        if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then
+            host_ssh_key="$HOME/.ssh/id_ed25519.pub"
+        elif [[ -f "$HOME/.ssh/id_rsa.pub" ]]; then
+            host_ssh_key="$HOME/.ssh/id_rsa.pub"
+        fi
+        
+        if [[ -n "$host_ssh_key" ]] && [[ -f "$host_ssh_key" ]]; then
+            cp "$host_ssh_key" "$cloud_init_dir/host_ssh_key.pub" 2>/dev/null || true
+            log_info "Including host SSH key in cloud-init: $host_ssh_key"
+        else
+            log_info "No SSH public key found in ~/.ssh/ - password authentication will be required"
+        fi
+        
         # Create meta-data
         echo "instance-id: ${VM_NAME}-$(date +%s)" > "$cloud_init_dir/meta-data"
         echo "local-hostname: ${VM_NAME}" >> "$cloud_init_dir/meta-data"
@@ -469,10 +509,16 @@ CLOUDINITEOF
         
         # Create cloud-init ISO
         cloud_init_iso="/tmp/cloud-init-${VM_NAME}.iso"
+        # Include SSH key file if it exists
+        local iso_files=("$cloud_init_dir/user-data" "$cloud_init_dir/meta-data")
+        if [[ -f "$cloud_init_dir/host_ssh_key.pub" ]]; then
+            iso_files+=("$cloud_init_dir/host_ssh_key.pub")
+        fi
+        
         if command -v mkisofs &> /dev/null; then
-            mkisofs -output "$cloud_init_iso" -volid cidata -joliet -rock "$cloud_init_dir/user-data" "$cloud_init_dir/meta-data" 2>/dev/null
+            mkisofs -output "$cloud_init_iso" -volid cidata -joliet -rock "${iso_files[@]}" 2>/dev/null
         elif command -v genisoimage &> /dev/null; then
-            genisoimage -output "$cloud_init_iso" -volid cidata -joliet -rock "$cloud_init_dir/user-data" "$cloud_init_dir/meta-data" 2>/dev/null
+            genisoimage -output "$cloud_init_iso" -volid cidata -joliet -rock "${iso_files[@]}" 2>/dev/null
         elif command -v hdiutil &> /dev/null; then
             # macOS fallback - create ISO using hdiutil
             log_warn "mkisofs/genisoimage not found, trying hdiutil..."
