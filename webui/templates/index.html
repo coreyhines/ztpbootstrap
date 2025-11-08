@@ -672,7 +672,8 @@
                             this.logsNginx = nginxMatch ? nginxMatch[1].trim() : 'No nginx logs available';
                             this.logsWebUI = webuiMatch ? webuiMatch[1].trim() : 'No webui logs available';
                         } else {
-                            this.logs = data.logs || 'No logs available';
+                            // Ensure logs is a string
+                            this.logs = typeof data.logs === 'string' ? data.logs : (data.logs || 'No logs available');
                             // Auto-scroll to bottom
                             this.$nextTick(() => {
                                 if (this.$refs.logsContainer) {
@@ -726,8 +727,17 @@
                 
                 formatLogsWithMarks(logText) {
                     if (!logText) return '';
+                    // Ensure logText is a string, not an array
+                    if (Array.isArray(logText)) {
+                        logText = logText.join('');
+                    }
+                    // Escape HTML first, then highlight MARK lines
+                    const escaped = String(logText)
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;');
                     // Highlight MARK lines with a distinct style
-                    return logText.replace(
+                    return escaped.replace(
                         /(===== MARK: .*? =====)/g,
                         '<span class="bg-yellow-600 text-yellow-100 font-bold px-1 rounded">$1</span>'
                     );
