@@ -127,53 +127,58 @@
                             <h2 class="text-lg font-semibold text-gray-900 mb-2">Bootstrap Scripts</h2>
                             <p class="text-sm text-gray-600">Manage bootstrap scripts for device enrollment</p>
                         </div>
-                        <div class="flex items-center space-x-2">
-                            <button @click="showRestoreDialog = !showRestoreDialog" 
-                                    class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium transition-colors">
-                                Restore Backup
-                            </button>
-                            <label class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium transition-colors cursor-pointer">
-                                <input type="file" @change="uploadScript($event)" accept=".py" class="hidden">
-                                Upload Script
-                            </label>
-                        </div>
+                        <label class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium transition-colors cursor-pointer">
+                            <input type="file" @change="uploadScript($event)" accept=".py" class="hidden">
+                            Upload Script
+                        </label>
                     </div>
                     
-                    <!-- Restore Backup Dialog -->
-                    <div x-show="showRestoreDialog" 
+                    <!-- Upload/Restore Workflow -->
+                    <div x-show="showUploadWorkflow" 
                          x-cloak
-                         class="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-                        <div class="flex items-center justify-between mb-3">
-                            <h3 class="text-md font-semibold text-gray-900">Restore from Backup</h3>
-                            <button @click="showRestoreDialog = false" class="text-gray-500 hover:text-gray-700">
+                         class="mb-6 bg-gray-50 border border-gray-200 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-md font-semibold text-gray-900">Upload or Restore Script</h3>
+                            <button @click="showUploadWorkflow = false; selectedBackup = null" class="text-gray-500 hover:text-gray-700">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                                 </svg>
                             </button>
                         </div>
-                        <div x-show="backups.length === 0" class="text-sm text-gray-600 py-2">
-                            No backup files available
-                        </div>
-                        <div x-show="backups.length > 0" class="space-y-2">
-                            <template x-for="backup in backups" :key="backup.name">
-                                <div class="flex items-center justify-between bg-white rounded border border-gray-200 p-3 hover:bg-gray-50">
-                                    <div class="flex-1">
-                                        <div class="font-medium text-gray-900" x-text="backup.name"></div>
-                                        <div class="text-sm text-gray-500" x-text="'Backed up: ' + backup.human_date"></div>
-                                        <div class="text-xs text-gray-400" x-text="formatSize(backup.size)"></div>
-                                    </div>
-                                    <div class="flex items-center space-x-2">
-                                        <button @click="restoreBackup(backup.name, 'new')" 
-                                                class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors">
-                                            Restore as New
-                                        </button>
-                                        <button @click="restoreBackup(backup.name, 'active')" 
-                                                class="px-3 py-1.5 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors">
-                                            Restore as Active
-                                        </button>
-                                    </div>
+                        
+                        <!-- Restore from Backup Section -->
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Restore from Backup</label>
+                            <div x-show="backups.length === 0" class="text-sm text-gray-500 py-2">
+                                No backup files available
+                            </div>
+                            <div x-show="backups.length > 0" class="space-y-3">
+                                <select x-model="selectedBackup" 
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="">Select a backup to restore...</option>
+                                    <template x-for="backup in backups" :key="backup.name">
+                                        <option :value="backup.name" x-text="backup.human_date + ' (' + formatSize(backup.size) + ')'"></option>
+                                    </template>
+                                </select>
+                                <div x-show="selectedBackup" class="flex items-center space-x-2">
+                                    <button @click="restoreBackup(selectedBackup, 'new')" 
+                                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium transition-colors">
+                                        Restore as New Script
+                                    </button>
+                                    <button @click="restoreBackup(selectedBackup, 'active')" 
+                                            class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium transition-colors">
+                                        Restore as Active (bootstrap.py)
+                                    </button>
                                 </div>
-                            </template>
+                            </div>
+                        </div>
+                        
+                        <div class="border-t border-gray-300 pt-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Or Upload New Script</label>
+                            <label class="inline-block px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium transition-colors cursor-pointer">
+                                <input type="file" @change="uploadScript($event)" accept=".py" class="hidden">
+                                Choose File to Upload
+                            </label>
                         </div>
                     </div>
                     
@@ -313,7 +318,8 @@
                 config: {},
                 logs: 'Loading...',
                 showScriptModal: false,
-                showRestoreDialog: false,
+                showUploadWorkflow: false,
+                selectedBackup: null,
                 viewingScript: null,
                 
                 async init() {
@@ -457,6 +463,11 @@
                 },
                 
                 async restoreBackup(filename, restoreAs) {
+                    if (!filename) {
+                        alert('Please select a backup to restore');
+                        return;
+                    }
+                    
                     const action = restoreAs === 'active' ? 'restore as active (bootstrap.py)' : 'restore as a new script';
                     if (!confirm(`Are you sure you want to restore ${filename} and ${action}?`)) {
                         return;
@@ -476,7 +487,8 @@
                         if (data.success) {
                             await this.loadScripts();
                             await this.loadBackups();
-                            this.showRestoreDialog = false;
+                            this.showUploadWorkflow = false;
+                            this.selectedBackup = null;
                         } else {
                             alert('Failed to restore backup: ' + (data.error || 'Unknown error'));
                         }
