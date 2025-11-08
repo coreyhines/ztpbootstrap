@@ -127,7 +127,6 @@ def regenerate_nginx_config():
         for filename in sorted(scripts_as_filename):
             location_blocks.append(f'''    # Serve {filename} as its filename
     location = /{filename} {{
-        types {{}};
         default_type text/plain;
         add_header Content-Type "text/plain; charset=utf-8" always;
         add_header Content-Disposition "attachment; filename*=UTF-8''{filename}" always;
