@@ -148,7 +148,7 @@
                                             <div class="flex items-center space-x-2">
                                                 <h3 class="font-semibold text-gray-900" x-text="script.name"></h3>
                                                 <span x-show="script.active" class="px-2 py-0.5 bg-green-100 text-green-800 text-xs font-medium rounded">Active</span>
-                                                <span x-show="script.serve_as_filename" class="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs font-medium rounded">Served as filename</span>
+                                                <span x-show="script.serve_as_filename && !script.active" class="px-2 py-0.5 bg-blue-100 text-blue-800 text-xs font-medium rounded">Served as filename</span>
                                             </div>
                                             <p class="text-sm text-gray-500" x-text="formatSize(script.size) + ' • Modified ' + formatDate(script.modified)"></p>
                                             <p class="text-xs text-gray-400 mt-1" x-text="script.serve_as_filename ? 'Device downloads as: ' + script.name : 'Device downloads as: bootstrap.py'"></p>
@@ -163,16 +163,18 @@
                                                 class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium transition-colors">
                                             Set Active
                                         </button>
-                                        <button @click="toggleServeAsFilename(script.name, !script.serve_as_filename)" 
-                                                class="px-3 py-2 text-sm font-medium transition-colors rounded-md"
-                                                :class="script.serve_as_filename ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'"
-                                                :title="script.serve_as_filename ? 'Currently served as ' + script.name + '. Click to serve as bootstrap.py' : 'Currently served as bootstrap.py. Click to serve as ' + script.name">
-                                            <span x-text="script.serve_as_filename ? 'As filename' : 'As bootstrap.py'"></span>
-                                        </button>
                                         <button x-show="!script.active" 
                                                 @click="deleteScript(script.name)" 
                                                 class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 text-sm font-medium transition-colors">
                                             Delete
+                                        </button>
+                                        <button @click="toggleServeAsFilename(script.name, !script.serve_as_filename)" 
+                                                class="px-2 py-1 text-xs font-normal transition-colors rounded border"
+                                                :class="script.serve_as_filename ? 'bg-blue-50 text-blue-600 border-blue-300 hover:bg-blue-100' : 'bg-gray-50 text-gray-500 border-gray-300 hover:bg-gray-100'"
+                                                :title="script.serve_as_filename ? 'Currently served as ' + script.name + '. Click to serve as bootstrap.py' : 'Currently served as bootstrap.py. Click to serve as ' + script.name">
+                                            <svg class="w-4 h-4 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="script.serve_as_filename ? 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' : 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4'"></path>
+                                            </svg>
                                         </button>
                                     </div>
                                 </div>
