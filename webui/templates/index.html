@@ -335,10 +335,10 @@
                                 <option value="tomorrow">Tomorrow (Dark)</option>
                                 <option value="okaidia">Okaidia (Dark)</option>
                                 <option value="twilight">Twilight (Dark)</option>
-                                <option value="atom-dark">Atom Dark</option>
+                                <option value="dark">Dark (Dark)</option>
                                 <option value="solarizedlight">Solarized Light</option>
                                 <option value="coy">Coy (Light)</option>
-                                <option value="ghcolors">GitHub (Light)</option>
+                                <option value="funky">Funky (Light)</option>
                                 <option value="prism">Prism (Light)</option>
                             </select>
                         </div>
@@ -729,10 +729,10 @@
                         'tomorrow': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css',
                         'okaidia': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-okaidia.min.css',
                         'twilight': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-twilight.min.css',
-                        'atom-dark': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-atom-dark.min.css',
+                        'dark': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-dark.min.css',
                         'solarizedlight': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-solarizedlight.min.css',
                         'coy': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-coy.min.css',
-                        'ghcolors': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-ghcolors.min.css',
+                        'funky': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-funky.min.css',
                         'prism': 'https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css'
                     };
                     
@@ -743,7 +743,7 @@
                     }
                     
                     // Apply dark/light mode to body
-                    const isDark = ['tomorrow', 'okaidia', 'twilight', 'atom-dark'].includes(this.theme);
+                    const isDark = ['tomorrow', 'okaidia', 'twilight', 'dark'].includes(this.theme);
                     document.body.classList.toggle('theme-dark', isDark);
                     document.body.classList.toggle('theme-light', !isDark);
                     
