@@ -10,6 +10,7 @@ Volume=/opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw
 Volume=/opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw
 Volume=/run/systemd/journal:/run/systemd/journal:ro
 Volume=/run/log/journal:/run/log/journal:ro
+Volume=/run/podman:/run/podman:ro
 Environment=TZ=UTC
 Environment=ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap
 Environment=FLASK_APP=app.py

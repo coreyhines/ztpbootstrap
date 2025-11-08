@@ -855,9 +855,8 @@ def get_logs():
         
         # Handle container logs (default) - only if not nginx_access or nginx_error
         if log_source not in ['nginx_access', 'nginx_error']:
-            # Try to get container logs using podman logs
-            # Since we're in a container, we can't use podman directly, but we can try
-            # to read from the host's podman socket or use alternative methods
+            # Try to get container logs using multiple methods
+            # Works with both host networking and macvlan approaches
             log_parts = []
             containers = {
                 'ztpbootstrap-pod.service': 'ztpbootstrap-pod-infra',
@@ -866,22 +865,58 @@ def get_logs():
             }
             
             for service, container_name in containers.items():
-                # Try podman logs (requires podman socket access, which we don't have)
-                # Fallback: provide helpful message
                 log_parts.append(f"=== {service} ===")
-                log_parts.append(f"Container: {container_name}")
-                log_parts.append("Logs not available from within container.")
+                container_logs = None
+                
+                # Method 1: Try podman logs (works if podman socket is accessible)
+                try:
+                    result = subprocess.run(
+                        ['podman', 'logs', '--tail', str(lines // len(containers)), container_name],
+                        capture_output=True,
+                        text=True,
+                        timeout=3
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        container_logs = result.stdout.strip()
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    pass
+                except Exception:
+                    pass
+                
+                # Method 2: Try journalctl (works if journal is accessible)
+                if not container_logs:
+                    try:
+                        journal_result = subprocess.run(
+                            ['journalctl', '-u', service, '-n', str(lines // len(containers)), '--no-pager', '--no-hostname'],
+                            capture_output=True,
+                            text=True,
+                            timeout=3
+                        )
+                        if journal_result.returncode == 0 and journal_result.stdout.strip():
+                            container_logs = journal_result.stdout.strip()
+                    except (FileNotFoundError, subprocess.TimeoutExpired):
+                        pass
+                    except Exception:
+                        pass
+                
+                if container_logs:
+                    log_parts.append(container_logs)
+                else:
+                    log_parts.append(f"Container: {container_name}")
+                    log_parts.append("Logs not available from within container.")
                 log_parts.append("")
             
             if log_parts:
                 logs = '\n'.join(log_parts)
-                logs += '\n\nTo view logs from the host:\n'
-                logs += '  sudo journalctl -u ztpbootstrap-pod.service -n 50\n'
-                logs += '  sudo journalctl -u ztpbootstrap-nginx.service -n 50\n'
-                logs += '  sudo journalctl -u ztpbootstrap-webui.service -n 50\n\n'
-                logs += 'Or use podman logs:\n'
-                logs += '  sudo podman logs ztpbootstrap-nginx --tail 50\n'
-                logs += '  sudo podman logs ztpbootstrap-webui --tail 50\n'
+                # Only show help message if no logs were retrieved
+                if "Logs not available from within container" in logs:
+                    logs += '\nTo view logs from the host:\n'
+                    logs += '  sudo journalctl -u ztpbootstrap-pod.service -n 50\n'
+                    logs += '  sudo journalctl -u ztpbootstrap-nginx.service -n 50\n'
+                    logs += '  sudo journalctl -u ztpbootstrap-webui.service -n 50\n\n'
+                    logs += 'Or use podman logs:\n'
+                    logs += '  sudo podman logs ztpbootstrap-nginx --tail 50\n'
+                    logs += '  sudo podman logs ztpbootstrap-webui --tail 50\n'
             else:
                 logs = 'Container logs are not available from within the container.'
         
