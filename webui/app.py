@@ -122,11 +122,11 @@ def regenerate_nginx_config():
         with open(NGINX_CONF, 'w') as f:
             f.write(new_config)
         
-        # Try to reload nginx
-        # Since we're in a pod, try to reload via podman exec or systemctl
+        # Try to reload/restart nginx to pick up config changes
+        # Since we're in a pod, try to reload via podman exec or restart the container
         reloaded = False
         try:
-            # Try podman exec to reload nginx in the nginx container
+            # First try to reload nginx (less disruptive)
             result = subprocess.run(
                 ['podman', 'exec', 'ztpbootstrap-nginx', 'nginx', '-s', 'reload'],
                 capture_output=True,
@@ -140,7 +140,21 @@ def regenerate_nginx_config():
         
         if not reloaded:
             try:
-                # Try systemctl reload (if we're in the same systemd context)
+                # If reload fails, restart the container (more disruptive but ensures config is picked up)
+                result = subprocess.run(
+                    ['podman', 'restart', 'ztpbootstrap-nginx'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                if result.returncode == 0:
+                    reloaded = True
+            except:
+                pass
+        
+        if not reloaded:
+            try:
+                # Try systemctl reload as fallback
                 result = subprocess.run(
                     ['systemctl', 'reload', 'ztpbootstrap-nginx.service'],
                     capture_output=True,
@@ -153,8 +167,8 @@ def regenerate_nginx_config():
                 pass
         
         if not reloaded:
-            print("Warning: Could not reload nginx automatically. Config updated but nginx needs manual reload.")
-            # Don't fail - config is updated, just needs manual reload
+            print("Warning: Could not reload/restart nginx automatically. Config updated but nginx needs manual restart.")
+            # Don't fail - config is updated, just needs manual restart
         
         return True
     except Exception as e:
