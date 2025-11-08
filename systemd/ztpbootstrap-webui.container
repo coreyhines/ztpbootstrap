@@ -7,7 +7,7 @@ ContainerName=ztpbootstrap-webui
 Pod=ztpbootstrap.pod
 PublishPort=5000:5000
 Volume=/opt/containerdata/ztpbootstrap/webui:/app:ro
-Volume=/opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:ro
+Volume=/opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw
 Environment=TZ=UTC
 Environment=ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap
 Environment=FLASK_APP=app.py
