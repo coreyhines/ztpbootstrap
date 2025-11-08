@@ -912,10 +912,45 @@ def get_logs():
                 if "Logs not available from within container" in logs:
                     # Try to get hostname for better instructions
                     import socket
+                    hostname = None
+                    host_ip = None
+                    
+                    # Try multiple methods to get host information
                     try:
-                        hostname = socket.gethostname()
+                        # Try reading from /etc/hostname (if mounted)
+                        hostname_file = Path('/etc/hostname')
+                        if hostname_file.exists():
+                            hostname = hostname_file.read_text().strip()
                     except:
-                        hostname = "the host server"
+                        pass
+                    
+                    if not hostname:
+                        try:
+                            hostname = socket.gethostname()
+                            # If it's a pod/container name, try to get actual hostname
+                            if 'pod' in hostname.lower() or 'container' in hostname.lower():
+                                hostname = None
+                        except:
+                            pass
+                    
+                    # Try to get host IP from environment or network
+                    try:
+                        # Check if we can get host IP from hostname resolution
+                        if hostname:
+                            host_ip = socket.gethostbyname(hostname)
+                    except:
+                        pass
+                    
+                    # Build SSH instruction
+                    if hostname and hostname not in ['ztpbootstrap-pod', 'localhost']:
+                        ssh_target = hostname
+                        if host_ip:
+                            ssh_instruction = f'  ssh user@{hostname}  # or ssh user@{host_ip}'
+                        else:
+                            ssh_instruction = f'  ssh user@{hostname}'
+                    else:
+                        ssh_target = "the host server"
+                        ssh_instruction = '  ssh user@<hostname-or-ip>  # Replace with actual hostname or IP'
                     
                     logs = '\n' + '='*70 + '\n'
                     logs += 'CONTAINER LOGS ARE NOT AVAILABLE FROM WITHIN THE CONTAINER\n'
@@ -923,8 +958,8 @@ def get_logs():
                     logs += 'Container logs require host-level access to systemd journal and podman.\n'
                     logs += 'To view container logs, you need to SSH to the host server where this\n'
                     logs += 'service is running and execute the commands below.\n\n'
-                    logs += f'SSH to the host server (hostname: {hostname}):\n'
-                    logs += f'  ssh user@{hostname}\n\n'
+                    logs += f'SSH to {ssh_target}:\n'
+                    logs += f'{ssh_instruction}\n\n'
                     logs += 'Once connected, run one of these commands:\n\n'
                     logs += 'Using journalctl (recommended):\n'
                     logs += '  sudo journalctl -u ztpbootstrap-pod.service -n 50 -f\n'
