@@ -849,6 +849,43 @@ def get_logs():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/logs/mark', methods=['POST'])
+def mark_logs():
+    """Insert a MARK line into the nginx access log"""
+    try:
+        from datetime import datetime
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')
+        mark_line = f'===== MARK: {timestamp} =====\n'
+        
+        # Write MARK to nginx access log
+        if NGINX_ACCESS_LOG.exists():
+            try:
+                with open(NGINX_ACCESS_LOG, 'a') as f:
+                    f.write(mark_line)
+            except Exception as e:
+                return jsonify({'error': f'Failed to write MARK to access log: {str(e)}'}), 500
+        else:
+            # Try to write via podman exec
+            try:
+                result = subprocess.run(
+                    ['podman', 'exec', 'ztpbootstrap-nginx', 'sh', '-c', f'echo "{mark_line.strip()}" >> /var/log/nginx/ztpbootstrap_access.log'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode != 0:
+                    return jsonify({'error': f'Failed to write MARK: {result.stderr}'}), 500
+            except Exception as e:
+                return jsonify({'error': f'Failed to write MARK: {str(e)}'}), 500
+        
+        return jsonify({
+            'success': True,
+            'message': f'MARK inserted at {timestamp}',
+            'timestamp': timestamp
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/device-connections')
 def get_device_connections():
     """Get device connection data"""

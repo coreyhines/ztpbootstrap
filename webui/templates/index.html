@@ -334,6 +334,9 @@
                                 <option value="200">Last 200 lines</option>
                                 <option value="500">Last 500 lines</option>
                             </select>
+                            <button @click="markLogs()" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm font-medium transition-colors">
+                                Mark Logs
+                            </button>
                             <button @click="loadLogs()" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium transition-colors">
                                 Refresh
                             </button>
@@ -360,7 +363,7 @@
                     <div x-show="!showMultiColumn || logSource !== 'container'" class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto" x-ref="logsContainer">
                         <pre class="text-sm font-mono overflow-x-auto whitespace-pre-wrap" 
                              :class="logSource === 'nginx_error' ? 'text-red-400' : 'text-green-400'"
-                             x-text="logs"></pre>
+                             x-html="formatLogsWithMarks(logs)"></pre>
                     </div>
                 </div>
             </div>
@@ -719,6 +722,32 @@
                     if (seconds < 60) return Math.round(seconds) + 's';
                     if (seconds < 3600) return Math.round(seconds / 60) + 'm';
                     return Math.round(seconds / 3600) + 'h';
+                },
+                
+                formatLogsWithMarks(logText) {
+                    if (!logText) return '';
+                    // Highlight MARK lines with a distinct style
+                    return logText.replace(
+                        /(===== MARK: .*? =====)/g,
+                        '<span class="bg-yellow-600 text-yellow-100 font-bold px-1 rounded">$1</span>'
+                    );
+                },
+                
+                async markLogs() {
+                    try {
+                        const response = await fetch('/api/logs/mark', {
+                            method: 'POST'
+                        });
+                        const data = await response.json();
+                        if (data.success) {
+                            // Reload logs to show the new MARK
+                            await this.loadLogs();
+                        } else {
+                            alert('Failed to mark logs: ' + (data.error || 'Unknown error'));
+                        }
+                    } catch (error) {
+                        alert('Failed to mark logs: ' + error.message);
+                    }
                 }
             }
         }
