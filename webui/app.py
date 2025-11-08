@@ -67,6 +67,102 @@ def save_scripts_metadata(metadata):
         print(f"Error saving metadata: {e}")
         return False
 
+def regenerate_nginx_config():
+    """Regenerate nginx config based on script metadata"""
+    if not NGINX_CONF.exists():
+        print(f"Nginx config not found: {NGINX_CONF}")
+        return False
+    
+    try:
+        import re
+        
+        # Read current nginx config
+        with open(NGINX_CONF, 'r') as f:
+            config_content = f.read()
+        
+        # Load metadata
+        metadata = load_scripts_metadata()
+        
+        # Find all scripts that should be served as their filename
+        scripts_as_filename = []
+        for filename, meta in metadata.items():
+            if meta.get('serve_as_filename', False):
+                script_path = CONFIG_DIR / filename
+                if script_path.exists() and script_path.suffix == '.py':
+                    scripts_as_filename.append(filename)
+        
+        # Remove any existing specific location blocks for scripts (to avoid duplicates)
+        # Pattern matches: comment line + location block for bootstrap*.py (but not bootstrap.py itself)
+        existing_pattern = r'        # Serve bootstrap[^.]*?\.py as its filename\n        location = /bootstrap[^.]*?\.py \{[^}]+\}\n\n?'
+        config_content = re.sub(existing_pattern, '', config_content)
+        
+        # Generate location blocks for scripts that should be served as their filename
+        # These need to come BEFORE the generic .py$ location block
+        location_blocks = []
+        for filename in sorted(scripts_as_filename):
+            location_blocks.append(f'''        # Serve {filename} as its filename
+        location = /{filename} {{
+            add_header Content-Type "text/plain; charset=utf-8";
+            add_header Content-Disposition "attachment; filename={filename}";
+            try_files $uri =404;
+        }}''')
+        
+        # Pattern to match the generic .py$ location block (with its comment)
+        # We need to insert our specific blocks before this
+        py_location_pattern = r'(        # Set proper MIME type for Python scripts\n        location ~\* \\\.py\$ \{)'
+        
+        # Insert location blocks before the generic .py$ block
+        if location_blocks:
+            replacement = '\n'.join(location_blocks) + '\n\n' + r'\1'
+            new_config = re.sub(py_location_pattern, replacement, config_content)
+        else:
+            new_config = config_content
+        
+        # Write updated config
+        with open(NGINX_CONF, 'w') as f:
+            f.write(new_config)
+        
+        # Try to reload nginx
+        # Since we're in a pod, try to reload via podman exec or systemctl
+        reloaded = False
+        try:
+            # Try podman exec to reload nginx in the nginx container
+            result = subprocess.run(
+                ['podman', 'exec', 'ztpbootstrap-nginx', 'nginx', '-s', 'reload'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                reloaded = True
+        except:
+            pass
+        
+        if not reloaded:
+            try:
+                # Try systemctl reload (if we're in the same systemd context)
+                result = subprocess.run(
+                    ['systemctl', 'reload', 'ztpbootstrap-nginx.service'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    reloaded = True
+            except:
+                pass
+        
+        if not reloaded:
+            print("Warning: Could not reload nginx automatically. Config updated but nginx needs manual reload.")
+            # Don't fail - config is updated, just needs manual reload
+        
+        return True
+    except Exception as e:
+        print(f"Error regenerating nginx config: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 def cleanup_old_backups():
     """Keep only the 5 most recent backup files, delete older ones"""
     try:
@@ -425,11 +521,20 @@ def set_serve_as_filename(filename):
         metadata[filename]['serve_as_filename'] = bool(serve_as_filename)
         
         if save_scripts_metadata(metadata):
-            return jsonify({
-                'success': True,
-                'message': f'Script will be served as {"its filename" if serve_as_filename else "bootstrap.py"}',
-                'serve_as_filename': serve_as_filename
-            })
+            # Regenerate nginx config based on updated metadata
+            if regenerate_nginx_config():
+                return jsonify({
+                    'success': True,
+                    'message': f'Script will be served as {"its filename" if serve_as_filename else "bootstrap.py"}',
+                    'serve_as_filename': serve_as_filename
+                })
+            else:
+                return jsonify({
+                    'success': True,
+                    'message': f'Metadata updated, but nginx config update failed. Script will be served as {"its filename" if serve_as_filename else "bootstrap.py"} after manual nginx reload.',
+                    'serve_as_filename': serve_as_filename,
+                    'warning': 'nginx config update failed'
+                })
         else:
             return jsonify({'error': 'Failed to save metadata'}), 500
     except Exception as e:
