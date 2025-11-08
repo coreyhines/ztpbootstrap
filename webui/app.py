@@ -138,9 +138,10 @@ def regenerate_nginx_config():
         
         # Pattern to match the location / block (we need to insert before it)
         # Look for "location / {" that's at the start of a line with proper indentation
-        location_root_pattern = r'(    # Main location block[^\n]*\n    location / \{)'
+        # We need to insert before BOTH server blocks (main and default)
+        location_root_pattern = r'(    # Main location block[^\n]*\n    location / \{|    # Main location block - serve content instead of returning 444\n    location / \{)'
         
-        # Insert location blocks before the location / block
+        # Insert location blocks before the location / block in both server blocks
         if location_blocks:
             replacement = '\n'.join(location_blocks) + '\n\n    ' + r'\1'
             new_config = re.sub(location_root_pattern, replacement, config_content, flags=re.MULTILINE)
