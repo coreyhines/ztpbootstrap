@@ -566,27 +566,27 @@ setup_pod() {
             fi
         fi
         
-    # Copy webui directory to script directory
-    local webui_dest="${SCRIPT_DIR}/webui"
-    if [[ ! -d "$webui_dest" ]]; then
-        mkdir -p "$webui_dest" || {
-            warn "Failed to create webui directory: $webui_dest"
-            return 1
-        }
-    fi
-    if cp -r "${repo_dir}/webui"/* "$webui_dest/" 2>/dev/null; then
-        log "Web UI directory copied to: $webui_dest"
-    else
-        warn "Failed to copy webui directory, Web UI may not work"
-        warn "Source: ${repo_dir}/webui"
-        warn "Destination: $webui_dest"
-    fi
-    
-    # Ensure systemd recognizes the webui container file
-    # This is important because systemd-quadlet needs to generate the service
-    if [[ -f "${systemd_dir}/ztpbootstrap-webui.container" ]]; then
-        log "Web UI container file installed: ${systemd_dir}/ztpbootstrap-webui.container"
-    fi
+        # Copy webui directory to script directory
+        local webui_dest="${SCRIPT_DIR}/webui"
+        if [[ ! -d "$webui_dest" ]]; then
+            mkdir -p "$webui_dest" || {
+                warn "Failed to create webui directory: $webui_dest"
+                return 1
+            }
+        fi
+        if cp -r "${repo_dir}/webui"/* "$webui_dest/" 2>/dev/null; then
+            log "Web UI directory copied to: $webui_dest"
+        else
+            warn "Failed to copy webui directory, Web UI may not work"
+            warn "Source: ${repo_dir}/webui"
+            warn "Destination: $webui_dest"
+        fi
+        
+        # Ensure systemd recognizes the webui container file
+        # This is important because systemd-quadlet needs to generate the service
+        if [[ -f "${systemd_dir}/ztpbootstrap-webui.container" ]]; then
+            log "Web UI container file installed: ${systemd_dir}/ztpbootstrap-webui.container"
+        fi
     else
         warn "Web UI directory not found, Web UI container will not be included"
         warn "Service will run without Web UI"
