@@ -208,6 +208,12 @@ create_self_signed_cert() {
         log "Set SELinux context for certificate directory"
     fi
     
+    # Also set SELinux context for script directory to allow webui uploads
+    if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
+        chcon -R -t container_file_t "$SCRIPT_DIR" 2>/dev/null || true
+        log "Set SELinux context for script directory (allows webui uploads)"
+    fi
+    
     log "Self-signed certificate created for testing"
     warn "This is a self-signed certificate and should not be used in production"
 }
