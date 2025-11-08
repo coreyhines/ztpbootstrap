@@ -127,10 +127,54 @@
                             <h2 class="text-lg font-semibold text-gray-900 mb-2">Bootstrap Scripts</h2>
                             <p class="text-sm text-gray-600">Manage bootstrap scripts for device enrollment</p>
                         </div>
-                        <label class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium transition-colors cursor-pointer">
-                            <input type="file" @change="uploadScript($event)" accept=".py" class="hidden">
-                            Upload Script
-                        </label>
+                        <div class="flex items-center space-x-2">
+                            <button @click="showRestoreDialog = !showRestoreDialog" 
+                                    class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium transition-colors">
+                                Restore Backup
+                            </button>
+                            <label class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm font-medium transition-colors cursor-pointer">
+                                <input type="file" @change="uploadScript($event)" accept=".py" class="hidden">
+                                Upload Script
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <!-- Restore Backup Dialog -->
+                    <div x-show="showRestoreDialog" 
+                         x-cloak
+                         class="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="text-md font-semibold text-gray-900">Restore from Backup</h3>
+                            <button @click="showRestoreDialog = false" class="text-gray-500 hover:text-gray-700">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        <div x-show="backups.length === 0" class="text-sm text-gray-600 py-2">
+                            No backup files available
+                        </div>
+                        <div x-show="backups.length > 0" class="space-y-2">
+                            <template x-for="backup in backups" :key="backup.name">
+                                <div class="flex items-center justify-between bg-white rounded border border-gray-200 p-3 hover:bg-gray-50">
+                                    <div class="flex-1">
+                                        <div class="font-medium text-gray-900" x-text="backup.name"></div>
+                                        <div class="text-sm text-gray-500" x-text="'Backed up: ' + backup.human_date"></div>
+                                        <div class="text-xs text-gray-400" x-text="formatSize(backup.size)"></div>
+                                    </div>
+                                    <div class="flex items-center space-x-2">
+                                        <button @click="restoreBackup(backup.name, 'new')" 
+                                                class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 transition-colors">
+                                            Restore as New
+                                        </button>
+                                        <button @click="restoreBackup(backup.name, 'active')" 
+                                                class="px-3 py-1.5 bg-green-600 text-white rounded text-sm hover:bg-green-700 transition-colors">
+                                            Restore as Active
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
                     </div>
                     
                     <div class="space-y-3">
@@ -265,9 +309,11 @@
                     bootstrap_script_exists: false
                 },
                 scripts: [],
+                backups: [],
                 config: {},
                 logs: 'Loading...',
                 showScriptModal: false,
+                showRestoreDialog: false,
                 viewingScript: null,
                 
                 async init() {
@@ -301,6 +347,17 @@
                         this.scripts = data.scripts || [];
                     } catch (error) {
                         console.error('Failed to load scripts:', error);
+                    }
+                },
+                
+                async loadBackups() {
+                    try {
+                        const response = await fetch('/api/bootstrap-scripts/backups');
+                        const data = await response.json();
+                        this.backups = data.backups || [];
+                    } catch (error) {
+                        console.error('Failed to load backups:', error);
+                        this.backups = [];
                     }
                 },
                 
@@ -395,6 +452,35 @@
                         }
                     } catch (error) {
                         alert('Failed to update setting: ' + error.message);
+                    }
+                },
+                
+                async restoreBackup(filename, restoreAs) {
+                    const action = restoreAs === 'active' ? 'restore as active (bootstrap.py)' : 'restore as a new script';
+                    if (!confirm(`Are you sure you want to restore ${filename} and ${action}?`)) {
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch(`/api/bootstrap-script/backup/${filename}/restore`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                restore_as: restoreAs
+                            })
+                        });
+                        const data = await response.json();
+                        if (data.success) {
+                            await this.loadScripts();
+                            await this.loadBackups();
+                            this.showRestoreDialog = false;
+                        } else {
+                            alert('Failed to restore backup: ' + (data.error || 'Unknown error'));
+                        }
+                    } catch (error) {
+                        alert('Failed to restore backup: ' + error.message);
                     }
                 },
                 

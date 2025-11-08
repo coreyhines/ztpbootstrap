@@ -7,6 +7,7 @@ Lightweight Flask application for configuration and monitoring
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_from_directory
 
@@ -370,6 +371,94 @@ def set_serve_as_filename(filename):
             })
         else:
             return jsonify({'error': 'Failed to save metadata'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bootstrap-scripts/backups')
+def list_backup_scripts():
+    """List backup bootstrap scripts"""
+    backups = []
+    script_dir = CONFIG_DIR
+    
+    for file in script_dir.glob('bootstrap_backup_*.py'):
+        try:
+            stat = file.stat()
+            # Extract timestamp from filename (bootstrap_backup_TIMESTAMP.py)
+            timestamp_str = file.stem.replace('bootstrap_backup_', '')
+            try:
+                timestamp = int(timestamp_str)
+                from datetime import datetime
+                dt = datetime.fromtimestamp(timestamp)
+                human_date = dt.strftime('%Y-%m-%d %H:%M:%S')
+            except (ValueError, OSError):
+                # Fallback to file modification time
+                from datetime import datetime
+                dt = datetime.fromtimestamp(stat.st_mtime)
+                human_date = dt.strftime('%Y-%m-%d %H:%M:%S')
+            
+            backups.append({
+                'name': file.name,
+                'path': str(file),
+                'size': stat.st_size,
+                'modified': stat.st_mtime,
+                'human_date': human_date,
+                'timestamp': timestamp if 'timestamp' in locals() else int(stat.st_mtime)
+            })
+        except OSError:
+            continue
+    
+    # Sort by timestamp (newest first)
+    backups.sort(key=lambda x: x['timestamp'], reverse=True)
+    
+    return jsonify({'backups': backups})
+
+@app.route('/api/bootstrap-script/backup/<filename>/restore', methods=['POST'])
+def restore_backup_script(filename):
+    """Restore a backup script"""
+    try:
+        # Validate filename is a backup
+        if not filename.startswith('bootstrap_backup_') or not filename.endswith('.py'):
+            return jsonify({'error': 'Invalid backup filename'}), 400
+        
+        backup_path = CONFIG_DIR / filename
+        if not backup_path.exists():
+            return jsonify({'error': 'Backup not found'}), 404
+        
+        # Get restore option from request
+        data = request.get_json() or {}
+        restore_as = data.get('restore_as', 'new')  # 'new' or 'active'
+        
+        if restore_as == 'active':
+            # Restore as bootstrap.py (active)
+            target = BOOTSTRAP_SCRIPT
+            import shutil
+            shutil.copy2(backup_path, target)
+            return jsonify({
+                'success': True,
+                'message': f'Backup {filename} restored as bootstrap.py (active)',
+                'restored_as': 'active'
+            })
+        else:
+            # Restore as a new script with a cleaned name
+            # Extract original name or create a new one
+            from datetime import datetime
+            timestamp_str = filename.replace('bootstrap_backup_', '').replace('.py', '')
+            try:
+                timestamp = int(timestamp_str)
+                dt = datetime.fromtimestamp(timestamp)
+                new_name = f"bootstrap_restored_{dt.strftime('%Y%m%d_%H%M%S')}.py"
+            except:
+                new_name = f"bootstrap_restored_{int(time.time())}.py"
+            
+            new_path = CONFIG_DIR / new_name
+            import shutil
+            shutil.copy2(backup_path, new_path)
+            return jsonify({
+                'success': True,
+                'message': f'Backup {filename} restored as {new_name}',
+                'restored_as': 'new',
+                'new_filename': new_name
+            })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
