@@ -197,44 +197,51 @@
                                         </div>
                                     </div>
                                     <div class="flex items-center space-x-1">
-                                        <!-- View Icon Button -->
+                                        <!-- View Button with icon on right -->
                                         <button @click="viewScript(script.name)" 
-                                                class="p-2 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                                                title="View script">
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                class="px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-xs font-medium transition-colors flex items-center space-x-1.5">
+                                            <span>View</span>
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
                                             </svg>
                                         </button>
                                         
-                                        <!-- Set Active Button (text for clarity) -->
+                                        <!-- Set Active Button with icon on right -->
                                         <button x-show="!script.active" @click="setActiveScript(script.name)" 
-                                                class="px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-xs font-medium transition-colors">
-                                            Set Active
+                                                class="px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 text-xs font-medium transition-colors flex items-center space-x-1.5">
+                                            <span>Set Active</span>
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                            </svg>
                                         </button>
                                         
-                                        <!-- Rename Button (text for clarity) -->
+                                        <!-- Rename Button with icon on right -->
                                         <button x-show="!script.active" @click="renameScript(script.name)" 
-                                                class="px-3 py-1.5 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 text-xs font-medium transition-colors">
-                                            Rename
+                                                class="px-3 py-1.5 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 text-xs font-medium transition-colors flex items-center space-x-1.5">
+                                            <span>Rename</span>
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                                            </svg>
                                         </button>
                                         
-                                        <!-- Serve as Filename Toggle (icon) -->
+                                        <!-- Serve as Filename Toggle with icon on right -->
                                         <button @click="toggleServeAsFilename(script.name, !script.serve_as_filename)" 
-                                                class="p-2 rounded-md transition-colors"
-                                                :class="script.serve_as_filename ? 'text-blue-600 hover:bg-blue-50' : 'text-gray-500 hover:bg-gray-100'"
+                                                class="px-3 py-1.5 rounded-md transition-colors flex items-center space-x-1.5 text-xs font-medium"
+                                                :class="script.serve_as_filename ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-300' : 'bg-gray-50 text-gray-600 hover:bg-gray-100 border border-gray-300'"
                                                 :title="script.serve_as_filename ? 'Currently served as ' + script.name + '. Click to serve as bootstrap.py' : 'Currently served as bootstrap.py. Click to serve as ' + script.name">
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <span x-text="script.serve_as_filename ? 'As filename' : 'As bootstrap.py'"></span>
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="script.serve_as_filename ? 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' : 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4'"></path>
                                             </svg>
                                         </button>
                                         
-                                        <!-- Delete Icon Button -->
+                                        <!-- Delete Button with icon on right -->
                                         <button x-show="!script.active" 
                                                 @click="deleteScript(script.name)" 
-                                                class="p-2 text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                                                title="Delete script">
-                                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                class="px-3 py-1.5 bg-red-600 text-white rounded-md hover:bg-red-700 text-xs font-medium transition-colors flex items-center space-x-1.5">
+                                            <span>Delete</span>
+                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                                             </svg>
                                         </button>
