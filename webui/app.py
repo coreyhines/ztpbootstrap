@@ -101,6 +101,10 @@ def list_bootstrap_scripts():
             pass
     
     for file in script_dir.glob('bootstrap*.py'):
+        # Skip backup files (they shouldn't be shown in the UI)
+        if file.name.startswith('bootstrap_backup_'):
+            continue
+        
         # Skip symlink loops (symlinks pointing to themselves)
         try:
             if file.is_symlink():
@@ -261,6 +265,8 @@ def set_active_script(filename):
             # Backup existing bootstrap.py
             backup = CONFIG_DIR / f'bootstrap_backup_{int(target.stat().st_mtime)}.py'
             target.rename(backup)
+            # Clean up old backups, keeping only the 5 most recent
+            cleanup_old_backups()
         
         # Create symlink to the selected script
         target.symlink_to(script_path.name)
