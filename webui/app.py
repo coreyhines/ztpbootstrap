@@ -825,26 +825,47 @@ def get_logs():
             pass
         
         else:  # container logs (default)
-            # Try to get logs from systemd services
-            services = ['ztpbootstrap-pod.service', 'ztpbootstrap-nginx.service', 'ztpbootstrap-webui.service']
+            # Try to get logs from containers using podman logs
+            # Map service names to container names
+            containers = {
+                'ztpbootstrap-pod.service': 'ztpbootstrap-pod-infra',
+                'ztpbootstrap-nginx.service': 'ztpbootstrap-nginx',
+                'ztpbootstrap-webui.service': 'ztpbootstrap-webui'
+            }
             log_parts = []
             
-            for service in services:
+            for service, container_name in containers.items():
                 try:
+                    # Try podman logs first (works from within container)
                     result = subprocess.run(
-                        ['journalctl', '-u', service, '-n', str(lines // len(services)), '--no-pager', '--no-hostname'],
+                        ['podman', 'logs', '--tail', str(lines // len(containers)), container_name],
                         capture_output=True,
                         text=True,
-                        timeout=2
+                        timeout=3
                     )
-                    if result.stdout.strip():
+                    if result.returncode == 0 and result.stdout.strip():
                         log_parts.append(f"=== {service} ===")
                         log_parts.append(result.stdout)
-                except:
+                    else:
+                        # Fallback to journalctl if available
+                        try:
+                            journal_result = subprocess.run(
+                                ['journalctl', '-u', service, '-n', str(lines // len(containers)), '--no-pager', '--no-hostname'],
+                                capture_output=True,
+                                text=True,
+                                timeout=2
+                            )
+                            if journal_result.returncode == 0 and journal_result.stdout.strip():
+                                log_parts.append(f"=== {service} ===")
+                                log_parts.append(journal_result.stdout)
+                        except FileNotFoundError:
+                            pass
+                except Exception as e:
+                    # Container might not exist yet
                     pass
             
             if not log_parts:
-                logs = 'No logs available. Services may not be running or journalctl is not accessible.'
+                logs = 'No logs available. Containers may not be running or podman is not accessible.'
             else:
                 logs = '\n'.join(log_parts)
         
