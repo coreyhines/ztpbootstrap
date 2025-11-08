@@ -125,11 +125,14 @@ def regenerate_nginx_config():
         # These need to come BEFORE the location / block (at the same level, not nested)
         location_blocks = []
         for filename in sorted(scripts_as_filename):
+            # URL-encode filename for RFC 5987 format
+            import urllib.parse
+            filename_encoded = urllib.parse.quote(filename, safe='')
             location_blocks.append(f'''    # Serve {filename} as its filename
     location = /{filename} {{
         default_type text/plain;
         add_header Content-Type "text/plain; charset=utf-8" always;
-        add_header Content-Disposition "attachment; filename=\\"{filename}\\"; filename*=UTF-8''{filename}" always;
+        add_header Content-Disposition "attachment; filename=\\"{filename}\\"; filename*=UTF-8\\'\\'{filename_encoded}" always;
         add_header Cache-Control "no-cache, no-store, must-revalidate" always;
         add_header Pragma "no-cache" always;
         add_header Expires "0" always;
