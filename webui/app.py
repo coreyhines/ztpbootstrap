@@ -144,13 +144,8 @@ def regenerate_nginx_config():
             # Also encode for standard format to handle special characters like hyphens
             filename_quoted = urllib.parse.quote(filename, safe='')
             # Proxy to Flask app's download endpoint for reliable filename handling
-            # Use a URL that doesn't expose the filename in the path to avoid browser extraction
-            # Use /d/ prefix to make it less obvious what the filename is
             location_blocks.append(f'''    # Serve {filename} as its filename via Flask download endpoint
     location = /{filename} {{
-        # Use internal redirect to a path that doesn't expose the filename
-        # This prevents browsers from extracting filename from URL path
-        rewrite ^ /d/{filename}? break;
         proxy_pass http://127.0.0.1:5000/download/{filename};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
