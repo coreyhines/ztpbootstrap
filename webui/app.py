@@ -144,9 +144,13 @@ def regenerate_nginx_config():
             # Also encode for standard format to handle special characters like hyphens
             filename_quoted = urllib.parse.quote(filename, safe='')
             # Proxy to Flask app's download endpoint for reliable filename handling
-            # Don't add headers here - let Flask set them to avoid conflicts
+            # Use a URL that doesn't expose the filename in the path to avoid browser extraction
+            # Use /d/ prefix to make it less obvious what the filename is
             location_blocks.append(f'''    # Serve {filename} as its filename via Flask download endpoint
     location = /{filename} {{
+        # Use internal redirect to a path that doesn't expose the filename
+        # This prevents browsers from extracting filename from URL path
+        rewrite ^ /d/{filename}? break;
         proxy_pass http://127.0.0.1:5000/download/{filename};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -155,10 +159,8 @@ def regenerate_nginx_config():
         proxy_connect_timeout 5s;
         proxy_send_timeout 5s;
         proxy_read_timeout 5s;
-        # Don't override Flask's Content-Disposition header
-        proxy_hide_header Content-Disposition;
+        # Ensure Flask's headers are passed through
         proxy_pass_header Content-Disposition;
-        proxy_hide_header Content-Type;
         proxy_pass_header Content-Type;
     }}''')
         
@@ -427,7 +429,10 @@ def download_bootstrap_script(filename):
         
         # Create response with explicit Content-Disposition header
         # Use both standard format (with quotes) and RFC 5987 format for maximum compatibility
+        # For filenames with hyphens, browsers may extract from URL, so we need to be very explicit
         filename_encoded = urllib.parse.quote(download_name, safe='')
+        # Use both formats: standard with quotes, and RFC 5987
+        # Some browsers prefer the RFC 5987 format when there are special characters
         content_disposition = f'attachment; filename="{download_name}"; filename*=UTF-8\'\'{filename_encoded}'
         
         response = Response(
@@ -438,7 +443,8 @@ def download_bootstrap_script(filename):
                 'X-Content-Type-Options': 'nosniff',
                 'Cache-Control': 'no-cache, no-store, must-revalidate',
                 'Pragma': 'no-cache',
-                'Expires': '0'
+                'Expires': '0',
+                'Content-Length': str(len(content))
             }
         )
         return response
