@@ -413,14 +413,32 @@ def download_bootstrap_script(filename):
         serve_as_filename = script_meta.get('serve_as_filename', False)
         
         # Use Flask's send_file with as_attachment and download_name
-        from flask import send_file
+        from flask import send_file, Response
+        import urllib.parse
+        
         download_name = filename if serve_as_filename else 'bootstrap.py'
-        return send_file(
-            str(script_path),
-            mimetype='text/plain',
-            as_attachment=True,
-            download_name=download_name
+        
+        # Read the file content
+        with open(script_path, 'rb') as f:
+            content = f.read()
+        
+        # Create response with explicit Content-Disposition header
+        # Use both standard format (with quotes) and RFC 5987 format for maximum compatibility
+        filename_encoded = urllib.parse.quote(download_name, safe='')
+        content_disposition = f'attachment; filename="{download_name}"; filename*=UTF-8\'\'{filename_encoded}'
+        
+        response = Response(
+            content,
+            mimetype='text/plain; charset=utf-8',
+            headers={
+                'Content-Disposition': content_disposition,
+                'X-Content-Type-Options': 'nosniff',
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
         )
+        return response
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
