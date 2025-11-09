@@ -534,8 +534,17 @@ setup_pod() {
         cp "${repo_dir}/systemd/ztpbootstrap-nginx.container" "$systemd_dir/"
         log "Nginx container configuration installed"
         
-        # Remove PublishPort lines if using host networking
         local nginx_container_file="${systemd_dir}/ztpbootstrap-nginx.container"
+        
+        # Remove certs volume mount if using HTTP-only mode
+        if [[ "$HTTP_ONLY" == "true" ]]; then
+            if sed -i.tmp "/certs\/wild.*\/etc\/nginx\/ssl/d" "$nginx_container_file" 2>/dev/null; then
+                rm -f "${nginx_container_file}.tmp" 2>/dev/null || true
+                log "Removed SSL certificate volume mount from nginx container (HTTP-only mode)"
+            fi
+        fi
+        
+        # Remove PublishPort lines if using host networking
         if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
             local host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
             if [[ "$host_network" == "true" ]]; then
