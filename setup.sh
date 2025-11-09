@@ -608,7 +608,17 @@ start_service() {
     systemctl daemon-reload
     
     # Wait a moment for systemd to fully process the new services
-    sleep 1
+    # Systemd quadlet generator needs time to process .container files
+    sleep 2
+    
+    # Check if webui container file exists and try to ensure systemd recognizes it
+    if [[ -f "${systemd_dir}/ztpbootstrap-webui.container" ]]; then
+        log "WebUI container file found, ensuring systemd recognizes it..."
+        # Touch the file to trigger systemd generator (if needed)
+        touch "${systemd_dir}/ztpbootstrap-webui.container"
+        systemctl daemon-reload
+        sleep 1
+    fi
     
     log "Starting ztpbootstrap pod..."
     if systemctl start ztpbootstrap-pod; then
@@ -630,15 +640,33 @@ start_service() {
     fi
     
     # Start webui container if it exists
-    if systemctl list-unit-files | grep -q ztpbootstrap-webui.service; then
+    # Check both unit-files and if the service is available
+    if systemctl list-unit-files | grep -q ztpbootstrap-webui.service || systemctl list-units --all | grep -q ztpbootstrap-webui.service; then
         log "Starting webui container..."
         if systemctl start ztpbootstrap-webui; then
             log "Webui container started successfully"
         else
             warn "Failed to start webui container. Check logs with: journalctl -u ztpbootstrap-webui -f"
         fi
+    elif [[ -f "${systemd_dir}/ztpbootstrap-webui.container" ]]; then
+        # Container file exists but service not generated - try manual start as fallback
+        warn "WebUI container file exists but systemd service not found"
+        warn "Attempting to start WebUI container manually..."
+        if podman run -d --name ztpbootstrap-webui --pod ztpbootstrap-pod \
+            -v /opt/containerdata/ztpbootstrap/webui:/app:ro \
+            -v /opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw \
+            -v /opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw \
+            -e TZ=UTC \
+            -e ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap \
+            -e FLASK_APP=app.py \
+            docker.io/python:alpine \
+            /bin/sh -c "pip install --no-cache-dir flask werkzeug && sleep 2 && python3 /app/app.py" 2>/dev/null; then
+            log "WebUI container started manually"
+        else
+            warn "Failed to start WebUI container manually. It may already be running."
+        fi
     else
-        log "Webui container service not found (this is OK if webui directory doesn't exist)"
+        log "WebUI container file not found (this is OK if webui directory doesn't exist)"
     fi
 }
 
