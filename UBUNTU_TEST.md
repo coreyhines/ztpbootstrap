@@ -26,6 +26,17 @@
 
 **Status:** ✅ FIXED
 
+### Issue 3: Ubuntu Cloud Image Format Detection
+**Problem:** Ubuntu cloud images are already in QCOW2 format even though they have `.img` extension. The script was trying to convert them from raw to qcow2, which could fail or create issues.
+
+**Fix Applied:** 
+- Use `qemu-img info` to detect actual format instead of assuming based on extension
+- For qcow2 images, create snapshot copy (more efficient) or standalone copy as fallback
+- For raw images, convert to qcow2 as before
+- Fixes VM boot issues where VM would get stuck in UEFI shell
+
+**Status:** ✅ FIXED
+
 ## Test Results
 
 ### Prerequisites
