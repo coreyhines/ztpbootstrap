@@ -7,7 +7,7 @@ ContainerName=ztpbootstrap-nginx
 Pod=ztpbootstrap.pod
 Volume=/opt/containerdata/ztpbootstrap:/usr/share/nginx/html:ro
 Volume=/opt/containerdata/ztpbootstrap/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-Volume=/opt/containerdata/certs/wild:/etc/nginx/ssl:z,ro
+Volume=/opt/containerdata/certs/wild:/etc/nginx/ssl:ro
 Volume=/opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw
 Environment=TZ=UTC
 HealthCmd=["sh", "-c", "pgrep nginx > /dev/null || exit 1"]

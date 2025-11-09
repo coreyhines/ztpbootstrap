@@ -1,5 +1,22 @@
 # Known Issues and Workarounds
 
+## SELinux Context Flags (`:z` and `:Z`) - NOT USED
+
+**IMPORTANT:** We do NOT use SELinux context flags (`:z` or `:Z`) in Podman volume mounts because:
+- These flags do NOT work with NFS shares
+- Many users (including the maintainer) deploy this service on NFS-mounted NAS shares
+- SELinux contexts are set via `chcon` on the host directories instead
+
+**How we handle SELinux:**
+- We use `chcon -R -t container_file_t` to set SELinux contexts on host directories
+- This works with both local filesystems and NFS shares
+- Volume mounts in quadlet files use only `:ro` (read-only) or `:rw` (read-write) flags
+
+**Files affected:**
+- `systemd/ztpbootstrap-nginx.container` - No `:z` or `:Z` flags
+- `systemd/ztpbootstrap-webui.container` - No `:z` or `:Z` flags
+- `setup.sh` - Uses `chcon` instead of volume mount flags
+
 This document tracks known issues, their workarounds, and planned fixes.
 
 ## Minor Issues
