@@ -704,11 +704,8 @@ main() {
         warn "All traffic will be unencrypted and vulnerable to interception."
         warn "Let's Encrypt certificates can be fully automated with certbot and systemd timers."
         echo ""
-        read -p "Are you sure you want to continue with HTTP-only setup? (yes/no): " -r
-        if [[ ! $REPLY =~ ^[Yy][Ee][Ss]$ ]]; then
-            log "Setup cancelled by user"
-            exit 0
-        fi
+        # No confirmation prompt - if user passed --http-only flag, they've already decided
+        log "Proceeding with HTTP-only setup (flag provided, no confirmation required)"
         echo ""
     fi
     
