@@ -390,6 +390,7 @@ users:
     shell: /bin/bash
     lock_passwd: false
     plain_text_passwd: '__DISTRO_USER__'
+    # SSH authorized keys will be added via write_files + runcmd for better compatibility
 chpasswd:
   list: |
     __DISTRO_USER__:__DISTRO_USER__
@@ -463,30 +464,16 @@ runcmd:
     __DISTRO_INSTALL_CMD__ git podman curl yq
   - |
     # Set up SSH authorized_keys from host if available
-    # This allows passwordless SSH access from the host machine
-    # Cloud-init mounts the ISO at /dev/sr0 or /dev/cdrom, we need to find it
-    # Use nullglob to handle glob patterns that don't match
-    shopt -s nullglob 2>/dev/null || true
-    # Use placeholder that will be replaced with actual glob pattern after heredoc creation
-    for mount_point in /mnt /media/cdrom /media/cdrom0 __MEDIA_GLOB_PLACEHOLDER__; do
-      if [ -f "$mount_point/host_ssh_key.pub" ]; then
-        mkdir -p /home/__DISTRO_USER__/.ssh
-        cat "$mount_point/host_ssh_key.pub" >> /home/__DISTRO_USER__/.ssh/authorized_keys
-        chmod 700 /home/__DISTRO_USER__/.ssh
-        chmod 600 /home/__DISTRO_USER__/.ssh/authorized_keys
-        chown -R __DISTRO_USER__:__DISTRO_USER__ /home/__DISTRO_USER__/.ssh
-        echo "SSH key from host added to authorized_keys"
-        break
-      fi
-    done
-    # Also check if cloud-init copied it to /tmp (fallback)
+    # Cloud-init write_files section copies the key to /tmp/host_ssh_key.pub
     if [ -f /tmp/host_ssh_key.pub ]; then
       mkdir -p /home/__DISTRO_USER__/.ssh
       cat /tmp/host_ssh_key.pub >> /home/__DISTRO_USER__/.ssh/authorized_keys
       chmod 700 /home/__DISTRO_USER__/.ssh
       chmod 600 /home/__DISTRO_USER__/.ssh/authorized_keys
       chown -R __DISTRO_USER__:__DISTRO_USER__ /home/__DISTRO_USER__/.ssh
-      echo "SSH key from host added to authorized_keys (from /tmp)"
+      echo "SSH key from host added to authorized_keys"
+    else
+      echo "No SSH key found at /tmp/host_ssh_key.pub - password authentication will be required"
     fi
   - |
     # Clone the repository
@@ -554,7 +541,7 @@ CLOUDINITEOF
           "$cloud_init_dir/user-data" 2>/dev/null || true
         rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
         
-        # Copy host SSH public key to cloud-init directory if available
+        # Get host SSH public key if available (will be embedded in user-data via write_files)
         # This allows passwordless SSH access from the host machine
         local host_ssh_key=""
         if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then
@@ -564,10 +551,12 @@ CLOUDINITEOF
         fi
         
         if [[ -n "$host_ssh_key" ]] && [[ -f "$host_ssh_key" ]]; then
-            cp "$host_ssh_key" "$cloud_init_dir/host_ssh_key.pub" 2>/dev/null || true
             log_info "Including host SSH key in cloud-init: $host_ssh_key"
         else
             log_info "No SSH public key found in ~/.ssh/ - password authentication will be required"
+            # Remove the SSH key write_files entry if no key available
+            sed -i.bak '/path: \/tmp\/host_ssh_key.pub/,/owner: root:root/d' "$cloud_init_dir/user-data" 2>/dev/null || true
+            rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
         fi
         
         # Create meta-data
