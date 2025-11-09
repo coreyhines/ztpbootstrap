@@ -368,31 +368,31 @@ start_vm() {
         fi
         
         # Create user-data for cloud-init (enable SSH, set password, clone repo, setup macvlan)
-        # Use unquoted heredoc to allow variable expansion
-        # Use placeholder for glob pattern to avoid bash expansion during heredoc creation
-        cat > "$cloud_init_dir/user-data" << CLOUDINITEOF
+        # Use quoted heredoc delimiter to prevent variable expansion during parsing
+        # Variables will be replaced with sed after heredoc creation
+        cat > "$cloud_init_dir/user-data" << 'CLOUDINITEOF'
 #cloud-config
 # Disable default user (if any) and create our own
 system_info:
   default_user:
-    name: ${distro_user}
+    name: __DISTRO_USER__
     lock_passwd: false
-    plain_text_passwd: '${distro_user}'
-    groups: [${distro_sudo_group}, adm, systemd-journal]
+    plain_text_passwd: '__DISTRO_USER__'
+    groups: [__DISTRO_SUDO_GROUP__, adm, systemd-journal]
     sudo: ["ALL=(ALL) NOPASSWD:ALL"]
     shell: /bin/bash
 
 users:
   - default
-  - name: ${distro_user}
+  - name: __DISTRO_USER__
     sudo: ALL=(ALL) NOPASSWD:ALL
-    groups: [${distro_sudo_group}, adm, systemd-journal]
+    groups: [__DISTRO_SUDO_GROUP__, adm, systemd-journal]
     shell: /bin/bash
     lock_passwd: false
-    plain_text_passwd: '${distro_user}'
+    plain_text_passwd: '__DISTRO_USER__'
 chpasswd:
   list: |
-    ${distro_user}:${distro_user}
+    __DISTRO_USER__:__DISTRO_USER__
   expire: false
 ssh_pwauth: true
 disable_root: false
@@ -411,14 +411,14 @@ write_files:
       Auto-setup enabled
     permissions: '0644'
     owner: root:root
-  - path: /home/${distro_user}/README_VM_SETUP.txt
+  - path: /home/__DISTRO_USER__/README_VM_SETUP.txt
     content: |
       ZTP Bootstrap VM Setup Complete!
 
-      The repository has been cloned to: /home/${distro_user}/ztpbootstrap
+      The repository has been cloned to: /home/__DISTRO_USER__/ztpbootstrap
 
       Next steps:
-      1. cd /home/${distro_user}/ztpbootstrap
+      1. cd /home/__DISTRO_USER__/ztpbootstrap
       2. Run interactive setup: ./setup-interactive.sh
          OR
          Run manual setup: ./setup.sh
@@ -426,15 +426,15 @@ write_files:
       The macvlan network 'ztpbootstrap-net' has been created (if ethernet interface was found).
 
       SSH access:
-        User: ${distro_user}
-        Password: ${distro_user}
-        From host: ssh ${distro_user}@localhost -p 2222
+        User: __DISTRO_USER__
+        Password: __DISTRO_USER__
+        From host: ssh __DISTRO_USER__@localhost -p 2222
       
       Service access (if running on port 80/443):
         HTTP:  http://localhost:8080
         HTTPS: https://localhost:8443
     permissions: '0644'
-    owner: ${distro_user}:${distro_user}
+    owner: __DISTRO_USER__:__DISTRO_USER__
 runcmd:
   - |
     # Configure SSH to allow password authentication - do this FIRST
@@ -447,20 +447,20 @@ runcmd:
     sed -i 's/^#*ChallengeResponseAuthentication.*/ChallengeResponseAuthentication yes/' /etc/ssh/sshd_config
     sed -i 's/^ChallengeResponseAuthentication no/ChallengeResponseAuthentication yes/' /etc/ssh/sshd_config
     # Ensure user exists and has password set
-    if ! id ${distro_user} &>/dev/null; then
-      useradd -m -G ${distro_sudo_group} -s /bin/bash ${distro_user}
+    if ! id __DISTRO_USER__ &>/dev/null; then
+      useradd -m -G __DISTRO_SUDO_GROUP__ -s /bin/bash __DISTRO_USER__
     fi
-    echo '${distro_user}:${distro_user}' | chpasswd
-    usermod -aG ${distro_sudo_group} ${distro_user}
-  - systemctl enable ${distro_ssh_service}
-  - systemctl restart ${distro_ssh_service}
+    echo '__DISTRO_USER__:__DISTRO_USER__' | chpasswd
+    usermod -aG __DISTRO_SUDO_GROUP__ __DISTRO_USER__
+  - systemctl enable __DISTRO_SSH_SERVICE__
+  - systemctl restart __DISTRO_SSH_SERVICE__
   - |
     # Wait a moment for SSH to restart, then verify
     sleep 2
-    systemctl status ${distro_ssh_service} || true
+    systemctl status __DISTRO_SSH_SERVICE__ || true
   - |
     # Install required packages
-    ${distro_install_cmd} git podman curl yq
+    __DISTRO_INSTALL_CMD__ git podman curl yq
   - |
     # Set up SSH authorized_keys from host if available
     # This allows passwordless SSH access from the host machine
@@ -470,29 +470,29 @@ runcmd:
     # Use placeholder that will be replaced with actual glob pattern after heredoc creation
     for mount_point in /mnt /media/cdrom /media/cdrom0 __MEDIA_GLOB_PLACEHOLDER__; do
       if [ -f "$mount_point/host_ssh_key.pub" ]; then
-        mkdir -p /home/${distro_user}/.ssh
-        cat "$mount_point/host_ssh_key.pub" >> /home/${distro_user}/.ssh/authorized_keys
-        chmod 700 /home/${distro_user}/.ssh
-        chmod 600 /home/${distro_user}/.ssh/authorized_keys
-        chown -R ${distro_user}:${distro_user} /home/${distro_user}/.ssh
+        mkdir -p /home/__DISTRO_USER__/.ssh
+        cat "$mount_point/host_ssh_key.pub" >> /home/__DISTRO_USER__/.ssh/authorized_keys
+        chmod 700 /home/__DISTRO_USER__/.ssh
+        chmod 600 /home/__DISTRO_USER__/.ssh/authorized_keys
+        chown -R __DISTRO_USER__:__DISTRO_USER__ /home/__DISTRO_USER__/.ssh
         echo "SSH key from host added to authorized_keys"
         break
       fi
     done
     # Also check if cloud-init copied it to /tmp (fallback)
     if [ -f /tmp/host_ssh_key.pub ]; then
-      mkdir -p /home/${distro_user}/.ssh
-      cat /tmp/host_ssh_key.pub >> /home/${distro_user}/.ssh/authorized_keys
-      chmod 700 /home/${distro_user}/.ssh
-      chmod 600 /home/${distro_user}/.ssh/authorized_keys
-      chown -R ${distro_user}:${distro_user} /home/${distro_user}/.ssh
+      mkdir -p /home/__DISTRO_USER__/.ssh
+      cat /tmp/host_ssh_key.pub >> /home/__DISTRO_USER__/.ssh/authorized_keys
+      chmod 700 /home/__DISTRO_USER__/.ssh
+      chmod 600 /home/__DISTRO_USER__/.ssh/authorized_keys
+      chown -R __DISTRO_USER__:__DISTRO_USER__ /home/__DISTRO_USER__/.ssh
       echo "SSH key from host added to authorized_keys (from /tmp)"
     fi
   - |
     # Clone the repository
-    if [ ! -d /home/${distro_user}/ztpbootstrap ]; then
-      sudo -u ${distro_user} git clone https://github.com/coreyhines/ztpbootstrap.git /home/${distro_user}/ztpbootstrap || \
-      sudo -u ${distro_user} git clone https://github.com/YOUR_USERNAME/ztpbootstrap.git /home/${distro_user}/ztpbootstrap || \
+    if [ ! -d /home/__DISTRO_USER__/ztpbootstrap ]; then
+      sudo -u __DISTRO_USER__ git clone https://github.com/coreyhines/ztpbootstrap.git /home/__DISTRO_USER__/ztpbootstrap || \
+      sudo -u __DISTRO_USER__ git clone https://github.com/YOUR_USERNAME/ztpbootstrap.git /home/__DISTRO_USER__/ztpbootstrap || \
       echo "Repository clone failed. Please clone manually."
     fi
   - |
@@ -523,29 +523,35 @@ runcmd:
     fi
   - |
     # Set ownership of cloned repo
-    chown -R ${distro_user}:${distro_user} /home/${distro_user}/ztpbootstrap 2>/dev/null || true
+    chown -R __DISTRO_USER__:__DISTRO_USER__ /home/__DISTRO_USER__/ztpbootstrap 2>/dev/null || true
   - |
     # Ensure README file has correct ownership (created by write_files)
-    chown ${distro_user}:${distro_user} /home/${distro_user}/README_VM_SETUP.txt 2>/dev/null || true
+    chown __DISTRO_USER__:__DISTRO_USER__ /home/__DISTRO_USER__/README_VM_SETUP.txt 2>/dev/null || true
   - echo "Cloud-init completed. Repository cloned and macvlan network configured."
-  - cat /home/${distro_user}/README_VM_SETUP.txt
+  - cat /home/__DISTRO_USER__/README_VM_SETUP.txt
   - |
     # Optionally run interactive setup automatically
     # Check if auto-setup flag file exists (created by cloud-init write_files)
     AUTO_SETUP_VAL=$(if [ -f /tmp/auto-setup-flag ]; then echo "true"; else echo "false"; fi)
-    if [ -f /home/${distro_user}/ztpbootstrap/setup-interactive.sh ] && [ "$AUTO_SETUP_VAL" = "true" ]; then
+    if [ -f /home/__DISTRO_USER__/ztpbootstrap/setup-interactive.sh ] && [ "$AUTO_SETUP_VAL" = "true" ]; then
       echo ""
       echo "Auto-running interactive setup..."
-      cd /home/${distro_user}/ztpbootstrap
-      sudo -u ${distro_user} bash -c "cd /home/${distro_user}/ztpbootstrap && ./setup-interactive.sh" || \
+      cd /home/__DISTRO_USER__/ztpbootstrap
+      sudo -u __DISTRO_USER__ bash -c "cd /home/__DISTRO_USER__/ztpbootstrap && ./setup-interactive.sh" || \
       echo "Interactive setup failed or was cancelled. Run manually: ./setup-interactive.sh"
     else
-      echo "Auto-setup disabled. Run manually: cd /home/${distro_user}/ztpbootstrap && ./setup-interactive.sh"
+      echo "Auto-setup disabled. Run manually: cd /home/__DISTRO_USER__/ztpbootstrap && ./setup-interactive.sh"
     fi
 CLOUDINITEOF
         
-        # Replace placeholder with actual glob pattern (after heredoc is created to avoid expansion issues)
-        sed -i.bak 's|__MEDIA_GLOB_PLACEHOLDER__|/run/media/*/cidata|g' "$cloud_init_dir/user-data" 2>/dev/null || true
+        # Replace all placeholders with actual values (after heredoc creation to avoid expansion issues)
+        sed -i.bak \
+          -e "s|__DISTRO_USER__|${distro_user}|g" \
+          -e "s|__DISTRO_SUDO_GROUP__|${distro_sudo_group}|g" \
+          -e "s|__DISTRO_SSH_SERVICE__|${distro_ssh_service}|g" \
+          -e "s|__DISTRO_INSTALL_CMD__|${distro_install_cmd}|g" \
+          -e "s|__MEDIA_GLOB_PLACEHOLDER__|/run/media/*/cidata|g" \
+          "$cloud_init_dir/user-data" 2>/dev/null || true
         rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
         
         # Copy host SSH public key to cloud-init directory if available
