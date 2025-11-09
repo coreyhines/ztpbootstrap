@@ -488,6 +488,32 @@ runcmd:
       echo "Repository clone failed. Please clone manually."
     fi
   - |
+    # Create minimal ztpbootstrap.env file for automated testing
+    # This allows setup.sh to run without manual configuration
+    mkdir -p /opt/containerdata/ztpbootstrap
+    cat > /opt/containerdata/ztpbootstrap/ztpbootstrap.env << 'ENVEOF'
+# Minimal configuration for automated testing
+CV_ADDR=www.arista.io
+ENROLLMENT_TOKEN=test_token_for_automated_testing
+CV_PROXY=
+EOS_URL=
+NTP_SERVER=time.nist.gov
+TZ=UTC
+NGINX_HOST=ztpboot.example.com
+NGINX_PORT=443
+ENVEOF
+    chmod 644 /opt/containerdata/ztpbootstrap/ztpbootstrap.env
+    # Also copy bootstrap.py and nginx.conf to expected location for setup.sh
+    if [ -f /home/__DISTRO_USER__/ztpbootstrap/bootstrap.py ]; then
+      cp /home/__DISTRO_USER__/ztpbootstrap/bootstrap.py /opt/containerdata/ztpbootstrap/bootstrap.py
+      chmod 644 /opt/containerdata/ztpbootstrap/bootstrap.py
+    fi
+    if [ -f /home/__DISTRO_USER__/ztpbootstrap/nginx.conf ]; then
+      cp /home/__DISTRO_USER__/ztpbootstrap/nginx.conf /opt/containerdata/ztpbootstrap/nginx.conf
+      chmod 644 /opt/containerdata/ztpbootstrap/nginx.conf
+    fi
+    echo "Created minimal ztpbootstrap.env for automated testing"
+  - |
     # Setup macvlan network on the primary ethernet interface
     # Find the primary ethernet interface (usually eth0 or ens*)
     ETH_IFACE=$(ip -o link show | grep -E '^[0-9]+: (eth|ens|enp)' | head -1 | cut -d: -f2 | tr -d ' ')
