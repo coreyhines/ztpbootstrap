@@ -142,20 +142,16 @@ start_vm() {
                 local qcow2_copy="${VM_DISK%.qcow2}-cloud.qcow2"
                 
                 if [[ "$actual_format" == "qcow2" ]]; then
-                    # Already qcow2 - create a snapshot/copy for fresh cloud-init runs
-                    log_info "Cloud image is already qcow2 format, creating snapshot copy for fresh cloud-init runs..."
+                    # Already qcow2 - create a standalone copy for fresh cloud-init runs
+                    # Using standalone copy instead of snapshot to avoid boot issues
+                    log_info "Cloud image is already qcow2 format, creating standalone copy for fresh cloud-init runs..."
                     if [[ ! -f "$qcow2_copy" ]] || [[ "$ISO_PATH" -nt "$qcow2_copy" ]]; then
-                        if qemu-img create -f qcow2 -b "$ISO_PATH" -F qcow2 "$qcow2_copy" 2>/dev/null; then
-                            log_info "✓ Created qcow2 snapshot copy: $qcow2_copy"
+                        if qemu-img convert -f qcow2 -O qcow2 "$ISO_PATH" "$qcow2_copy"; then
+                            log_info "✓ Created qcow2 copy: $qcow2_copy"
                         else
-                            # Fallback: convert to standalone qcow2
-                            log_info "Snapshot failed, creating standalone qcow2 copy..."
-                            if qemu-img convert -f qcow2 -O qcow2 "$ISO_PATH" "$qcow2_copy"; then
-                                log_info "✓ Created qcow2 copy: $qcow2_copy"
-                            else
-                                log_warn "Failed to create qcow2 copy, using original image"
-                                qcow2_copy="$ISO_PATH"
-                            fi
+                            log_warn "Failed to create qcow2 copy, using original image"
+                            log_warn "Note: Cloud-init will only run on first boot with original image"
+                            qcow2_copy="$ISO_PATH"
                         fi
                     else
                         log_info "Using existing qcow2 copy: $qcow2_copy"
