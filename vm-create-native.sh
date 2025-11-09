@@ -136,25 +136,51 @@ start_vm() {
         elif [[ "$ISO_PATH" == *.img ]]; then
             # Check if it's a cloud image (cloudimg in filename) or generic disk image
             if [[ "$ISO_PATH" == *cloudimg* ]] || [[ "$ISO_PATH" == *cloud* ]]; then
-                # Cloud image - create a qcow2 copy so cloud-init can run fresh each time
+                # Cloud image - detect actual format and create a qcow2 copy so cloud-init can run fresh each time
+                # Ubuntu cloud images are often already qcow2 even with .img extension
+                local actual_format=$(qemu-img info "$ISO_PATH" 2>/dev/null | grep "file format:" | awk '{print $3}' || echo "raw")
                 local qcow2_copy="${VM_DISK%.qcow2}-cloud.qcow2"
-                if [[ ! -f "$qcow2_copy" ]] || [[ "$ISO_PATH" -nt "$qcow2_copy" ]]; then
-                    log_info "Creating qcow2 copy of cloud image for fresh cloud-init runs..."
-                    if qemu-img convert -f raw -O qcow2 "$ISO_PATH" "$qcow2_copy"; then
-                        log_info "✓ Created qcow2 copy: $qcow2_copy"
+                
+                if [[ "$actual_format" == "qcow2" ]]; then
+                    # Already qcow2 - create a snapshot/copy for fresh cloud-init runs
+                    log_info "Cloud image is already qcow2 format, creating snapshot copy for fresh cloud-init runs..."
+                    if [[ ! -f "$qcow2_copy" ]] || [[ "$ISO_PATH" -nt "$qcow2_copy" ]]; then
+                        if qemu-img create -f qcow2 -b "$ISO_PATH" -F qcow2 "$qcow2_copy" 2>/dev/null; then
+                            log_info "✓ Created qcow2 snapshot copy: $qcow2_copy"
+                        else
+                            # Fallback: convert to standalone qcow2
+                            log_info "Snapshot failed, creating standalone qcow2 copy..."
+                            if qemu-img convert -f qcow2 -O qcow2 "$ISO_PATH" "$qcow2_copy"; then
+                                log_info "✓ Created qcow2 copy: $qcow2_copy"
+                            else
+                                log_warn "Failed to create qcow2 copy, using original image"
+                                qcow2_copy="$ISO_PATH"
+                            fi
+                        fi
                     else
-                        log_warn "Failed to create qcow2 copy, using raw image directly"
-                        log_warn "Note: Cloud-init will only run on first boot with raw images"
-                        qcow2_copy="$ISO_PATH"
+                        log_info "Using existing qcow2 copy: $qcow2_copy"
                     fi
                 else
-                    log_info "Using existing qcow2 copy: $qcow2_copy"
+                    # Raw format - convert to qcow2
+                    log_info "Cloud image is raw format, converting to qcow2 for fresh cloud-init runs..."
+                    if [[ ! -f "$qcow2_copy" ]] || [[ "$ISO_PATH" -nt "$qcow2_copy" ]]; then
+                        if qemu-img convert -f raw -O qcow2 "$ISO_PATH" "$qcow2_copy"; then
+                            log_info "✓ Created qcow2 copy: $qcow2_copy"
+                        else
+                            log_warn "Failed to create qcow2 copy, using raw image directly"
+                            log_warn "Note: Cloud-init will only run on first boot with raw images"
+                            qcow2_copy="$ISO_PATH"
+                        fi
+                    else
+                        log_info "Using existing qcow2 copy: $qcow2_copy"
+                    fi
                 fi
                 drive_arg="-drive file=$qcow2_copy,if=virtio,format=qcow2"
             else
-                # Generic disk image
-                log_info "Using disk image: $ISO_PATH"
-                drive_arg="-drive file=$ISO_PATH,if=virtio,format=raw"
+                # Generic disk image - detect format
+                local actual_format=$(qemu-img info "$ISO_PATH" 2>/dev/null | grep "file format:" | awk '{print $3}' || echo "raw")
+                log_info "Using disk image: $ISO_PATH (format: $actual_format)"
+                drive_arg="-drive file=$ISO_PATH,if=virtio,format=$actual_format"
             fi
         else
             # ISO - boot from CD
