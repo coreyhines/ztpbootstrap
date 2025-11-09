@@ -8,7 +8,7 @@
 
 1. ✅ VM Creation (Fedora 43 cloud image)
 2. ✅ VM Boot and Cloud-Init
-3. ⚠️ SSH Access Verification - **ISSUE FOUND**
+3. ⚠️ SSH Access Verification - **FIX APPLIED**
 4. ⏳ Repository Clone Verification
 5. ⏳ Service Setup and Deployment
 6. ⏳ Service Health Checks
@@ -20,15 +20,18 @@
 ## Errors Encountered
 
 ### Error 1: SSH Key Not Added to Authorized Keys
-**Status:** 🔴 CRITICAL  
+**Status:** ✅ FIXED  
 **Description:** Cloud-init completed but SSH key from host was not added to authorized_keys  
 **Log Evidence:** `ci-info: no authorized SSH keys fingerprints found for user fedora.`  
-**Impact:** Password authentication required (not ideal for automation)  
-**Root Cause:** The mount point search in cloud-init runcmd is not finding the SSH key file  
-**Location:** `vm-create-native.sh` lines 465-490 (cloud-init runcmd section)
+**Root Cause:** The mount point search in cloud-init runcmd was not finding the SSH key file because cloud-init reads directly from `/dev/vdb` (seed device), not from a mount point  
+**Fix Applied:** 
+- Changed approach to use cloud-init's `write_files` feature to copy SSH key to `/tmp/host_ssh_key.pub`
+- Embed SSH key content directly in user-data via placeholder replacement
+- Simplified runcmd to just read from `/tmp/host_ssh_key.pub` (which cloud-init creates)
+- More reliable than searching mount points
 
 ### Error 2: README File Not Created
-**Status:** 🟡 MINOR  
+**Status:** 🟡 MINOR (to be verified after SSH fix)  
 **Description:** README_VM_SETUP.txt file was not created in /home/fedora/  
 **Log Evidence:** `cat: /home/fedora/README_VM_SETUP.txt: No such file or directory`  
 **Impact:** Minor - file is informational only  
@@ -49,18 +52,77 @@
 - SSH service started
 - Repository cloned to /home/fedora/ztpbootstrap
 - Macvlan network created
-- **Issue:** SSH key not added to authorized_keys
-- **Issue:** README file not created
+- **Issue:** SSH key not added to authorized_keys (FIXED)
+- **Issue:** README file not created (to be verified)
 
 ### Phase 3: SSH Access
-**Status:** ⚠️ IN PROGRESS
+**Status:** ⏳ PENDING RE-TEST
 - SSH service is running
 - Password authentication should be enabled (per cloud-init config)
-- Testing password authentication...
+- SSH key fix applied - need to re-test
 
 ## Next Steps
 
-1. Fix SSH key mounting/copying in cloud-init
-2. Fix README file creation
-3. Verify password authentication works
+1. ✅ Fix SSH key deployment (DONE)
+2. Re-run VM creation to test SSH key fix
+3. Verify password authentication works as fallback
 4. Continue with service setup
+5. Verify README file creation
+
+[38;5;231m### Phase 4: Re-Test with Fixes[0m
+[38;5;231m**Status:** ✅ IN PROGRESS[0m
+[38;5;231m- VM recreated with fixed configuration[0m
+[38;5;231m- Testing SSH key-based authentication[0m
+[38;5;231m- Testing service setup[0m
+
+
+[38;5;231m### Phase 5: Final Test with All Fixes[0m
+[38;5;231m**Status:** ✅ IN PROGRESS[0m
+[38;5;231m- Fixed write_files removal bug (was removing entire section)[0m
+[38;5;231m- VM recreated with all fixes[0m
+[38;5;231m- Testing complete end-to-end flow[0m
+
+[38;5;231m## Test Results Summary[0m
+
+[38;5;231m### ✅ Successful Steps[0m
+[38;5;231m1. VM Creation - Working[0m
+[38;5;231m2. Cloud-Init Execution - Working[0m
+[38;5;231m3. SSH Key Deployment - **FIXED** (write_files bug)[0m
+[38;5;231m4. Repository Clone - Working[0m
+[38;5;231m5. Service Setup - Testing...[0m
+
+[38;5;231m### 🔴 Issues Found and Fixed[0m
+[38;5;231m1. **Unbound Variable Error** - Fixed with quoted heredoc + placeholders[0m
+[38;5;231m2. **SSH Key Not Deployed** - Fixed by using write_files instead of mount search[0m
+[38;5;231m3. **write_files Section Deleted** - Fixed sed command to only remove auto-setup-flag[0m
+
+
+[38;5;231m## Final Test Results[0m
+
+[38;5;231m### ✅ All Critical Issues Resolved[0m
+
+[38;5;231m1. **VM Creation** - ✅ Working perfectly[0m
+[38;5;231m2. **Cloud-Init** - ✅ Working perfectly  [0m
+[38;5;231m3. **SSH Key Authentication** - ✅ **WORKING!** SSH key successfully deployed[0m
+[38;5;231m4. **Repository Clone** - ✅ Working[0m
+[38;5;231m5. **Service Setup** - ⏳ In progress (requires sudo)[0m
+
+[38;5;231m### Manual Steps Required[0m
+
+[38;5;231m**NONE FOUND SO FAR** - All steps are automated![0m
+
+[38;5;231mThe only "manual" step is that `setup.sh` must be run with `sudo`, which is expected and documented.[0m
+
+[38;5;231m### Summary[0m
+
+[38;5;231m✅ **SSH Key Authentication: WORKING**[0m
+[38;5;231m- SSH key successfully embedded in cloud-init user-data[0m
+[38;5;231m- Key written to /tmp/host_ssh_key.pub by cloud-init write_files[0m
+[38;5;231m- Key added to ~/.ssh/authorized_keys by runcmd[0m
+[38;5;231m- Passwordless SSH access confirmed working[0m
+
+[38;5;231m✅ **All Fixes Applied:**[0m
+[38;5;231m1. Unbound variable error - Fixed[0m
+[38;5;231m2. SSH key deployment - Fixed  [0m
+[38;5;231m3. write_files section deletion - Fixed[0m
+
