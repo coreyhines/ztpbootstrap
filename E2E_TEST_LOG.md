@@ -160,3 +160,12 @@
 
 [38;5;231m**Conclusion:** The installation process is now **fully automated** except for the expected security confirmation when using insecure HTTP-only mode. This is by design and appropriate for security reasons.[0m
 
+
+[38;5;231m### Update: Manual Step Eliminated[0m
+
+[38;5;231m**Service Setup Confirmation Prompt** - ✅ **FIXED**[0m
+[38;5;231m- Removed confirmation prompt when `--http-only` flag is explicitly provided[0m
+[38;5;231m- Flags should always override prompts for automation[0m
+[38;5;231m- Confirmation prompts are only appropriate for interactive setups[0m
+[38;5;231m- **Status:** ✅ **ELIMINATED** - No manual steps remaining![0m
+
