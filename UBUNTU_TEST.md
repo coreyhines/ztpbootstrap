@@ -31,7 +31,7 @@
 
 **Fix Applied:** 
 - Use `qemu-img info` to detect actual format instead of assuming based on extension
-- For qcow2 images, create snapshot copy (more efficient) or standalone copy as fallback
+- For qcow2 images, create standalone copy (snapshot copies can cause UEFI boot issues)
 - For raw images, convert to qcow2 as before
 - Fixes VM boot issues where VM would get stuck in UEFI shell
 
