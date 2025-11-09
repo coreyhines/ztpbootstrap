@@ -491,17 +491,17 @@ runcmd:
     # Create minimal ztpbootstrap.env file for automated testing
     # This allows setup.sh to run without manual configuration
     mkdir -p /opt/containerdata/ztpbootstrap
-    cat > /opt/containerdata/ztpbootstrap/ztpbootstrap.env << 'ENVFILEEOF'
-# Minimal configuration for automated testing
-CV_ADDR=www.arista.io
-ENROLLMENT_TOKEN=test_token_for_automated_testing
-CV_PROXY=
-EOS_URL=
-NTP_SERVER=time.nist.gov
-TZ=UTC
-NGINX_HOST=ztpboot.example.com
-NGINX_PORT=443
-ENVFILEEOF
+    printf '%s\n' \
+      '# Minimal configuration for automated testing' \
+      'CV_ADDR=www.arista.io' \
+      'ENROLLMENT_TOKEN=test_token_for_automated_testing' \
+      'CV_PROXY=' \
+      'EOS_URL=' \
+      'NTP_SERVER=time.nist.gov' \
+      'TZ=UTC' \
+      'NGINX_HOST=ztpboot.example.com' \
+      'NGINX_PORT=443' \
+      > /opt/containerdata/ztpbootstrap/ztpbootstrap.env
     chmod 644 /opt/containerdata/ztpbootstrap/ztpbootstrap.env
     # Also copy bootstrap.py and nginx.conf to expected location for setup.sh
     if [ -f /home/__DISTRO_USER__/ztpbootstrap/bootstrap.py ]; then
