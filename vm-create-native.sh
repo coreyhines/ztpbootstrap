@@ -463,9 +463,9 @@ runcmd:
     # Set up SSH authorized_keys from host if available
     # This allows passwordless SSH access from the host machine
     # Cloud-init mounts the ISO at /dev/sr0 or /dev/cdrom, we need to find it
+    # Use nullglob to handle glob patterns that don't match
+    shopt -s nullglob 2>/dev/null || true
     for mount_point in /mnt /media/cdrom /media/cdrom0 /run/media/*/cidata; do
-      # Skip if glob didn't match (mount_point would be literal string with *)
-      [ "$mount_point" = "/run/media/*/cidata" ] && [ ! -d "/run/media" ] && continue
       if [ -f "$mount_point/host_ssh_key.pub" ]; then
         mkdir -p /home/${distro_user}/.ssh
         cat "$mount_point/host_ssh_key.pub" >> /home/${distro_user}/.ssh/authorized_keys
