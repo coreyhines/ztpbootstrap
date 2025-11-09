@@ -368,6 +368,7 @@ start_vm() {
         fi
         
         # Create user-data for cloud-init (enable SSH, set password, clone repo, setup macvlan)
+        # Use unquoted heredoc to allow variable expansion, but escape the glob pattern
         cat > "$cloud_init_dir/user-data" << CLOUDINITEOF
 #cloud-config
 # Disable default user (if any) and create our own
@@ -465,7 +466,8 @@ runcmd:
     # Cloud-init mounts the ISO at /dev/sr0 or /dev/cdrom, we need to find it
     # Use nullglob to handle glob patterns that don't match
     shopt -s nullglob 2>/dev/null || true
-    for mount_point in /mnt /media/cdrom /media/cdrom0 /run/media/*/cidata; do
+    # Escape the glob pattern to prevent bash from trying to expand it during script parsing
+    for mount_point in /mnt /media/cdrom /media/cdrom0 /run/media/\*/cidata; do
       if [ -f "$mount_point/host_ssh_key.pub" ]; then
         mkdir -p /home/${distro_user}/.ssh
         cat "$mount_point/host_ssh_key.pub" >> /home/${distro_user}/.ssh/authorized_keys
