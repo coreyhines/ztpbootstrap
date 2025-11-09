@@ -7,7 +7,7 @@
 
 1. ✅ Wiped existing VM
 2. ✅ Created fresh Fedora 43 VM with cloud-init
-3. ✅ Waited for cloud-init to complete (3 minutes)
+3. ✅ Waited for cloud-init to complete (5+ minutes)
 4. ✅ Tested SSH access (automatic with SSH key)
 5. ✅ Verified repository clone (automatic)
 6. ✅ Verified prerequisites installed (automatic)
@@ -16,6 +16,7 @@
 9. ✅ Ran setup.sh --http-only
 10. ✅ Verified all services running
 11. ✅ Tested all endpoints from host
+12. ✅ Verified no manual steps required
 
 ## Results
 
@@ -64,4 +65,10 @@ The entire setup process from VM creation to service deployment is now fully aut
 - No manual service configuration required
 
 The service is ready to use immediately after VM creation and cloud-init completion.
+
+## Test Execution Notes
+
+- Cloud-init takes approximately 3-5 minutes to complete on first boot
+- SSH access becomes available automatically once cloud-init finishes
+- All automation works as expected with zero manual intervention
 
