@@ -617,8 +617,15 @@ start_service() {
     # Check if webui container file exists and try to ensure systemd recognizes it
     if [[ -f "${systemd_dir}/ztpbootstrap-webui.container" ]]; then
         log "WebUI container file found, ensuring systemd recognizes it..."
-        # Touch the file to trigger systemd generator (if needed)
-        touch "${systemd_dir}/ztpbootstrap-webui.container"
+        # Manually run quadlet generator to ensure service is created
+        # This is needed because systemd's automatic generator may not always process all files
+        if command -v /usr/libexec/podman/quadlet >/dev/null 2>&1; then
+            if /usr/libexec/podman/quadlet "${systemd_dir}/ztpbootstrap-webui.container" 2>/dev/null; then
+                log "WebUI service generated successfully"
+            else
+                warn "Failed to generate WebUI service via quadlet generator"
+            fi
+        fi
         systemctl daemon-reload
         sleep 1
     fi
