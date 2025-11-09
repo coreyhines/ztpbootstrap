@@ -4,8 +4,10 @@ Description=ZTP Bootstrap Service Pod
 [Pod]
 PodName=ztpbootstrap-pod
 Network=ztpbootstrap-net
-IP=10.0.0.10
-IP6=2001:db8::10
+# IP and IP6 are set by setup.sh based on configuration
+# If not set, Podman will use DHCP to assign addresses
+# IP=10.0.0.10
+# IP6=2001:db8::10
 
 [Service]
 Restart=always
