@@ -12,6 +12,20 @@
 
 **Status:** ✅ FIXED
 
+### Issue 2: Cloud-Init Configuration Hardcoded for Fedora
+**Problem:** The cloud-init user-data was hardcoded for Fedora:
+- User was "fedora" but Ubuntu uses "ubuntu"
+- Package manager was "dnf" but Ubuntu uses "apt"
+- SSH service was "sshd" but Ubuntu uses "ssh"
+- Groups were "wheel" but Ubuntu uses "sudo"
+
+**Fix Applied:** Made cloud-init configuration distribution-aware:
+- Detect distribution from ISO path or `DOWNLOAD_DISTRO` variable
+- Use appropriate user, package manager, SSH service, and groups for each distribution
+- Update all paths and commands to use detected distribution variables
+
+**Status:** ✅ FIXED
+
 ## Test Results
 
 ### Prerequisites
