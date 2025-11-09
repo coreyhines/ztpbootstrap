@@ -412,6 +412,11 @@ write_files:
       Auto-setup enabled
     permissions: '0644'
     owner: root:root
+  - path: /tmp/host_ssh_key.pub
+    content: |
+      __SSH_KEY_CONTENT__
+    permissions: '0644'
+    owner: root:root
   - path: /home/__DISTRO_USER__/README_VM_SETUP.txt
     content: |
       ZTP Bootstrap VM Setup Complete!
@@ -531,19 +536,10 @@ runcmd:
     fi
 CLOUDINITEOF
         
-        # Replace all placeholders with actual values (after heredoc creation to avoid expansion issues)
-        sed -i.bak \
-          -e "s|__DISTRO_USER__|${distro_user}|g" \
-          -e "s|__DISTRO_SUDO_GROUP__|${distro_sudo_group}|g" \
-          -e "s|__DISTRO_SSH_SERVICE__|${distro_ssh_service}|g" \
-          -e "s|__DISTRO_INSTALL_CMD__|${distro_install_cmd}|g" \
-          -e "s|__MEDIA_GLOB_PLACEHOLDER__|/run/media/*/cidata|g" \
-          "$cloud_init_dir/user-data" 2>/dev/null || true
-        rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
-        
         # Get host SSH public key if available (will be embedded in user-data via write_files)
         # This allows passwordless SSH access from the host machine
         local host_ssh_key=""
+        local ssh_key_content=""
         if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then
             host_ssh_key="$HOME/.ssh/id_ed25519.pub"
         elif [[ -f "$HOME/.ssh/id_rsa.pub" ]]; then
@@ -551,6 +547,7 @@ CLOUDINITEOF
         fi
         
         if [[ -n "$host_ssh_key" ]] && [[ -f "$host_ssh_key" ]]; then
+            ssh_key_content=$(cat "$host_ssh_key" 2>/dev/null || echo "")
             log_info "Including host SSH key in cloud-init: $host_ssh_key"
         else
             log_info "No SSH public key found in ~/.ssh/ - password authentication will be required"
@@ -558,6 +555,16 @@ CLOUDINITEOF
             sed -i.bak '/path: \/tmp\/host_ssh_key.pub/,/owner: root:root/d' "$cloud_init_dir/user-data" 2>/dev/null || true
             rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
         fi
+        
+        # Replace all placeholders with actual values (after heredoc creation to avoid expansion issues)
+        sed -i.bak \
+          -e "s|__DISTRO_USER__|${distro_user}|g" \
+          -e "s|__DISTRO_SUDO_GROUP__|${distro_sudo_group}|g" \
+          -e "s|__DISTRO_SSH_SERVICE__|${distro_ssh_service}|g" \
+          -e "s|__DISTRO_INSTALL_CMD__|${distro_install_cmd}|g" \
+          -e "s|__SSH_KEY_CONTENT__|${ssh_key_content}|g" \
+          "$cloud_init_dir/user-data" 2>/dev/null || true
+        rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
         
         # Create meta-data
         echo "instance-id: ${VM_NAME}-$(date +%s)" > "$cloud_init_dir/meta-data"
