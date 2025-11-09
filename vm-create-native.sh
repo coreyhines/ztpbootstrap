@@ -572,11 +572,8 @@ CLOUDINITEOF
         
         # Remove auto-setup flag file creation if auto-setup is disabled
         if [[ "$AUTO_SETUP" != "true" ]]; then
-            # Remove the write_files section for auto-setup-flag
-            # This is a simple approach - remove lines between write_files: and the line before runcmd:
-            sed -i.bak '/^write_files:/,/^runcmd:/{ /^write_files:/d; /^runcmd:/!d; }' "$cloud_init_dir/user-data" 2>/dev/null || \
-            # Fallback: remove the write_files block manually
-            sed -i.bak '/^write_files:/,/^owner: root:root$/d' "$cloud_init_dir/user-data" 2>/dev/null || true
+            # Remove only the auto-setup-flag write_files entry, not the entire write_files section
+            sed -i.bak '/path: \/tmp\/auto-setup-flag/,/owner: root:root/d' "$cloud_init_dir/user-data" 2>/dev/null || true
             rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
         fi
         
