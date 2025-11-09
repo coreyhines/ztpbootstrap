@@ -603,6 +603,9 @@ start_service() {
         exit 1
     fi
     
+    # Define systemd directory (same as in setup_pod)
+    local systemd_dir="/etc/containers/systemd/ztpbootstrap"
+    
     # Reload systemd daemon after copying files so it recognizes the new services
     log "Reloading systemd daemon..."
     systemctl daemon-reload
