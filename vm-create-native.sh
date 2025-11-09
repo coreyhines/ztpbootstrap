@@ -544,6 +544,10 @@ runcmd:
     fi
 CLOUDINITEOF
         
+        # Replace placeholder with actual glob pattern (after heredoc is created to avoid expansion issues)
+        sed -i.bak 's|__MEDIA_GLOB_PLACEHOLDER__|/run/media/*/cidata|g' "$cloud_init_dir/user-data" 2>/dev/null || true
+        rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
+        
         # Copy host SSH public key to cloud-init directory if available
         # This allows passwordless SSH access from the host machine
         local host_ssh_key=""
