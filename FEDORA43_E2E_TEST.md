@@ -72,3 +72,11 @@ The service is ready to use immediately after VM creation and cloud-init complet
 - SSH access becomes available automatically once cloud-init finishes
 - All automation works as expected with zero manual intervention
 
+## Latest Test Run
+
+**Date:** 2025-11-09 (after SELinux flag removal)
+
+**Status:** Test restarted after fixing SELinux `:z` flag removal for NFS compatibility
+
+**Results:** (Test in progress - waiting for VM to boot and cloud-init to complete)
+
