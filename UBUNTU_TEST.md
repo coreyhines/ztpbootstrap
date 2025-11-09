@@ -37,6 +37,18 @@
 
 **Status:** ✅ FIXED
 
+### Issue 4: Unbound Variable Error in Cloud-Init Heredoc
+**Problem:** Script failed with `mount_point: unbound variable` error when glob pattern `/run/media/*/cidata` didn't match any directories. This affected both Fedora and Ubuntu VM creation.
+
+**Root Cause:** With `set -u` (unbound variable check), when a glob pattern doesn't match, bash treats it as an unbound variable and exits.
+
+**Fix Applied:**
+- Added `shopt -s nullglob` before the for loop to handle glob patterns that don't match
+- When glob doesn't match, it's simply skipped instead of causing an error
+- Fixes VM creation failures for both Fedora and Ubuntu
+
+**Status:** ✅ FIXED
+
 ## Test Results
 
 ### Prerequisites
