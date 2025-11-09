@@ -324,30 +324,51 @@ start_vm() {
         local cloud_init_dir="/tmp/cloud-init-${VM_NAME}"
         mkdir -p "$cloud_init_dir"
         
+        # Detect distribution from ISO path or download distro
+        local distro_user="fedora"
+        local distro_pkg_mgr="dnf"
+        local distro_ssh_service="sshd"
+        local distro_sudo_group="wheel"
+        local distro_install_cmd="dnf install -y"
+        
+        if [[ "$ISO_PATH" == *ubuntu* ]] || [[ "$ISO_PATH" == *Ubuntu* ]] || [[ "$DOWNLOAD_DISTRO" == "ubuntu" ]] || [[ "$DOWNLOAD_DISTRO" == "Ubuntu" ]]; then
+            distro_user="ubuntu"
+            distro_pkg_mgr="apt"
+            distro_ssh_service="ssh"
+            distro_sudo_group="sudo"
+            distro_install_cmd="apt-get update && apt-get install -y"
+        elif [[ "$ISO_PATH" == *debian* ]] || [[ "$ISO_PATH" == *Debian* ]] || [[ "$DOWNLOAD_DISTRO" == "debian" ]] || [[ "$DOWNLOAD_DISTRO" == "Debian" ]]; then
+            distro_user="debian"
+            distro_pkg_mgr="apt"
+            distro_ssh_service="ssh"
+            distro_sudo_group="sudo"
+            distro_install_cmd="apt-get update && apt-get install -y"
+        fi
+        
         # Create user-data for cloud-init (enable SSH, set password, clone repo, setup macvlan)
-        cat > "$cloud_init_dir/user-data" << 'CLOUDINITEOF'
+        cat > "$cloud_init_dir/user-data" << CLOUDINITEOF
 #cloud-config
 # Disable default user (if any) and create our own
 system_info:
   default_user:
-    name: fedora
+    name: ${distro_user}
     lock_passwd: false
-    plain_text_passwd: 'fedora'
-    groups: [wheel, adm, systemd-journal]
+    plain_text_passwd: '${distro_user}'
+    groups: [${distro_sudo_group}, adm, systemd-journal]
     sudo: ["ALL=(ALL) NOPASSWD:ALL"]
     shell: /bin/bash
 
 users:
   - default
-  - name: fedora
+  - name: ${distro_user}
     sudo: ALL=(ALL) NOPASSWD:ALL
-    groups: [wheel, adm, systemd-journal]
+    groups: [${distro_sudo_group}, adm, systemd-journal]
     shell: /bin/bash
     lock_passwd: false
-    plain_text_passwd: 'fedora'
+    plain_text_passwd: '${distro_user}'
 chpasswd:
   list: |
-    fedora:fedora
+    ${distro_user}:${distro_user}
   expire: false
 ssh_pwauth: true
 disable_root: false
@@ -366,14 +387,14 @@ write_files:
       Auto-setup enabled
     permissions: '0644'
     owner: root:root
-  - path: /home/fedora/README_VM_SETUP.txt
+  - path: /home/${distro_user}/README_VM_SETUP.txt
     content: |
       ZTP Bootstrap VM Setup Complete!
 
-      The repository has been cloned to: /home/fedora/ztpbootstrap
+      The repository has been cloned to: /home/${distro_user}/ztpbootstrap
 
       Next steps:
-      1. cd /home/fedora/ztpbootstrap
+      1. cd /home/${distro_user}/ztpbootstrap
       2. Run interactive setup: ./setup-interactive.sh
          OR
          Run manual setup: ./setup.sh
@@ -381,15 +402,15 @@ write_files:
       The macvlan network 'ztpbootstrap-net' has been created (if ethernet interface was found).
 
       SSH access:
-        User: fedora
-        Password: fedora
-        From host: ssh fedora@localhost -p 2222
+        User: ${distro_user}
+        Password: ${distro_user}
+        From host: ssh ${distro_user}@localhost -p 2222
       
       Service access (if running on port 80/443):
         HTTP:  http://localhost:8080
         HTTPS: https://localhost:8443
     permissions: '0644'
-    owner: fedora:fedora
+    owner: ${distro_user}:${distro_user}
 runcmd:
   - |
     # Configure SSH to allow password authentication - do this FIRST
@@ -402,49 +423,49 @@ runcmd:
     sed -i 's/^#*ChallengeResponseAuthentication.*/ChallengeResponseAuthentication yes/' /etc/ssh/sshd_config
     sed -i 's/^ChallengeResponseAuthentication no/ChallengeResponseAuthentication yes/' /etc/ssh/sshd_config
     # Ensure user exists and has password set
-    if ! id fedora &>/dev/null; then
-      useradd -m -G wheel -s /bin/bash fedora
+    if ! id ${distro_user} &>/dev/null; then
+      useradd -m -G ${distro_sudo_group} -s /bin/bash ${distro_user}
     fi
-    echo 'fedora:fedora' | chpasswd
-    usermod -aG wheel fedora
-  - systemctl enable sshd
-  - systemctl restart sshd
+    echo '${distro_user}:${distro_user}' | chpasswd
+    usermod -aG ${distro_sudo_group} ${distro_user}
+  - systemctl enable ${distro_ssh_service}
+  - systemctl restart ${distro_ssh_service}
   - |
     # Wait a moment for SSH to restart, then verify
     sleep 2
-    systemctl status sshd || true
+    systemctl status ${distro_ssh_service} || true
   - |
     # Install required packages
-    dnf install -y git podman curl yq
+    ${distro_install_cmd} git podman curl yq
   - |
     # Set up SSH authorized_keys from host if available
     # This allows passwordless SSH access from the host machine
     # Cloud-init mounts the ISO at /dev/sr0 or /dev/cdrom, we need to find it
     for mount_point in /mnt /media/cdrom /media/cdrom0 /run/media/*/cidata; do
       if [ -f "$mount_point/host_ssh_key.pub" ]; then
-        mkdir -p /home/fedora/.ssh
-        cat "$mount_point/host_ssh_key.pub" >> /home/fedora/.ssh/authorized_keys
-        chmod 700 /home/fedora/.ssh
-        chmod 600 /home/fedora/.ssh/authorized_keys
-        chown -R fedora:fedora /home/fedora/.ssh
+        mkdir -p /home/${distro_user}/.ssh
+        cat "$mount_point/host_ssh_key.pub" >> /home/${distro_user}/.ssh/authorized_keys
+        chmod 700 /home/${distro_user}/.ssh
+        chmod 600 /home/${distro_user}/.ssh/authorized_keys
+        chown -R ${distro_user}:${distro_user} /home/${distro_user}/.ssh
         echo "SSH key from host added to authorized_keys"
         break
       fi
     done
     # Also check if cloud-init copied it to /tmp (fallback)
     if [ -f /tmp/host_ssh_key.pub ]; then
-      mkdir -p /home/fedora/.ssh
-      cat /tmp/host_ssh_key.pub >> /home/fedora/.ssh/authorized_keys
-      chmod 700 /home/fedora/.ssh
-      chmod 600 /home/fedora/.ssh/authorized_keys
-      chown -R fedora:fedora /home/fedora/.ssh
+      mkdir -p /home/${distro_user}/.ssh
+      cat /tmp/host_ssh_key.pub >> /home/${distro_user}/.ssh/authorized_keys
+      chmod 700 /home/${distro_user}/.ssh
+      chmod 600 /home/${distro_user}/.ssh/authorized_keys
+      chown -R ${distro_user}:${distro_user} /home/${distro_user}/.ssh
       echo "SSH key from host added to authorized_keys (from /tmp)"
     fi
   - |
     # Clone the repository
-    if [ ! -d /home/fedora/ztpbootstrap ]; then
-      sudo -u fedora git clone https://github.com/coreyhines/ztpbootstrap.git /home/fedora/ztpbootstrap || \
-      sudo -u fedora git clone https://github.com/YOUR_USERNAME/ztpbootstrap.git /home/fedora/ztpbootstrap || \
+    if [ ! -d /home/${distro_user}/ztpbootstrap ]; then
+      sudo -u ${distro_user} git clone https://github.com/coreyhines/ztpbootstrap.git /home/${distro_user}/ztpbootstrap || \
+      sudo -u ${distro_user} git clone https://github.com/YOUR_USERNAME/ztpbootstrap.git /home/${distro_user}/ztpbootstrap || \
       echo "Repository clone failed. Please clone manually."
     fi
   - |
@@ -475,24 +496,24 @@ runcmd:
     fi
   - |
     # Set ownership of cloned repo
-    chown -R fedora:fedora /home/fedora/ztpbootstrap 2>/dev/null || true
+    chown -R ${distro_user}:${distro_user} /home/${distro_user}/ztpbootstrap 2>/dev/null || true
   - |
     # Ensure README file has correct ownership (created by write_files)
-    chown fedora:fedora /home/fedora/README_VM_SETUP.txt 2>/dev/null || true
+    chown ${distro_user}:${distro_user} /home/${distro_user}/README_VM_SETUP.txt 2>/dev/null || true
   - echo "Cloud-init completed. Repository cloned and macvlan network configured."
-  - cat /home/fedora/README_VM_SETUP.txt
+  - cat /home/${distro_user}/README_VM_SETUP.txt
   - |
     # Optionally run interactive setup automatically
     # Check if auto-setup flag file exists (created by cloud-init write_files)
     AUTO_SETUP_VAL=$(if [ -f /tmp/auto-setup-flag ]; then echo "true"; else echo "false"; fi)
-    if [ -f /home/fedora/ztpbootstrap/setup-interactive.sh ] && [ "$AUTO_SETUP_VAL" = "true" ]; then
+    if [ -f /home/${distro_user}/ztpbootstrap/setup-interactive.sh ] && [ "$AUTO_SETUP_VAL" = "true" ]; then
       echo ""
       echo "Auto-running interactive setup..."
-      cd /home/fedora/ztpbootstrap
-      sudo -u fedora bash -c "cd /home/fedora/ztpbootstrap && ./setup-interactive.sh" || \
+      cd /home/${distro_user}/ztpbootstrap
+      sudo -u ${distro_user} bash -c "cd /home/${distro_user}/ztpbootstrap && ./setup-interactive.sh" || \
       echo "Interactive setup failed or was cancelled. Run manually: ./setup-interactive.sh"
     else
-      echo "Auto-setup disabled. Run manually: cd /home/fedora/ztpbootstrap && ./setup-interactive.sh"
+      echo "Auto-setup disabled. Run manually: cd /home/${distro_user}/ztpbootstrap && ./setup-interactive.sh"
     fi
 CLOUDINITEOF
         
@@ -552,7 +573,7 @@ CLOUDINITEOF
         
         if [[ -n "$cloud_init_iso" ]] && [[ -f "$cloud_init_iso" ]]; then
             log_info "Created cloud-init ISO: $cloud_init_iso"
-            log_info "Default user: fedora / Password: fedora"
+            log_info "Default user: ${distro_user} / Password: ${distro_user}"
             # Verify the ISO has the correct volume ID
             if command -v file &> /dev/null; then
                 local iso_info=$(file "$cloud_init_iso" 2>/dev/null || echo "")
