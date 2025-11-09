@@ -367,11 +367,9 @@ start_vm() {
             distro_install_cmd="apt-get update && apt-get install -y"
         fi
         
-        # Store glob pattern in variable to avoid bash trying to expand it during heredoc parsing
-        local media_glob="/run/media/*/cidata"
-        
         # Create user-data for cloud-init (enable SSH, set password, clone repo, setup macvlan)
         # Use unquoted heredoc to allow variable expansion
+        # Use placeholder for glob pattern to avoid bash expansion during heredoc creation
         cat > "$cloud_init_dir/user-data" << CLOUDINITEOF
 #cloud-config
 # Disable default user (if any) and create our own
@@ -469,8 +467,8 @@ runcmd:
     # Cloud-init mounts the ISO at /dev/sr0 or /dev/cdrom, we need to find it
     # Use nullglob to handle glob patterns that don't match
     shopt -s nullglob 2>/dev/null || true
-    # Use variable for glob pattern to avoid expansion issues during heredoc creation
-    for mount_point in /mnt /media/cdrom /media/cdrom0 ${media_glob}; do
+    # Use placeholder that will be replaced with actual glob pattern after heredoc creation
+    for mount_point in /mnt /media/cdrom /media/cdrom0 __MEDIA_GLOB_PLACEHOLDER__; do
       if [ -f "$mount_point/host_ssh_key.pub" ]; then
         mkdir -p /home/${distro_user}/.ssh
         cat "$mount_point/host_ssh_key.pub" >> /home/${distro_user}/.ssh/authorized_keys
