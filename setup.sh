@@ -438,8 +438,19 @@ setup_pod() {
                     warn "Failed to set Network in pod file"
                 fi
                 
+                # For HTTP-only mode (testing), use DHCP instead of static IPs
+                if [[ "$HTTP_ONLY" == "true" ]]; then
+                    # Remove static IPs to use DHCP
+                    if sed -i.tmp "/^IP=/d" "$pod_file" 2>/dev/null; then
+                        rm -f "${pod_file}.tmp" 2>/dev/null || true
+                        log "Removed IPv4 address from pod file (using DHCP for testing)"
+                    fi
+                    if sed -i.tmp "/^IP6=/d" "$pod_file" 2>/dev/null; then
+                        rm -f "${pod_file}.tmp" 2>/dev/null || true
+                        log "Removed IPv6 address from pod file (using DHCP for testing)"
+                    fi
                 # Update or remove IPv4 address
-                if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]] && [[ "$ipv4" != "" ]]; then
+                elif [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]] && [[ "$ipv4" != "" ]]; then
                     if grep -q "^IP=" "$pod_file" 2>/dev/null; then
                         if sed -i.tmp "s|^IP=.*|IP=$ipv4|" "$pod_file" 2>/dev/null; then
                             rm -f "${pod_file}.tmp" 2>/dev/null || true
@@ -472,8 +483,8 @@ setup_pod() {
                     fi
                 fi
                 
-                # Update or remove IPv6 address
-                if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]] && [[ "$ipv6" != "" ]]; then
+                # Update or remove IPv6 address (skip if HTTP_ONLY already handled above)
+                if [[ "$HTTP_ONLY" != "true" ]] && [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]] && [[ "$ipv6" != "" ]]; then
                     if grep -q "^IP6=" "$pod_file" 2>/dev/null; then
                         if sed -i.tmp "s|^IP6=.*|IP6=$ipv6|" "$pod_file" 2>/dev/null; then
                             rm -f "${pod_file}.tmp" 2>/dev/null || true
@@ -499,11 +510,11 @@ setup_pod() {
                             fi
                         fi
                     fi
-                else
-                    # Remove IP6= line if IPv6 is empty (disabled)
+                elif [[ "$HTTP_ONLY" != "true" ]]; then
+                    # Remove IP6= line if IPv6 is empty (disabled) - but not if HTTP_ONLY already handled it
                     if sed -i.tmp "/^IP6=/d" "$pod_file" 2>/dev/null; then
                         rm -f "${pod_file}.tmp" 2>/dev/null || true
-                        log "Removed IPv6 address from pod file (IPv6 disabled)"
+                        log "Removed IPv6 address from pod file (IPv6 disabled or will use DHCP)"
                     fi
                 fi
             fi
