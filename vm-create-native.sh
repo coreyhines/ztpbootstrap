@@ -134,9 +134,28 @@ start_vm() {
             log_info "Using cloud image (qcow2): $ISO_PATH"
             drive_arg="-drive file=$ISO_PATH,if=virtio,format=qcow2"
         elif [[ "$ISO_PATH" == *.img ]]; then
-            # Generic disk image
-            log_info "Using disk image: $ISO_PATH"
-            drive_arg="-drive file=$ISO_PATH,if=virtio,format=raw"
+            # Check if it's a cloud image (cloudimg in filename) or generic disk image
+            if [[ "$ISO_PATH" == *cloudimg* ]] || [[ "$ISO_PATH" == *cloud* ]]; then
+                # Cloud image - create a qcow2 copy so cloud-init can run fresh each time
+                local qcow2_copy="${VM_DISK%.qcow2}-cloud.qcow2"
+                if [[ ! -f "$qcow2_copy" ]] || [[ "$ISO_PATH" -nt "$qcow2_copy" ]]; then
+                    log_info "Creating qcow2 copy of cloud image for fresh cloud-init runs..."
+                    if qemu-img convert -f raw -O qcow2 "$ISO_PATH" "$qcow2_copy"; then
+                        log_info "✓ Created qcow2 copy: $qcow2_copy"
+                    else
+                        log_warn "Failed to create qcow2 copy, using raw image directly"
+                        log_warn "Note: Cloud-init will only run on first boot with raw images"
+                        qcow2_copy="$ISO_PATH"
+                    fi
+                else
+                    log_info "Using existing qcow2 copy: $qcow2_copy"
+                fi
+                drive_arg="-drive file=$qcow2_copy,if=virtio,format=qcow2"
+            else
+                # Generic disk image
+                log_info "Using disk image: $ISO_PATH"
+                drive_arg="-drive file=$ISO_PATH,if=virtio,format=raw"
+            fi
         else
             # ISO - boot from CD
             iso_arg="-cdrom $ISO_PATH"
@@ -241,7 +260,7 @@ start_vm() {
     
     # Find UEFI firmware (required for booting disk images)
     local uefi_firmware=""
-    if [[ "$ISO_PATH" == *.raw ]] || [[ "$ISO_PATH" == *.qcow2 ]] || [[ -z "$ISO_PATH" ]]; then
+    if [[ "$ISO_PATH" == *.raw ]] || [[ "$ISO_PATH" == *.qcow2 ]] || [[ "$ISO_PATH" == *cloudimg* ]] || [[ "$ISO_PATH" == *cloud*.img ]] || [[ -z "$ISO_PATH" ]]; then
         # Cloud images and disk-only boots need UEFI firmware
         if [[ "$detected_arch" == "aarch64" ]]; then
             local firmware_paths=(
@@ -301,7 +320,7 @@ start_vm() {
     
     # Create cloud-init ISO if using cloud image
     local cloud_init_iso=""
-    if [[ "$ISO_PATH" == *.raw ]] || [[ "$ISO_PATH" == *.qcow2 ]]; then
+    if [[ "$ISO_PATH" == *.raw ]] || [[ "$ISO_PATH" == *.qcow2 ]] || [[ "$ISO_PATH" == *cloudimg* ]] || [[ "$ISO_PATH" == *cloud*.img ]]; then
         local cloud_init_dir="/tmp/cloud-init-${VM_NAME}"
         mkdir -p "$cloud_init_dir"
         
