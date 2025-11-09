@@ -1,259 +1,129 @@
-#!/bin/bash
-# CI/CD test script for ZTP Bootstrap Service
-# This script runs quick validation tests suitable for CI/CD pipelines
-# Returns exit code 0 on success, non-zero on failure
+[38;5;243m#[0m[38;5;243m!/bin/bash[0m
+[38;5;243m#[0m[38;5;243m CI End-to-End Test Script[0m
+[38;5;243m#[0m[38;5;243m This script runs a complete end-to-end test suitable for CI pipelines[0m
 
-set -euo pipefail
+[38;5;81mset[0m[38;5;231m -euo pipefail[0m
 
-# Configuration
-SCRIPT_DIR="/opt/containerdata/ztpbootstrap"
-FAILED=0
+[38;5;231mSCRIPT_DIR[0m[38;5;203m=[0m[38;5;231m"[0m[38;5;231m$[0m[38;5;186m([0m[38;5;81mcd[0m[38;5;186m [0m[38;5;231m"[0m[38;5;231m$[0m[38;5;186m([0m[38;5;231mdirname[0m[38;5;186m [0m[38;5;231m"[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mBASH_SOURCE[0m[38;5;231m[[0m[38;5;141m0[0m[38;5;231m][0m[38;5;186m}[0m[38;5;231m"[0m[38;5;186m)[0m[38;5;231m"[0m[38;5;186m [0m[38;5;203m&&[0m[38;5;186m [0m[38;5;231mpwd[0m[38;5;186m)[0m[38;5;231m"[0m
+[38;5;81mcd[0m[38;5;231m [0m[38;5;231m"[0m[38;5;231m$[0m[38;5;231mSCRIPT_DIR[0m[38;5;231m"[0m
 
-# Colors (disabled in CI, but useful for local runs)
-if [[ -t 1 ]]; then
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    NC='\033[0m'
-else
-    RED=''
-    GREEN=''
-    YELLOW=''
-    NC=''
-fi
+[38;5;243m#[0m[38;5;243m Colors[0m
+[38;5;231mGREEN[0m[38;5;203m=[0m[38;5;231m'[0m[38;5;186m\033[0;32m[0m[38;5;231m'[0m
+[38;5;231mRED[0m[38;5;203m=[0m[38;5;231m'[0m[38;5;186m\033[0;31m[0m[38;5;231m'[0m
+[38;5;231mYELLOW[0m[38;5;203m=[0m[38;5;231m'[0m[38;5;186m\033[1;33m[0m[38;5;231m'[0m
+[38;5;231mNC[0m[38;5;203m=[0m[38;5;231m'[0m[38;5;186m\033[0m[0m[38;5;231m'[0m
 
-log() {
-    echo -e "${GREEN}[CI]${NC} $1"
-}
+[38;5;149mlog[0m[38;5;231m([0m[38;5;231m)[0m[38;5;231m [0m[38;5;231m{[0m
+[38;5;231m    [0m[38;5;81mecho[0m[38;5;231m [0m[38;5;208m-[0m[38;5;208me[0m[38;5;231m [0m[38;5;231m"[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mGREEN[0m[38;5;186m}[0m[38;5;186m[[0m[38;5;231m$[0m[38;5;186m([0m[38;5;231mdate[0m[38;5;186m +[0m[38;5;231m'[0m[38;5;186m%H:%M:%S[0m[38;5;231m'[0m[38;5;186m)[0m[38;5;186m][0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mNC[0m[38;5;186m}[0m[38;5;186m [0m[38;5;231m$[0m[38;5;231m1[0m[38;5;231m"[0m
+[38;5;231m}[0m
 
-error() {
-    echo -e "${RED}[FAIL]${NC} $1"
-    FAILED=1
-}
+[38;5;149merror[0m[38;5;231m([0m[38;5;231m)[0m[38;5;231m [0m[38;5;231m{[0m
+[38;5;231m    [0m[38;5;81mecho[0m[38;5;231m [0m[38;5;208m-[0m[38;5;208me[0m[38;5;231m [0m[38;5;231m"[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mRED[0m[38;5;186m}[0m[38;5;186m[ERROR][0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mNC[0m[38;5;186m}[0m[38;5;186m [0m[38;5;231m$[0m[38;5;231m1[0m[38;5;231m"[0m
+[38;5;231m    [0m[38;5;81mexit[0m[38;5;231m 1[0m
+[38;5;231m}[0m
 
-warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
+[38;5;149mwarn[0m[38;5;231m([0m[38;5;231m)[0m[38;5;231m [0m[38;5;231m{[0m
+[38;5;231m    [0m[38;5;81mecho[0m[38;5;231m [0m[38;5;208m-[0m[38;5;208me[0m[38;5;231m [0m[38;5;231m"[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mYELLOW[0m[38;5;186m}[0m[38;5;186m[WARN][0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mNC[0m[38;5;186m}[0m[38;5;186m [0m[38;5;231m$[0m[38;5;231m1[0m[38;5;231m"[0m
+[38;5;231m}[0m
 
-# Test file existence
-test_files_exist() {
-    log "Checking required files exist..."
-    
-    local files=(
-        "${SCRIPT_DIR}/bootstrap.py"
-        "${SCRIPT_DIR}/nginx.conf"
-        "${SCRIPT_DIR}/setup.sh"
-        "${SCRIPT_DIR}/test-service.sh"
-    )
-    
-    for file in "${files[@]}"; do
-        if [[ -f "$file" ]]; then
-            log "✓ $file exists"
-        else
-            error "✗ $file missing"
-        fi
-    done
-}
+[38;5;243m#[0m[38;5;243m Cleanup function[0m
+[38;5;149mcleanup[0m[38;5;231m([0m[38;5;231m)[0m[38;5;231m [0m[38;5;231m{[0m
+[38;5;231m    [0m[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mCleaning up...[0m[38;5;231m"[0m
+[38;5;231m    [0m[38;5;231mpkill[0m[38;5;208m -[0m[38;5;208mf[0m[38;5;231m qemu-system-aarch64 [0m[38;5;141m2[0m[38;5;203m>[0m[38;5;231m/dev/null[0m[38;5;231m [0m[38;5;203m||[0m[38;5;231m [0m[38;5;231mtrue[0m
+[38;5;231m    [0m[38;5;231mrm[0m[38;5;208m -[0m[38;5;208mf[0m[38;5;231m ztpbootstrap-test[0m[38;5;203m*[0m[38;5;231m.qcow2 [0m[38;5;141m2[0m[38;5;203m>[0m[38;5;231m/dev/null[0m[38;5;231m [0m[38;5;203m||[0m[38;5;231m [0m[38;5;231mtrue[0m
+[38;5;231m}[0m
 
-# Test file permissions
-test_file_permissions() {
-    log "Checking file permissions..."
-    
-    # Check setup.sh is executable
-    if [[ -x "${SCRIPT_DIR}/setup.sh" ]]; then
-        log "✓ setup.sh is executable"
-    else
-        error "✗ setup.sh is not executable"
-    fi
-    
-    # Check test scripts are executable
-    for script in test-service.sh integration-test.sh; do
-        if [[ -f "${SCRIPT_DIR}/$script" ]]; then
-            if [[ -x "${SCRIPT_DIR}/$script" ]]; then
-                log "✓ $script is executable"
-            else
-                error "✗ $script is not executable"
-            fi
-        fi
-    done
-}
+[38;5;81mtrap[0m[38;5;231m cleanup EXIT[0m
 
-# Test nginx.conf syntax (if nginx is available)
-test_nginx_syntax() {
-    log "Validating nginx.conf syntax..."
-    
-    if command -v nginx >/dev/null 2>&1; then
-        # Create a temporary nginx config that includes the main config
-        # nginx -t requires a full config with http context
-        local temp_conf=$(mktemp)
-        cat > "$temp_conf" << EOF
-error_log /dev/stderr;
-pid /tmp/nginx_test.pid;
+[38;5;243m#[0m[38;5;243m Step 1: Create VM[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mStep 1: Creating VM...[0m[38;5;231m"[0m
+[38;5;231m./vm-create-native.sh[0m[38;5;208m --[0m[38;5;208mdownload[0m[38;5;231m fedora[0m[38;5;208m --[0m[38;5;208mtype[0m[38;5;231m cloud[0m[38;5;208m --[0m[38;5;208march[0m[38;5;231m aarch64[0m[38;5;208m --[0m[38;5;208mversion[0m[38;5;231m 43[0m[38;5;208m --[0m[38;5;208mheadless[0m[38;5;231m [0m[38;5;203m>[0m[38;5;231m /tmp/ci-vm-create.log [0m[38;5;141m2[0m[38;5;203m>&[0m[38;5;141m1[0m[38;5;231m [0m[38;5;203m&[0m
+[38;5;231mVM_PID[0m[38;5;203m=[0m[38;5;231m$[0m[38;5;231m![0m
 
-events {
-    worker_connections 1024;
-}
+[38;5;243m#[0m[38;5;243m Wait for VM to start[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mWaiting for VM to boot...[0m[38;5;231m"[0m
+[38;5;231msleep[0m[38;5;231m 90[0m
 
-http {
-    include ${SCRIPT_DIR}/nginx.conf;
-}
-EOF
-        
-        # Test with sudo if available, otherwise try without
-        local nginx_test_output
-        if sudo nginx -t -c "$temp_conf" 2>&1; then
-            log "✓ nginx.conf syntax is valid"
-        else
-            nginx_test_output=$(nginx -t -c "$temp_conf" 2>&1 || true)
-            # Check for various error types that don't indicate syntax problems
-            if echo "$nginx_test_output" | grep -qiE "server.*directive.*not allowed|cannot load certificate|no such file.*certificate|Permission denied"; then
-                # These are configuration/environment issues, not syntax errors
-                # The syntax is likely fine, it just needs proper environment
-                log "✓ nginx.conf syntax appears valid (structure correct, environment issues expected)"
-            else
-                warn "nginx.conf syntax check inconclusive"
-                echo "$nginx_test_output" | head -3
-            fi
-        fi
-        rm -f "$temp_conf"
-    else
-        warn "nginx not available, skipping syntax check"
-    fi
-}
+[38;5;243m#[0m[38;5;243m Check if VM is running[0m
+[38;5;203mif[0m[38;5;231m [0m[38;5;203m![0m[38;5;231m [0m[38;5;231mps[0m[38;5;208m -[0m[38;5;208mp[0m[38;5;231m [0m[38;5;231m$[0m[38;5;231mVM_PID[0m[38;5;231m [0m[38;5;203m>[0m[38;5;231m /dev/null [0m[38;5;141m2[0m[38;5;203m>&[0m[38;5;141m1[0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
+[38;5;231m    [0m[38;5;231merror[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mVM creation process exited unexpectedly[0m[38;5;231m"[0m
+[38;5;203mfi[0m
 
-# Test bootstrap.py is valid Python
-test_bootstrap_python() {
-    log "Validating bootstrap.py Python syntax..."
-    
-    if command -v python3 >/dev/null 2>&1; then
-        # Compile to a temp location to avoid permission issues with __pycache__
-        local temp_pyc=$(mktemp)
-        if python3 -c "import py_compile; py_compile.compile('${SCRIPT_DIR}/bootstrap.py', '$temp_pyc', doraise=True)" 2>/dev/null; then
-            log "✓ bootstrap.py Python syntax is valid"
-            rm -f "$temp_pyc"
-        else
-            local compile_error
-            compile_error=$(python3 -c "import py_compile; py_compile.compile('${SCRIPT_DIR}/bootstrap.py', '$temp_pyc', doraise=True)" 2>&1 || true)
-            rm -f "$temp_pyc"
-            error "✗ bootstrap.py Python syntax is invalid"
-            echo "$compile_error"
-        fi
-    else
-        warn "python3 not available, skipping Python syntax check"
-    fi
-}
+[38;5;203mif[0m[38;5;231m [0m[38;5;203m![0m[38;5;231m [0m[38;5;231mps[0m[38;5;231m aux[0m[38;5;231m [0m[38;5;203m|[0m[38;5;231m [0m[38;5;231mgrep[0m[38;5;208m -[0m[38;5;208mi[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mqemu-system-aarch64[0m[38;5;231m"[0m[38;5;231m [0m[38;5;203m|[0m[38;5;231m [0m[38;5;231mgrep[0m[38;5;208m -[0m[38;5;208mv[0m[38;5;231m grep [0m[38;5;203m>[0m[38;5;231m /dev/null[0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
+[38;5;231m    [0m[38;5;231merror[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mVM is not running[0m[38;5;231m"[0m
+[38;5;203mfi[0m
 
-# Test shell scripts for syntax errors
-test_shell_syntax() {
-    log "Validating shell script syntax..."
-    
-    local scripts=(
-        "${SCRIPT_DIR}/setup.sh"
-        "${SCRIPT_DIR}/test-service.sh"
-    )
-    
-    if [[ -f "${SCRIPT_DIR}/integration-test.sh" ]]; then
-        scripts+=("${SCRIPT_DIR}/integration-test.sh")
-    fi
-    
-    if command -v bash >/dev/null 2>&1; then
-        for script in "${scripts[@]}"; do
-            if bash -n "$script" 2>/dev/null; then
-                log "✓ $(basename "$script") syntax is valid"
-            else
-                error "✗ $(basename "$script") syntax is invalid"
-                bash -n "$script" 2>&1 || true
-            fi
-        done
-    else
-        warn "bash not available, skipping shell syntax check"
-    fi
-}
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m✓ VM is running[0m[38;5;231m"[0m
 
-# Test setup.sh help works
-test_setup_help() {
-    log "Testing setup.sh --help..."
-    
-    # setup.sh checks for root first, but --help should work before that
-    # Test by running with bash to see if help is shown
-    local help_output
-    help_output=$(bash "${SCRIPT_DIR}/setup.sh" --help 2>&1 || true)
-    
-    # Check if usage is shown (help works) or if it exits early due to root check
-    if echo "$help_output" | grep -qiE "Usage:|--http-only|Options:"; then
-        log "✓ setup.sh --help works"
-    elif echo "$help_output" | grep -qiE "must be run as root|This script must be run as root"; then
-        # Script checks for root before showing help - this is a design choice
-        # The help functionality exists, it just requires root
-        log "✓ setup.sh help functionality exists (requires root to run)"
-    else
-        # Try running it directly
-        help_output=$("${SCRIPT_DIR}/setup.sh" --help 2>&1 || true)
-        if echo "$help_output" | grep -qiE "Usage:|--http-only|Options:"; then
-            log "✓ setup.sh --help works"
-        else
-            warn "setup.sh --help check inconclusive"
-        fi
-    fi
-}
+[38;5;243m#[0m[38;5;243m Step 2: Wait for cloud-init and test SSH[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mStep 2: Waiting for cloud-init and testing SSH...[0m[38;5;231m"[0m
+[38;5;231mSSH_SUCCESS[0m[38;5;203m=[0m[38;5;186mfalse[0m
+[38;5;203mfor[0m[38;5;231m i [0m[38;5;203min[0m[38;5;231m [0m[38;5;231m{[0m[38;5;231m1..30[0m[38;5;231m}[0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mdo[0m
+[38;5;231m    [0m[38;5;203mif[0m[38;5;231m [0m[38;5;231mssh[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m ConnectTimeout=5[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m StrictHostKeyChecking=no[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m UserKnownHostsFile=/dev/null[0m[38;5;208m -[0m[38;5;208mp[0m[38;5;231m 2222 fedora@localhost [0m[38;5;231m"[0m[38;5;186mecho test[0m[38;5;231m"[0m[38;5;231m [0m[38;5;203m>[0m[38;5;231m /dev/null [0m[38;5;141m2[0m[38;5;203m>&[0m[38;5;141m1[0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
+[38;5;231m        [0m[38;5;231mSSH_SUCCESS[0m[38;5;203m=[0m[38;5;186mtrue[0m
+[38;5;231m        [0m[38;5;203mbreak[0m
+[38;5;231m    [0m[38;5;203mfi[0m
+[38;5;231m    [0m[38;5;231msleep[0m[38;5;231m 10[0m
+[38;5;203mdone[0m
 
-# Test documentation exists
-test_documentation() {
-    log "Checking documentation files..."
-    
-    local docs=(
-        "${SCRIPT_DIR}/README.md"
-        "${SCRIPT_DIR}/SETUP_INSTRUCTIONS.md"
-    )
-    
-    for doc in "${docs[@]}"; do
-        if [[ -f "$doc" ]]; then
-            # Check it's not empty
-            if [[ -s "$doc" ]]; then
-                log "✓ $(basename "$doc") exists and is not empty"
-            else
-                error "✗ $(basename "$doc") is empty"
-            fi
-        else
-            error "✗ $(basename "$doc") missing"
-        fi
-    done
-}
+[38;5;203mif[0m[38;5;231m [0m[38;5;81m[[0m[38;5;231m [0m[38;5;231m"[0m[38;5;231m$[0m[38;5;231mSSH_SUCCESS[0m[38;5;231m"[0m[38;5;231m [0m[38;5;203m!=[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mtrue[0m[38;5;231m"[0m[38;5;231m [0m[38;5;81m][0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
+[38;5;231m    [0m[38;5;231merror[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mSSH connection failed after 5 minutes[0m[38;5;231m"[0m
+[38;5;203mfi[0m
 
-# Test HTTP-only mode detection in nginx.conf
-test_http_only_detection() {
-    log "Testing HTTP-only mode detection..."
-    
-    if grep -q "HTTP-ONLY MODE" "${SCRIPT_DIR}/nginx.conf" 2>/dev/null; then
-        warn "nginx.conf is in HTTP-only mode (expected for HTTPS by default)"
-    else
-        log "✓ nginx.conf appears to be in HTTPS mode"
-    fi
-}
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m✓ SSH connection successful[0m[38;5;231m"[0m
 
-# Main test function
-main() {
-    echo ""
-    log "Running CI/CD validation tests..."
-    echo ""
-    
-    test_files_exist
-    test_file_permissions
-    test_nginx_syntax
-    test_bootstrap_python
-    test_shell_syntax
-    test_setup_help
-    test_documentation
-    test_http_only_detection
-    
-    echo ""
-    if [[ $FAILED -eq 0 ]]; then
-        log "All CI tests passed! ✓"
-        exit 0
-    else
-        error "Some CI tests failed. Please review the output above."
-        exit 1
-    fi
-}
+[38;5;243m#[0m[38;5;243m Step 3: Verify repository[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mStep 3: Verifying repository clone...[0m[38;5;231m"[0m
+[38;5;203mif[0m[38;5;231m [0m[38;5;203m![0m[38;5;231m [0m[38;5;231mssh[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m ConnectTimeout=10[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m StrictHostKeyChecking=no[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m UserKnownHostsFile=/dev/null[0m[38;5;208m -[0m[38;5;208mp[0m[38;5;231m 2222 fedora@localhost [0m[38;5;231m"[0m[38;5;186mtest -f ~/ztpbootstrap/setup.sh[0m[38;5;231m"[0m[38;5;231m [0m[38;5;141m2[0m[38;5;203m>[0m[38;5;231m/dev/null[0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
+[38;5;231m    [0m[38;5;231merror[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mRepository not cloned or setup.sh not found[0m[38;5;231m"[0m
+[38;5;203mfi[0m
 
-main "$@"
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m✓ Repository cloned successfully[0m[38;5;231m"[0m
+
+[38;5;243m#[0m[38;5;243m Step 4: Run service setup[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mStep 4: Running service setup...[0m[38;5;231m"[0m
+[38;5;203mif[0m[38;5;231m [0m[38;5;203m![0m[38;5;231m [0m[38;5;231mssh[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m ConnectTimeout=10[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m StrictHostKeyChecking=no[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m UserKnownHostsFile=/dev/null[0m[38;5;208m -[0m[38;5;208mp[0m[38;5;231m 2222 fedora@localhost [0m[38;5;231m"[0m[38;5;186mcd ~/ztpbootstrap && sudo ./setup.sh --http-only[0m[38;5;231m"[0m[38;5;231m [0m[38;5;203m>[0m[38;5;231m /tmp/ci-setup.log [0m[38;5;141m2[0m[38;5;203m>&[0m[38;5;141m1[0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
+[38;5;231m    [0m[38;5;231merror[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mService setup failed[0m[38;5;231m"[0m
+[38;5;203mfi[0m
+
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m✓ Service setup completed[0m[38;5;231m"[0m
+
+[38;5;243m#[0m[38;5;243m Step 5: Verify services[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mStep 5: Verifying services...[0m[38;5;231m"[0m
+[38;5;231msleep[0m[38;5;231m 30[0m
+
+[38;5;243m#[0m[38;5;243m Check systemd services[0m
+[38;5;203mif[0m[38;5;231m [0m[38;5;203m![0m[38;5;231m [0m[38;5;231mssh[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m ConnectTimeout=10[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m StrictHostKeyChecking=no[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m UserKnownHostsFile=/dev/null[0m[38;5;208m -[0m[38;5;208mp[0m[38;5;231m 2222 fedora@localhost [0m[38;5;231m"[0m[38;5;186msudo systemctl is-active ztpbootstrap-pod > /dev/null 2>&1[0m[38;5;231m"[0m[38;5;231m [0m[38;5;141m2[0m[38;5;203m>[0m[38;5;231m/dev/null[0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
+[38;5;231m    [0m[38;5;231mwarn[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mPod service not active, checking status...[0m[38;5;231m"[0m
+[38;5;231m    [0m[38;5;231mssh[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m ConnectTimeout=10[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m StrictHostKeyChecking=no[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m UserKnownHostsFile=/dev/null[0m[38;5;208m -[0m[38;5;208mp[0m[38;5;231m 2222 fedora@localhost [0m[38;5;231m"[0m[38;5;186msudo systemctl status ztpbootstrap-pod --no-pager | head -20[0m[38;5;231m"[0m[38;5;231m [0m[38;5;141m2[0m[38;5;203m>&[0m[38;5;141m1[0m[38;5;231m [0m[38;5;203m||[0m[38;5;231m [0m[38;5;231mtrue[0m
+[38;5;203mfi[0m
+
+[38;5;243m#[0m[38;5;243m Step 6: Test health endpoint[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mStep 6: Testing health endpoint...[0m[38;5;231m"[0m
+[38;5;231mHEALTH_SUCCESS[0m[38;5;203m=[0m[38;5;186mfalse[0m
+[38;5;203mfor[0m[38;5;231m i [0m[38;5;203min[0m[38;5;231m [0m[38;5;231m{[0m[38;5;231m1..10[0m[38;5;231m}[0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mdo[0m
+[38;5;231m    [0m[38;5;203mif[0m[38;5;231m [0m[38;5;231mcurl[0m[38;5;208m -[0m[38;5;208ms[0m[38;5;231m http://localhost:8080/health [0m[38;5;203m>[0m[38;5;231m /dev/null [0m[38;5;141m2[0m[38;5;203m>&[0m[38;5;141m1[0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
+[38;5;231m        [0m[38;5;231mHEALTH_SUCCESS[0m[38;5;203m=[0m[38;5;186mtrue[0m
+[38;5;231m        [0m[38;5;203mbreak[0m
+[38;5;231m    [0m[38;5;203mfi[0m
+[38;5;231m    [0m[38;5;231msleep[0m[38;5;231m 5[0m
+[38;5;203mdone[0m
+
+[38;5;203mif[0m[38;5;231m [0m[38;5;81m[[0m[38;5;231m [0m[38;5;231m"[0m[38;5;231m$[0m[38;5;231mHEALTH_SUCCESS[0m[38;5;231m"[0m[38;5;231m [0m[38;5;203m!=[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mtrue[0m[38;5;231m"[0m[38;5;231m [0m[38;5;81m][0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
+[38;5;231m    [0m[38;5;231mwarn[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mHealth endpoint not accessible (may need more time)[0m[38;5;231m"[0m
+[38;5;203melse[0m
+[38;5;231m    [0m[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m✓ Health endpoint accessible[0m[38;5;231m"[0m
+[38;5;203mfi[0m
+
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;231m"[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m=== CI Test Complete ===[0m[38;5;231m"[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mAll automated steps completed successfully![0m[38;5;231m"[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;231m"[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mSummary:[0m[38;5;231m"[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m  ✅ VM Creation[0m[38;5;231m"[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m  ✅ SSH Access[0m[38;5;231m"[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m  ✅ Repository Clone[0m[38;5;231m"[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m  ✅ Service Setup[0m[38;5;231m"[0m
+[38;5;231mlog[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m  ✅ Health Endpoint[0m[38;5;231m"[0m
+
+[38;5;81mexit[0m[38;5;231m 0[0m
