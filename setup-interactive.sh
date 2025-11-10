@@ -1646,6 +1646,47 @@ create_pod_files_from_config() {
         fi
         log "Web UI container configuration installed"
         
+        # Copy webui directory to script directory (required for webui container)
+        local webui_dest="${script_dir}/webui"
+        if [[ ! -d "$webui_dest" ]]; then
+            if [[ $EUID -eq 0 ]]; then
+                mkdir -p "$webui_dest" || {
+                    warn "Failed to create webui directory: $webui_dest"
+                }
+            else
+                sudo mkdir -p "$webui_dest" || {
+                    warn "Failed to create webui directory: $webui_dest"
+                }
+            fi
+        fi
+        if [[ -d "${repo_dir}/webui" ]]; then
+            if [[ $EUID -eq 0 ]]; then
+                if cp -r "${repo_dir}/webui"/* "$webui_dest/" 2>/dev/null; then
+                    log "Web UI directory copied to: $webui_dest"
+                    # Ensure start-webui.sh is executable
+                    if [[ -f "${webui_dest}/start-webui.sh" ]]; then
+                        chmod +x "${webui_dest}/start-webui.sh" 2>/dev/null || true
+                        log "Made start-webui.sh executable"
+                    fi
+                else
+                    warn "Failed to copy webui directory, Web UI may not work"
+                fi
+            else
+                if sudo cp -r "${repo_dir}/webui"/* "$webui_dest/" 2>/dev/null; then
+                    log "Web UI directory copied to: $webui_dest"
+                    # Ensure start-webui.sh is executable
+                    if [[ -f "${webui_dest}/start-webui.sh" ]]; then
+                        sudo chmod +x "${webui_dest}/start-webui.sh" 2>/dev/null || true
+                        log "Made start-webui.sh executable"
+                    fi
+                else
+                    warn "Failed to copy webui directory, Web UI may not work"
+                fi
+            fi
+        else
+            warn "Web UI source directory not found: ${repo_dir}/webui"
+        fi
+        
         # Manually run quadlet generator to ensure service is created
         # This is needed because systemd's automatic generator may not always process all files
         if command -v /usr/libexec/podman/quadlet >/dev/null 2>&1; then
@@ -2276,6 +2317,37 @@ EOF
         else
             warn "setup.sh not found. Pod files will not be created automatically."
             warn "You will need to run: sudo ./setup.sh"
+        fi
+        
+        # Create logs directory (required for nginx container)
+        if [[ -n "${SCRIPT_DIR:-}" ]]; then
+            log "Creating logs directory..."
+            local logs_dir="${SCRIPT_DIR}/logs"
+            if [[ $EUID -eq 0 ]]; then
+                mkdir -p "$logs_dir" 2>/dev/null || true
+                chmod 777 "$logs_dir" 2>/dev/null || true
+                # Try to set ownership to nginx user (UID 101) if possible
+                chown 101:101 "$logs_dir" 2>/dev/null || chmod 777 "$logs_dir" 2>/dev/null || true
+                # Set SELinux context if not on NFS
+                if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
+                    if ! is_nfs_mount "$logs_dir"; then
+                        chcon -R -t container_file_t "$logs_dir" 2>/dev/null || true
+                        log "Set SELinux context for logs directory (not NFS)"
+                    fi
+                fi
+            else
+                sudo mkdir -p "$logs_dir" 2>/dev/null || true
+                sudo chmod 777 "$logs_dir" 2>/dev/null || true
+                sudo chown 101:101 "$logs_dir" 2>/dev/null || sudo chmod 777 "$logs_dir" 2>/dev/null || true
+                # Set SELinux context if not on NFS
+                if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
+                    if ! is_nfs_mount "$logs_dir"; then
+                        sudo chcon -R -t container_file_t "$logs_dir" 2>/dev/null || true
+                        log "Set SELinux context for logs directory (not NFS)"
+                    fi
+                fi
+            fi
+            log "Created logs directory: $logs_dir"
         fi
         
         # Ensure script directory is writable by webui container (runs as root)
