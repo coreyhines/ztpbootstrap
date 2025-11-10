@@ -280,15 +280,32 @@ log_info "✓ Backup restored in VM"
 
 # Step 5: Clone repo and prepare for interactive setup
 log_step "Step 5: Preparing repository in VM"
-ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 "${DEFAULT_USER}@localhost" << 'PREP_EOF'
+log_info "Cloning repository to ${DEFAULT_USER}'s home directory..."
+ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 "${DEFAULT_USER}@localhost" << PREP_EOF
 set -e
+# Ensure we're in the correct user's home directory
+cd ~
+echo "Current user: \$(whoami)"
+echo "Home directory: \$HOME"
+echo "Current directory: \$(pwd)"
+
+# Remove any existing clone in wrong location (if it exists in /home/fedora)
+if [ -d /home/fedora/ztpbootstrap ] && [ "\$(whoami)" != "fedora" ]; then
+    echo "Found repository in /home/fedora/ztpbootstrap, but running as \$(whoami)"
+    echo "Will clone to \$HOME/ztpbootstrap instead"
+fi
+
+# Clone to current user's home directory
 if [ ! -d ~/ztpbootstrap ]; then
     git clone https://github.com/coreyhines/ztpbootstrap.git ~/ztpbootstrap || {
         echo "Repository may already exist or clone failed"
     }
+else
+    echo "Repository already exists at ~/ztpbootstrap"
 fi
 cd ~/ztpbootstrap
 git pull || true
+PREP_EOF
 
 # Ensure yq is installed
 if ! command -v yq &> /dev/null; then
