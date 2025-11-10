@@ -858,15 +858,18 @@ main() {
     log "Setting permissions for webui script uploads..."
     if [[ -d "$SCRIPT_DIR" ]]; then
         # Make directory writable by root (webui container runs as root)
-        # Use 775 to allow owner and group write, or 777 for world-writable
+        # Change ownership to root:root so root can write, or use 777 for world-writable
         # Check if on NFS first - NFS may have different permission requirements
         if ! is_nfs_mount "$SCRIPT_DIR"; then
+            # Change ownership to root so webui (running as root) can write
+            chown root:root "$SCRIPT_DIR" 2>/dev/null || sudo chown root:root "$SCRIPT_DIR" 2>/dev/null || true
             chmod 775 "$SCRIPT_DIR" 2>/dev/null || sudo chmod 775 "$SCRIPT_DIR" 2>/dev/null || true
-            # Also ensure existing files in the directory are writable
+            # Also ensure existing files in the directory are writable by root
+            chown root:root "$SCRIPT_DIR"/*.py 2>/dev/null || sudo chown root:root "$SCRIPT_DIR"/*.py 2>/dev/null || true
             chmod 664 "$SCRIPT_DIR"/*.py 2>/dev/null || sudo chmod 664 "$SCRIPT_DIR"/*.py 2>/dev/null || true
-            log "Set permissions on script directory for webui uploads (not NFS)"
+            log "Set ownership and permissions on script directory for webui uploads (not NFS)"
         else
-            # For NFS, we may need 777 or specific ownership
+            # For NFS, ownership changes may not work, so use 777
             chmod 777 "$SCRIPT_DIR" 2>/dev/null || sudo chmod 777 "$SCRIPT_DIR" 2>/dev/null || true
             chmod 666 "$SCRIPT_DIR"/*.py 2>/dev/null || sudo chmod 666 "$SCRIPT_DIR"/*.py 2>/dev/null || true
             log "Set permissions on script directory for webui uploads (NFS - using 777)"

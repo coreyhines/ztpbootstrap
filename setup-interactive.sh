@@ -2265,16 +2265,21 @@ EOF
             log "Setting permissions for webui script uploads..."
             # Check if on NFS first
             if ! is_nfs_mount "$SCRIPT_DIR"; then
+                # Change ownership to root so webui (running as root) can write
                 if [[ ("$SCRIPT_DIR" =~ ^/etc/ || "$SCRIPT_DIR" =~ ^/opt/) && $EUID -ne 0 ]]; then
+                    sudo chown root:root "$SCRIPT_DIR" 2>/dev/null || true
                     sudo chmod 775 "$SCRIPT_DIR" 2>/dev/null || true
+                    sudo chown root:root "$SCRIPT_DIR"/*.py 2>/dev/null || true
                     sudo chmod 664 "$SCRIPT_DIR"/*.py 2>/dev/null || true
                 else
+                    chown root:root "$SCRIPT_DIR" 2>/dev/null || true
                     chmod 775 "$SCRIPT_DIR" 2>/dev/null || true
+                    chown root:root "$SCRIPT_DIR"/*.py 2>/dev/null || true
                     chmod 664 "$SCRIPT_DIR"/*.py 2>/dev/null || true
                 fi
-                log "Set permissions on script directory for webui uploads (not NFS)"
+                log "Set ownership and permissions on script directory for webui uploads (not NFS)"
             else
-                # For NFS, we may need 777
+                # For NFS, ownership changes may not work, so use 777
                 if [[ ("$SCRIPT_DIR" =~ ^/etc/ || "$SCRIPT_DIR" =~ ^/opt/) && $EUID -ne 0 ]]; then
                     sudo chmod 777 "$SCRIPT_DIR" 2>/dev/null || true
                     sudo chmod 666 "$SCRIPT_DIR"/*.py 2>/dev/null || true
