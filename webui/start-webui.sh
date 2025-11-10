@@ -4,10 +4,13 @@
 
 set -euo pipefail
 
-# Install dependencies if needed (flask, werkzeug, systemd-python)
+# Install dependencies if needed (flask, werkzeug)
+# Note: systemd-python requires build dependencies (pkg-config, gcc, etc.) which aren't in alpine
+# If systemd integration is needed, install build dependencies first or use a different base image
 if ! python3 -c "import flask" 2>/dev/null; then
-    pip3 install --no-cache-dir flask werkzeug systemd-python || {
-        echo "Warning: Failed to install some dependencies, continuing anyway..."
+    pip3 install --no-cache-dir flask werkzeug || {
+        echo "Error: Failed to install flask or werkzeug. Cannot continue."
+        exit 1
     }
 fi
 
