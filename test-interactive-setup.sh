@@ -303,30 +303,35 @@ PREP_EOF
 
 log_info "✓ Repository prepared"
 
-# Step 6: Run interactive setup (with automated responses)
+# Step 6: Run interactive setup (after restore is complete)
 log_step "Step 6: Running interactive setup"
-log_info "The interactive setup will now run."
+log_info "The interactive setup will now run after the restore."
 log_info "It should:"
-log_info "  1. Detect the existing installation"
-log_info "  2. Detect running services (if any)"
-log_info "  3. Load existing values from files"
-log_info "  4. Offer to create backup"
+log_info "  1. Detect the restored installation"
+log_info "  2. Load existing values from restored files"
+log_info "  3. Use loaded values as defaults in prompts"
+log_info "  4. Offer to create backup (of the restored installation)"
 log_info "  5. Clean directories"
-log_info "  6. Use loaded values as defaults in prompts"
+log_info "  6. Install/upgrade the service"
+log_info "  7. Start services"
 log_info ""
-log_warn "This will require manual interaction or expect script for full automation"
-log_info ""
-log_info "To run interactively, SSH into the VM and run:"
-echo ""
-echo "  ssh -p 2222 ${DEFAULT_USER}@localhost"
-echo "  cd ~/ztpbootstrap"
-echo "  ./setup-interactive.sh"
-echo ""
-log_info "Or we can test specific functions..."
+log_info "Running interactive setup now..."
 echo ""
 
-# Step 7: Verify restored installation
-log_step "Step 7: Verifying restored installation"
+# Run the interactive setup
+ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 "${DEFAULT_USER}@localhost" << 'SETUP_EOF'
+set -e
+cd ~/ztpbootstrap
+
+# Run interactive setup
+# It will detect the restored installation and use those values as defaults
+./setup-interactive.sh
+SETUP_EOF
+
+log_info "✓ Interactive setup completed"
+
+# Step 7: Verify installation and services
+log_step "Step 7: Verifying installation and services"
 ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 "${DEFAULT_USER}@localhost" << 'VERIFY_EOF'
 echo "Checking restored files..."
 if [ -f /opt/containerdata/ztpbootstrap/ztpbootstrap.env ]; then
@@ -365,24 +370,19 @@ log_info "✓ Installation verified"
 
 echo ""
 echo "=========================================="
-echo "✅ TEST PREPARATION COMPLETE"
+echo "✅ TEST COMPLETE"
 echo "=========================================="
 echo ""
-echo "Next steps:"
-echo "  1. SSH into the VM:"
-echo "     ssh -p 2222 ${DEFAULT_USER}@localhost"
+echo "Workflow completed:"
+echo "  1. ✓ VM created and ready"
+echo "  2. ✓ Backup restored from ${BACKUP_HOST}"
+echo "  3. ✓ Repository cloned and updated"
+echo "  4. ✓ Interactive setup completed"
 echo ""
-echo "  2. Run interactive setup:"
-echo "     cd ~/ztpbootstrap"
-echo "     ./setup-interactive.sh"
-echo ""
-echo "  3. Verify it:"
-echo "     - Detects existing installation"
-echo "     - Loads existing values"
-echo "     - Uses them as defaults in prompts"
-echo "     - Creates backup"
-echo "     - Cleans directories"
-echo "     - Installs new version"
-echo ""
-echo "VM is ready for interactive testing!"
+echo "To verify services are running:"
+echo "  ssh -p 2222 ${DEFAULT_USER}@localhost"
+echo "  sudo systemctl status ztpbootstrap-pod"
+echo "  sudo systemctl status ztpbootstrap-nginx"
+echo "  sudo systemctl status ztpbootstrap-webui"
+echo "  sudo podman ps --filter pod=ztpbootstrap-pod"
 echo ""

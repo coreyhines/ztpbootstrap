@@ -63,6 +63,14 @@ prompt_with_default() {
     local is_secret="${4:-false}"
     local allow_empty="${5:-false}"
     
+    # In non-interactive mode, use default value without prompting
+    if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
+        value="$default_value"
+        log "Non-interactive: $prompt_text = $default_value"
+        eval "$var_name=\"$value\""
+        return 0
+    fi
+    
     if [[ "$is_secret" == "true" ]]; then
         info "$prompt_text"
         if [[ -n "$default_value" ]]; then
@@ -115,6 +123,17 @@ prompt_yes_no() {
     local prompt_text="$1"
     local default_value="${2:-n}"
     local var_name="$3"
+    
+    # In non-interactive mode, use default value without prompting
+    if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
+        if [[ "$default_value" == "y" ]] || [[ "$default_value" == "Y" ]]; then
+            eval "$var_name='true'"
+        else
+            eval "$var_name='false'"
+        fi
+        log "Non-interactive: $prompt_text = $default_value"
+        return 0
+    fi
     
     local default_display
     if [[ "$default_value" == "y" ]] || [[ "$default_value" == "Y" ]]; then
@@ -2339,6 +2358,7 @@ check_prerequisites() {
 parse_args() {
     RESTORE_MODE=false
     RESTORE_TIMESTAMP=""
+    NON_INTERACTIVE=false
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -2350,6 +2370,10 @@ parse_args() {
                 fi
                 shift
                 ;;
+            --non-interactive|--auto)
+                NON_INTERACTIVE=true
+                shift
+                ;;
             -h|--help)
                 cat << EOF
 Usage: $0 [OPTIONS]
@@ -2357,10 +2381,13 @@ Usage: $0 [OPTIONS]
 Options:
     --restore [TIMESTAMP]    Restore from a previous backup
                             If TIMESTAMP is not provided, will list available backups
+    --non-interactive        Run in non-interactive mode (use defaults, auto-answer prompts)
+    --auto                   Alias for --non-interactive
     -h, --help              Show this help message
 
 Examples:
     $0                      # Run interactive setup
+    $0 --non-interactive    # Run automated setup using defaults
     $0 --restore            # List and restore from available backups
     $0 --restore 20240101_120000  # Restore from specific backup
 
@@ -2436,11 +2463,16 @@ main() {
             done
             echo ""
             warn "Services must be stopped before proceeding with installation/upgrade."
-            prompt_yes_no "Stop services gracefully before proceeding?" "n" STOP_SERVICES
-            
-            if [[ "$STOP_SERVICES" != "true" ]]; then
-                log "Setup cancelled. Please stop services manually and try again."
-                exit 0
+            if [[ "$NON_INTERACTIVE" == "true" ]]; then
+                STOP_SERVICES="true"
+                log "Non-interactive mode: Auto-stopping services..."
+            else
+                prompt_yes_no "Stop services gracefully before proceeding?" "n" STOP_SERVICES
+                
+                if [[ "$STOP_SERVICES" != "true" ]]; then
+                    log "Setup cancelled. Please stop services manually and try again."
+                    exit 0
+                fi
             fi
             
             # Stop services gracefully
@@ -2451,25 +2483,40 @@ main() {
         fi
         
         # Create backup
-        prompt_yes_no "Would you like to create a backup before proceeding?" "y" CREATE_BACKUP
+        if [[ "$NON_INTERACTIVE" == "true" ]]; then
+            CREATE_BACKUP="true"
+            log "Non-interactive mode: Auto-creating backup..."
+        else
+            prompt_yes_no "Would you like to create a backup before proceeding?" "y" CREATE_BACKUP
+        fi
         
         if [[ "$CREATE_BACKUP" == "true" ]]; then
             if ! create_backup "$default_script_dir"; then
                 warn "Backup failed, but continuing with setup..."
-                echo ""
-                prompt_yes_no "Continue with setup anyway?" "y" CONTINUE_SETUP
-                if [[ "$CONTINUE_SETUP" != "true" ]]; then
-                    log "Setup cancelled."
-                    exit 0
+                if [[ "$NON_INTERACTIVE" == "true" ]]; then
+                    CONTINUE_SETUP="true"
+                    log "Non-interactive mode: Continuing despite backup failure..."
+                else
+                    echo ""
+                    prompt_yes_no "Continue with setup anyway?" "y" CONTINUE_SETUP
+                    if [[ "$CONTINUE_SETUP" != "true" ]]; then
+                        log "Setup cancelled."
+                        exit 0
+                    fi
                 fi
             fi
         else
             warn "No backup will be created. Existing files may be overwritten."
-            echo ""
-            prompt_yes_no "Continue with setup?" "y" CONTINUE_SETUP
-            if [[ "$CONTINUE_SETUP" != "true" ]]; then
-                log "Setup cancelled."
-                exit 0
+            if [[ "$NON_INTERACTIVE" == "true" ]]; then
+                CONTINUE_SETUP="true"
+                log "Non-interactive mode: Continuing without backup..."
+            else
+                echo ""
+                prompt_yes_no "Continue with setup?" "y" CONTINUE_SETUP
+                if [[ "$CONTINUE_SETUP" != "true" ]]; then
+                    log "Setup cancelled."
+                    exit 0
+                fi
             fi
         fi
         echo ""
@@ -2484,7 +2531,17 @@ main() {
     load_existing_config || true
     
     # Run interactive configuration
-    interactive_config
+    if [[ "$NON_INTERACTIVE" == "true" ]]; then
+        log "Non-interactive mode: Using loaded defaults for all configuration..."
+        # Set APPLY_NOW to true automatically
+        APPLY_NOW="true"
+        # Use loaded existing values or defaults for all config
+        # The interactive_config function will be skipped, we'll set variables directly
+        # But we still need to call it to set all variables - modify it to skip prompts in non-interactive mode
+        NON_INTERACTIVE_MODE=true interactive_config
+    else
+        interactive_config
+    fi
     
     # Generate YAML config
     generate_yaml_config
@@ -2503,7 +2560,12 @@ main() {
         
         # Offer to start services
         echo ""
-        prompt_yes_no "Would you like to start the services now?" "y" START_SERVICES
+        if [[ "$NON_INTERACTIVE" == "true" ]]; then
+            START_SERVICES="true"
+            log "Non-interactive mode: Auto-starting services..."
+        else
+            prompt_yes_no "Would you like to start the services now?" "y" START_SERVICES
+        fi
         
         if [[ "$START_SERVICES" == "true" ]]; then
             start_services_after_install
