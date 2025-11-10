@@ -85,15 +85,19 @@ prompt_with_default() {
         read -r value
     fi
     
-    # If value is empty, use default if available
-    # If allow_empty is true and user wants empty, they can explicitly type something
-    # But pressing Enter with a default should use the default
+    # Handle empty input
     if [[ -z "$value" ]]; then
         if [[ -n "$default_value" ]]; then
             # There's a default, use it when Enter is pressed
             value="$default_value"
         elif [[ "$allow_empty" == "true" ]]; then
             # No default and empty is allowed, keep it empty
+            value=""
+        fi
+    else
+        # User typed something - check if they want empty
+        # Allow "empty", "none", or single space to mean empty
+        if [[ "$allow_empty" == "true" ]] && [[ "$value" =~ ^[[:space:]]*(empty|none)[[:space:]]*$ ]]; then
             value=""
         fi
     fi
@@ -1209,7 +1213,7 @@ interactive_config() {
     fi
     # Clearer prompt wording: if there's a default, pressing Enter uses it
     if [[ -n "$default_ipv4" ]]; then
-        prompt_with_default "IPv4 address (press Enter to use default, or leave empty for host network)" "$default_ipv4" IPV4 "false" "true"
+        prompt_with_default "IPv4 address (press Enter for default, or type 'empty' for host network)" "$default_ipv4" IPV4 "false" "true"
     else
         prompt_with_default "IPv4 address (leave empty for host network)" "" IPV4 "false" "true"
     fi
@@ -1227,7 +1231,7 @@ interactive_config() {
     fi
     # Clearer prompt wording: if there's a default, pressing Enter uses it
     if [[ -n "$default_ipv6" ]]; then
-        prompt_with_default "IPv6 address (press Enter to use default, or leave empty to disable)" "$default_ipv6" IPV6 "false" "true"
+        prompt_with_default "IPv6 address (press Enter for default, or type 'empty' to disable)" "$default_ipv6" IPV6 "false" "true"
     else
         prompt_with_default "IPv6 address (leave empty to disable)" "" IPV6 "false" "true"
     fi
