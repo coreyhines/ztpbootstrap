@@ -1692,8 +1692,8 @@ create_pod_files_from_config() {
         
         # Manually run quadlet generator to ensure service is created
         # This is needed because systemd's automatic generator may not always process all files
+        local webui_container_file="${systemd_dir}/ztpbootstrap-webui.container"
         if command -v /usr/libexec/podman/quadlet >/dev/null 2>&1; then
-            local webui_container_file="${systemd_dir}/ztpbootstrap-webui.container"
             if [[ $EUID -eq 0 ]]; then
                 if /usr/libexec/podman/quadlet "$webui_container_file" 2>/dev/null; then
                     log "WebUI service generated successfully"
@@ -1706,6 +1706,47 @@ create_pod_files_from_config() {
                 else
                     warn "Failed to generate WebUI service via quadlet generator"
                 fi
+            fi
+        fi
+        
+        # Always ensure the service file includes the start-webui.sh command
+        # Quadlet regenerates the service file, so we use a systemd drop-in to override ExecStart
+        # This is more reliable than modifying the generated file
+        local override_dir="/etc/systemd/system/ztpbootstrap-webui.service.d"
+        if [[ -f "/run/systemd/generator/ztpbootstrap-webui.service" ]]; then
+            if [[ $EUID -eq 0 ]]; then
+                mkdir -p "$override_dir"
+            else
+                sudo mkdir -p "$override_dir"
+            fi
+            
+            # Extract the ExecStart line from the generated service file
+            local execstart_line
+            if [[ $EUID -eq 0 ]]; then
+                execstart_line=$(grep "^ExecStart=" /run/systemd/generator/ztpbootstrap-webui.service | head -1)
+            else
+                execstart_line=$(sudo grep "^ExecStart=" /run/systemd/generator/ztpbootstrap-webui.service | head -1)
+            fi
+            
+            if [[ -n "$execstart_line" ]] && [[ "$execstart_line" != *"/app/start-webui.sh"* ]]; then
+                log "Creating systemd drop-in to add /app/start-webui.sh command to webui service..."
+                # Append /app/start-webui.sh to the ExecStart line
+                local updated_execstart
+                updated_execstart="${execstart_line} /app/start-webui.sh"
+                if [[ $EUID -eq 0 ]]; then
+                    cat > "${override_dir}/override.conf" << EOF
+[Service]
+ExecStart=
+ExecStart=${updated_execstart#ExecStart=}
+EOF
+                else
+                    sudo tee "${override_dir}/override.conf" > /dev/null << EOF
+[Service]
+ExecStart=
+ExecStart=${updated_execstart#ExecStart=}
+EOF
+                fi
+                log "Created systemd drop-in override for webui service"
             fi
         fi
     fi
