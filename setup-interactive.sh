@@ -75,12 +75,17 @@ prompt_with_default() {
     else
         if [[ -n "$default_value" ]]; then
             if [[ "$allow_empty" == "true" ]]; then
-                echo -n -e "${CYAN}[?]${NC} $prompt_text ${BLUE}[$default_value, or Enter for empty]${NC}: "
+                # When there's a default and empty is allowed, make it clear Enter uses default
+                echo -n -e "${CYAN}[?]${NC} $prompt_text ${BLUE}[$default_value]${NC} (press Enter to use default, or type 'empty' to leave blank): "
             else
                 echo -n -e "${CYAN}[?]${NC} $prompt_text ${BLUE}[$default_value]${NC}: "
             fi
         else
-            echo -n -e "${CYAN}[?]${NC} $prompt_text: "
+            if [[ "$allow_empty" == "true" ]]; then
+                echo -n -e "${CYAN}[?]${NC} $prompt_text (leave empty if not needed): "
+            else
+                echo -n -e "${CYAN}[?]${NC} $prompt_text: "
+            fi
         fi
         read -r value
     fi
@@ -1243,7 +1248,7 @@ interactive_config() {
     fi
     # Clearer prompt wording: if there's a default, pressing Enter uses it
     if [[ -n "$default_ipv4" ]]; then
-        prompt_with_default "IPv4 address (press Enter for default, or type 'empty' for host network)" "$default_ipv4" IPV4 "false" "true"
+        prompt_with_default "IPv4 address" "$default_ipv4" IPV4 "false" "true"
     else
         prompt_with_default "IPv4 address (leave empty for host network)" "" IPV4 "false" "true"
     fi
@@ -1261,7 +1266,7 @@ interactive_config() {
     fi
     # Clearer prompt wording: if there's a default, pressing Enter uses it
     if [[ -n "$default_ipv6" ]]; then
-        prompt_with_default "IPv6 address (press Enter for default, or type 'empty' to disable)" "$default_ipv6" IPV6 "false" "true"
+        prompt_with_default "IPv6 address" "$default_ipv6" IPV6 "false" "true"
     else
         prompt_with_default "IPv6 address (leave empty to disable)" "" IPV6 "false" "true"
     fi
