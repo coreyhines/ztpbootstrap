@@ -85,11 +85,16 @@ prompt_with_default() {
         read -r value
     fi
     
-    # If value is empty and allow_empty is true, keep it empty
-    # Otherwise, use default if value is empty
+    # If value is empty, use default if available
+    # If allow_empty is true and user wants empty, they can explicitly type something
+    # But pressing Enter with a default should use the default
     if [[ -z "$value" ]]; then
-        if [[ "$allow_empty" != "true" ]]; then
+        if [[ -n "$default_value" ]]; then
+            # There's a default, use it when Enter is pressed
             value="$default_value"
+        elif [[ "$allow_empty" == "true" ]]; then
+            # No default and empty is allowed, keep it empty
+            value=""
         fi
     fi
     
