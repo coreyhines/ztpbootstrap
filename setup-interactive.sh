@@ -1358,6 +1358,13 @@ load_existing_installation_values() {
     fi
     if [[ -n "$EXISTING_CV_ADDR" ]]; then
         log "  CVaaS address: $EXISTING_CV_ADDR"
+    else
+        log "  CVaaS address: (not found)"
+    fi
+    if [[ -n "$EXISTING_ENROLLMENT_TOKEN" ]]; then
+        log "  Enrollment token: (found, hidden)"
+    else
+        log "  Enrollment token: (not found)"
     fi
     if [[ -n "$EXISTING_TIMEZONE" ]]; then
         log "  Timezone: $EXISTING_TIMEZONE"
