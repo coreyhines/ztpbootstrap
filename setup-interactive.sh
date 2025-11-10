@@ -880,7 +880,11 @@ load_existing_installation_values() {
         log "Parsing container values..."
         # Use process substitution to ensure proper line-by-line reading
         local parsed_count=0
-        while IFS='=' read -r key value || [[ -n "$key" ]]; do
+        # Disable exit on error for the read loop (we handle errors explicitly)
+        set +e
+        while IFS='=' read -r key value; do
+            # Re-enable exit on error for the rest of the script
+            set -e
             # Skip empty lines
             [[ -z "$key" ]] && continue
             # Trim whitespace from key
@@ -895,17 +899,17 @@ load_existing_installation_values() {
                 Network) 
                     EXISTING_NETWORK="$value"
                     log "  Found Network: $value"
-                    ((parsed_count++))
+                    parsed_count=$((parsed_count + 1)) || true
                     ;;
                 IP) 
                     EXISTING_IPV4="$value"
                     log "  Found IP: $value"
-                    ((parsed_count++))
+                    parsed_count=$((parsed_count + 1)) || true
                     ;;
                 IP6) 
                     EXISTING_IPV6="$value"
                     log "  Found IP6: $value"
-                    ((parsed_count++))
+                    parsed_count=$((parsed_count + 1)) || true
                     ;;
                 Environment) 
                     # Handle Environment="TZ=America/Central" format
@@ -925,7 +929,11 @@ load_existing_installation_values() {
                     log "  Found DNS2: $value"
                 fi
             fi
+            # Disable exit on error for next read iteration
+            set +e
         done < <(printf '%s\n' "$container_values")
+        # Re-enable exit on error
+        set -e
         log "Parsed $parsed_count network-related values from container file"
     else
         log "No container values to parse"
