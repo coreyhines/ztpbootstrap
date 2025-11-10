@@ -1134,8 +1134,8 @@ load_existing_installation_values() {
             esac
         done < <(read_config_yaml "config.yaml" "$(dirname "$config_file")")
         log "  Loaded values from config.yaml"
-    elif [[ -f "$install_config_file" ]] || [[ -f "$repo_config_file" ]]; then
-        log "config.yaml found but yq is not installed, skipping config.yaml read"
+    elif [[ -f "$install_config_file" ]]; then
+        log "config.yaml found in installation directory but yq is not installed, skipping config.yaml read"
     fi
     
     # Read ztpbootstrap.env (only fill in values not already set from config.yaml)
