@@ -285,20 +285,33 @@ ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/
 set -e
 # Ensure we're in the correct user's home directory
 cd ~
-echo "Current user: \$(whoami)"
-echo "Home directory: \$HOME"
+CURRENT_USER=\$(whoami)
+CURRENT_HOME=\$HOME
+echo "Current user: \$CURRENT_USER"
+echo "Home directory: \$CURRENT_HOME"
 echo "Current directory: \$(pwd)"
 
-# Remove any existing clone in wrong location (if it exists in /home/fedora)
-if [ -d /home/fedora/ztpbootstrap ] && [ "\$(whoami)" != "fedora" ]; then
-    echo "Found repository in /home/fedora/ztpbootstrap, but running as \$(whoami)"
-    echo "Will clone to \$HOME/ztpbootstrap instead"
+# If repository exists in /home/fedora but we're not fedora, move it to our home
+if [ -d /home/fedora/ztpbootstrap ] && [ "\$CURRENT_USER" != "fedora" ]; then
+    echo "Found repository in /home/fedora/ztpbootstrap, but running as \$CURRENT_USER"
+    if [ ! -d "\$CURRENT_HOME/ztpbootstrap" ]; then
+        echo "Moving repository from /home/fedora/ztpbootstrap to \$CURRENT_HOME/ztpbootstrap"
+        sudo mv /home/fedora/ztpbootstrap "\$CURRENT_HOME/ztpbootstrap" || {
+            echo "Failed to move, will clone fresh instead"
+            sudo rm -rf "\$CURRENT_HOME/ztpbootstrap" 2>/dev/null || true
+        }
+        sudo chown -R "\$CURRENT_USER:\$CURRENT_USER" "\$CURRENT_HOME/ztpbootstrap" 2>/dev/null || true
+    else
+        echo "Repository already exists in \$CURRENT_HOME/ztpbootstrap, leaving /home/fedora copy alone"
+    fi
 fi
 
-# Clone to current user's home directory
+# Clone to current user's home directory if it doesn't exist
 if [ ! -d ~/ztpbootstrap ]; then
+    echo "Cloning repository to \$CURRENT_HOME/ztpbootstrap"
     git clone https://github.com/coreyhines/ztpbootstrap.git ~/ztpbootstrap || {
-        echo "Repository may already exist or clone failed"
+        echo "Repository clone failed"
+        exit 1
     }
 else
     echo "Repository already exists at ~/ztpbootstrap"
