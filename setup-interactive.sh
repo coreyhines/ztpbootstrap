@@ -708,8 +708,26 @@ read_container_file() {
     local target_file=""
     
     # Check for pod file first (newer), then container file (older)
+    # But if pod file has Network=host and no IP addresses, also check container file
     if [[ -f "$pod_file" ]]; then
         target_file="$pod_file"
+        # Check if pod file has Network=host and no IP addresses
+        # If so, also check container file for IP addresses
+        local pod_content
+        if [[ $EUID -eq 0 ]]; then
+            pod_content=$(cat "$pod_file" 2>/dev/null)
+        else
+            pod_content=$(sudo cat "$pod_file" 2>/dev/null)
+        fi
+        # Check if pod has Network=host and no IP= or IP6= lines (or they're commented out)
+        if grep -q "^Network=host" <<< "$pod_content" 2>/dev/null; then
+            if ! grep -q "^IP=" <<< "$pod_content" 2>/dev/null && ! grep -q "^IP6=" <<< "$pod_content" 2>/dev/null; then
+                # Pod has host networking and no IPs, check container file for IP addresses
+                if [[ -f "$container_file" ]]; then
+                    target_file="$container_file"
+                fi
+            fi
+        fi
     elif [[ -f "$container_file" ]]; then
         target_file="$container_file"
     else
