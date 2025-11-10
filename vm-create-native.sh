@@ -518,10 +518,12 @@ runcmd:
     # Cloud-init may create the home directory with root ownership
     chown -R __DISTRO_USER__:__DISTRO_USER__ /home/__DISTRO_USER__ 2>/dev/null || true
     # Ensure current user's home directory exists and has correct permissions
+    # Always fix ownership even if directory exists (cloud-init may create it with wrong ownership)
     if [ ! -d /home/__CURRENT_USER__ ]; then
       mkdir -p /home/__CURRENT_USER__
-      chown __CURRENT_USER__:__CURRENT_USER__ /home/__CURRENT_USER__
     fi
+    # Always ensure correct ownership (even if directory already exists)
+    chown -R __CURRENT_USER__:__CURRENT_USER__ /home/__CURRENT_USER__ 2>/dev/null || true
     # Clone the repository to current user's home (with retries and better error handling)
     if [ ! -d /home/__CURRENT_USER__/ztpbootstrap ]; then
       # Install git if not present
