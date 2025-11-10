@@ -1416,6 +1416,50 @@ clean_installation_directories() {
 }
 
 # Start services after installation
+# Check if a path is on an NFS filesystem
+# Returns 0 if NFS, 1 if not NFS
+is_nfs_mount() {
+    local path="$1"
+    if [[ -z "$path" ]]; then
+        return 1
+    fi
+    
+    # Resolve the path to its actual location
+    local resolved_path
+    resolved_path=$(readlink -f "$path" 2>/dev/null || realpath "$path" 2>/dev/null || echo "$path")
+    
+    # Check if the path is on an NFS mount using findmnt or mount
+    if command -v findmnt >/dev/null 2>&1; then
+        if findmnt -n -o FSTYPE -T "$resolved_path" 2>/dev/null | grep -qi "^nfs"; then
+            return 0
+        fi
+    elif command -v mount >/dev/null 2>&1; then
+        if mount | grep -E "^[^ ]+ on $resolved_path" | grep -qi "type nfs"; then
+            return 0
+        fi
+    fi
+    
+    # Check parent directories if the path itself doesn't exist yet
+    local check_path="$resolved_path"
+    while [[ "$check_path" != "/" ]] && [[ ! -e "$check_path" ]]; do
+        check_path=$(dirname "$check_path")
+    done
+    
+    if [[ -n "$check_path" ]] && [[ "$check_path" != "/" ]]; then
+        if command -v findmnt >/dev/null 2>&1; then
+            if findmnt -n -o FSTYPE -T "$check_path" 2>/dev/null | grep -qi "^nfs"; then
+                return 0
+            fi
+        elif command -v mount >/dev/null 2>&1; then
+            if mount | grep -E "^[^ ]+ on $check_path" | grep -qi "type nfs"; then
+                return 0
+            fi
+        fi
+    fi
+    
+    return 1
+}
+
 # Create pod and container systemd files from config.yaml
 # This replicates the setup_pod() function from setup.sh
 create_pod_files_from_config() {
@@ -1533,6 +1577,42 @@ create_pod_files_from_config() {
             sudo cp "${repo_dir}/systemd/ztpbootstrap-nginx.container" "$systemd_dir/"
         fi
         log "Nginx container configuration installed"
+        
+        # Check if paths are on NFS and conditionally add :z flags for SELinux
+        local nginx_container_file="${systemd_dir}/ztpbootstrap-nginx.container"
+        local script_dir
+        script_dir=$(yq eval '.paths.script_dir // "/opt/containerdata/ztpbootstrap"' "${repo_dir}/config.yaml" 2>/dev/null || echo "/opt/containerdata/ztpbootstrap")
+        local cert_dir
+        cert_dir=$(yq eval '.paths.cert_dir // "/opt/containerdata/certs/wild"' "${repo_dir}/config.yaml" 2>/dev/null || echo "/opt/containerdata/certs/wild")
+        
+        # Use sudo for sed if not root
+        local sed_cmd="sed"
+        if [[ $EUID -ne 0 ]]; then
+            sed_cmd="sudo sed"
+        fi
+        
+        # Check if certs directory is on NFS
+        if ! is_nfs_mount "$cert_dir"; then
+            # Not on NFS, add :z flag to certs volume mount if SELinux is enforcing
+            if getenforce 2>/dev/null | grep -qi "enforcing"; then
+                $sed_cmd -i.tmp "s|Volume=\(${cert_dir}.*\):ro|Volume=\1:ro,z|g" "$nginx_container_file" 2>/dev/null && rm -f "${nginx_container_file}.tmp" 2>/dev/null || true
+                log "Added :z flag to certs volume mount (SELinux enforcing, not NFS)"
+            fi
+        else
+            log "Certs directory is on NFS, skipping :z flag"
+        fi
+        
+        # Check if logs directory is on NFS
+        local logs_dir="${script_dir}/logs"
+        if ! is_nfs_mount "$logs_dir"; then
+            # Not on NFS, add :z flag to logs volume mount if SELinux is enforcing
+            if getenforce 2>/dev/null | grep -qi "enforcing"; then
+                $sed_cmd -i.tmp "s|Volume=\(${logs_dir}.*\):rw|Volume=\1:rw,z|g" "$nginx_container_file" 2>/dev/null && rm -f "${nginx_container_file}.tmp" 2>/dev/null || true
+                log "Added :z flag to logs volume mount (SELinux enforcing, not NFS)"
+            fi
+        else
+            log "Logs directory is on NFS, skipping :z flag"
+        fi
     else
         error "Nginx container configuration not found: ${repo_dir}/systemd/ztpbootstrap-nginx.container"
         return 1
@@ -1546,6 +1626,25 @@ create_pod_files_from_config() {
             sudo cp "${repo_dir}/systemd/ztpbootstrap-webui.container" "$systemd_dir/"
         fi
         log "Web UI container configuration installed"
+        
+        # Manually run quadlet generator to ensure service is created
+        # This is needed because systemd's automatic generator may not always process all files
+        if command -v /usr/libexec/podman/quadlet >/dev/null 2>&1; then
+            local webui_container_file="${systemd_dir}/ztpbootstrap-webui.container"
+            if [[ $EUID -eq 0 ]]; then
+                if /usr/libexec/podman/quadlet "$webui_container_file" 2>/dev/null; then
+                    log "WebUI service generated successfully"
+                else
+                    warn "Failed to generate WebUI service via quadlet generator"
+                fi
+            else
+                if sudo /usr/libexec/podman/quadlet "$webui_container_file" 2>/dev/null; then
+                    log "WebUI service generated successfully"
+                else
+                    warn "Failed to generate WebUI service via quadlet generator"
+                fi
+            fi
+        fi
     fi
     
     return 0
