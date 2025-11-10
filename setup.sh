@@ -867,12 +867,17 @@ main() {
             # Also ensure existing files in the directory are writable by root
             chown root:root "$SCRIPT_DIR"/*.py 2>/dev/null || sudo chown root:root "$SCRIPT_DIR"/*.py 2>/dev/null || true
             chmod 664 "$SCRIPT_DIR"/*.py 2>/dev/null || sudo chmod 664 "$SCRIPT_DIR"/*.py 2>/dev/null || true
+            # Set SELinux context to container_file_t so containers can write
+            if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
+                chcon -R -t container_file_t "$SCRIPT_DIR" 2>/dev/null || sudo chcon -R -t container_file_t "$SCRIPT_DIR" 2>/dev/null || true
+                log "Set SELinux context to container_file_t for webui uploads"
+            fi
             log "Set ownership and permissions on script directory for webui uploads (not NFS)"
         else
             # For NFS, ownership changes may not work, so use 777
             chmod 777 "$SCRIPT_DIR" 2>/dev/null || sudo chmod 777 "$SCRIPT_DIR" 2>/dev/null || true
             chmod 666 "$SCRIPT_DIR"/*.py 2>/dev/null || sudo chmod 666 "$SCRIPT_DIR"/*.py 2>/dev/null || true
-            log "Set permissions on script directory for webui uploads (NFS - using 777)"
+            log "Set permissions on script directory for webui uploads (NFS - using 777, SELinux context not applicable)"
         fi
     fi
     
