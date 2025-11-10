@@ -704,6 +704,29 @@ start_service() {
             fi
         fi
         
+        # Always ensure the service file includes the start-webui.sh command
+        # Quadlet doesn't support Command= in Container section, so we need to add it manually
+        if [[ -f "/run/systemd/generator/ztpbootstrap-webui.service" ]]; then
+            # Update the ExecStart line to include the command if it's missing
+            if ! grep -q "/app/start-webui.sh" /run/systemd/generator/ztpbootstrap-webui.service 2>/dev/null; then
+                log "Adding /app/start-webui.sh command to webui service file..."
+                # Use python for reliable multi-line replacement
+                python3 -c "
+import re
+with open(\"/run/systemd/generator/ztpbootstrap-webui.service\", \"r\") as f:
+    content = f.read()
+# Replace docker.io/python:alpine at end of ExecStart line with docker.io/python:alpine /app/start-webui.sh
+content = re.sub(r\"(docker\.io/python:alpine)(\s*$)\", r\"\1 /app/start-webui.sh\2\", content, flags=re.MULTILINE)
+with open(\"/run/systemd/generator/ztpbootstrap-webui.service\", \"w\") as f:
+    f.write(content)
+" 2>/dev/null || {
+                    # Fallback to sed if python not available
+                    sed -i.tmp 's|docker\.io/python:alpine$|docker.io/python:alpine /app/start-webui.sh|g' /run/systemd/generator/ztpbootstrap-webui.service 2>/dev/null && rm -f /run/systemd/generator/ztpbootstrap-webui.service.tmp 2>/dev/null || true
+                }
+                log "Updated webui service file with start-webui.sh command"
+            fi
+        fi
+        
         # If quadlet failed, create a basic service file manually
         if [[ "$webui_service_generated" == "false" ]]; then
             warn "Quadlet generator did not create webui service, creating manual service file..."
