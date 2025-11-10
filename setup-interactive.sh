@@ -728,7 +728,7 @@ read_container_file() {
         fi
     fi
     
-    # Prefer pod file, but if it's missing IP6 and container file has it, use container file
+    # Prefer pod file, but if it's missing IP6 or DNS entries and container file has them, use container file
     if [[ -n "$pod_content" ]]; then
         # Check if pod has Network=host and no IP addresses
         if grep -q "^Network=host" <<< "$pod_content" 2>/dev/null; then
@@ -745,6 +745,10 @@ read_container_file() {
         # Check if pod is missing IP6 but container file has it
         elif [[ -n "$container_content" ]] && ! grep -q "^IP6=" <<< "$pod_content" 2>/dev/null && grep -q "^IP6=" <<< "$container_content" 2>/dev/null; then
             # Pod doesn't have IP6 but container does, use container file
+            target_file="$container_file"
+        # Check if pod is missing DNS entries but container file has them
+        elif [[ -n "$container_content" ]] && ! grep -q "^DNS=" <<< "$pod_content" 2>/dev/null && grep -q "^DNS=" <<< "$container_content" 2>/dev/null; then
+            # Pod doesn't have DNS but container does, use container file
             target_file="$container_file"
         else
             target_file="$pod_file"
