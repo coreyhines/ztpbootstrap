@@ -1397,34 +1397,49 @@ interactive_config() {
     fi
     prompt_with_default "Domain name" "$default_domain" DOMAIN
     
-    # For IPv4, use existing value if set, otherwise default to 10.0.0.10
-    local default_ipv4="10.0.0.10"
-    if [[ -n "${EXISTING_IPV4:-}" ]]; then
-        default_ipv4="$EXISTING_IPV4"
+    # Ask about host network mode FIRST, so user can override detected IP addresses
+    # Determine default host network mode from existing network config
+    local default_host_network="n"
+    if [[ "${EXISTING_NETWORK:-}" == "host" ]]; then
+        default_host_network="y"
     fi
-    # Clearer prompt wording: if there's a default, pressing Enter uses it
-    if [[ -n "$default_ipv4" ]]; then
-        prompt_with_default "IPv4 address" "$default_ipv4" IPV4 "false" "true"
-    else
-        prompt_with_default "IPv4 address (leave empty for host network)" "" IPV4 "false" "true"
-    fi
+    prompt_yes_no "Use host network mode? (overrides IP addresses, useful for testing)" "$default_host_network" HOST_NETWORK
     
-    # For IPv6, use existing value if set (even if empty), otherwise default to empty
-    local default_ipv6=""
-    if [[ -n "${EXISTING_IPV6:-}" ]]; then
-        default_ipv6="$EXISTING_IPV6"
-    elif [[ -z "${EXISTING_IPV6:-}" ]] && [[ "${EXISTING_IPV6+set}" == "set" ]]; then
-        # IPv6 was explicitly set to empty in existing config
-        default_ipv6=""
+    # If host network is enabled, clear IP addresses and skip IP prompts
+    if [[ "$HOST_NETWORK" == "true" ]]; then
+        IPV4=""
+        IPV6=""
+        log "Host network mode enabled - IP addresses will be ignored"
     else
-        # IPv6 was not set at all, use empty as default (to disable)
-        default_ipv6=""
-    fi
-    # Clearer prompt wording: if there's a default, pressing Enter uses it
-    if [[ -n "$default_ipv6" ]]; then
-        prompt_with_default "IPv6 address" "$default_ipv6" IPV6 "false" "true"
-    else
-        prompt_with_default "IPv6 address (leave empty to disable)" "" IPV6 "false" "true"
+        # For IPv4, use existing value if set, otherwise default to 10.0.0.10
+        local default_ipv4="10.0.0.10"
+        if [[ -n "${EXISTING_IPV4:-}" ]]; then
+            default_ipv4="$EXISTING_IPV4"
+        fi
+        # Clearer prompt wording: if there's a default, pressing Enter uses it
+        if [[ -n "$default_ipv4" ]]; then
+            prompt_with_default "IPv4 address" "$default_ipv4" IPV4 "false" "true"
+        else
+            prompt_with_default "IPv4 address (leave empty for host network)" "" IPV4 "false" "true"
+        fi
+        
+        # For IPv6, use existing value if set (even if empty), otherwise default to empty
+        local default_ipv6=""
+        if [[ -n "${EXISTING_IPV6:-}" ]]; then
+            default_ipv6="$EXISTING_IPV6"
+        elif [[ -z "${EXISTING_IPV6:-}" ]] && [[ "${EXISTING_IPV6+set}" == "set" ]]; then
+            # IPv6 was explicitly set to empty in existing config
+            default_ipv6=""
+        else
+            # IPv6 was not set at all, use empty as default (to disable)
+            default_ipv6=""
+        fi
+        # Clearer prompt wording: if there's a default, pressing Enter uses it
+        if [[ -n "$default_ipv6" ]]; then
+            prompt_with_default "IPv6 address" "$default_ipv6" IPV6 "false" "true"
+        else
+            prompt_with_default "IPv6 address (leave empty to disable)" "" IPV6 "false" "true"
+        fi
     fi
     prompt_with_default "HTTPS port" "${EXISTING_HTTPS_PORT:-443}" HTTPS_PORT
     prompt_with_default "HTTP port" "80" HTTP_PORT
@@ -1508,12 +1523,8 @@ interactive_config() {
     prompt_with_default "Container name" "ztpbootstrap" CONTAINER_NAME
     prompt_with_default "Container image" "docker.io/nginx:alpine" CONTAINER_IMAGE
     prompt_with_default "Timezone" "${EXISTING_TIMEZONE:-UTC}" TIMEZONE
-    # Determine host network mode from existing network config
-    local default_host_network="y"
-    if [[ -n "${EXISTING_NETWORK:-}" ]] && [[ "${EXISTING_NETWORK}" != "host" ]]; then
-        default_host_network="n"
-    fi
-    prompt_yes_no "Use host network mode?" "$default_host_network" HOST_NETWORK
+    # Note: Host network mode is now asked in the Network Configuration section above
+    # This ensures it can override detected IP addresses
     prompt_with_default "DNS server 1" "${EXISTING_DNS1:-8.8.8.8}" DNS1
     prompt_with_default "DNS server 2" "${EXISTING_DNS2:-8.8.4.4}" DNS2
     
