@@ -970,23 +970,45 @@ load_existing_installation_values() {
     fi
     
     # Debug: Log loaded values
+    log "Summary of loaded existing values:"
+    if [[ -n "$EXISTING_DOMAIN" ]]; then
+        log "  Domain: $EXISTING_DOMAIN"
+    else
+        log "  Domain: (not found)"
+    fi
     if [[ -n "$EXISTING_IPV4" ]]; then
-        log "Loaded existing IPv4: $EXISTING_IPV4"
+        log "  IPv4: $EXISTING_IPV4"
+    else
+        log "  IPv4: (not found)"
     fi
     if [[ -n "$EXISTING_IPV6" ]]; then
-        log "Loaded existing IPv6: $EXISTING_IPV6"
+        log "  IPv6: $EXISTING_IPV6"
+    else
+        log "  IPv6: (not found)"
     fi
     if [[ -n "$EXISTING_NETWORK" ]]; then
-        log "Loaded existing Network: $EXISTING_NETWORK"
+        log "  Network: $EXISTING_NETWORK"
+    else
+        log "  Network: (not found)"
     fi
     if [[ -n "$EXISTING_HTTP_ONLY" ]]; then
-        log "Loaded existing HTTP-only mode: $EXISTING_HTTP_ONLY"
+        log "  HTTP-only mode: $EXISTING_HTTP_ONLY"
+    else
+        log "  HTTP-only mode: (not found)"
     fi
     if [[ -n "$EXISTING_HTTPS_PORT" ]]; then
-        log "Loaded existing HTTPS port: $EXISTING_HTTPS_PORT"
+        log "  HTTPS port: $EXISTING_HTTPS_PORT"
+    else
+        log "  HTTPS port: (not found)"
+    fi
+    if [[ -n "$EXISTING_CV_ADDR" ]]; then
+        log "  CVaaS address: $EXISTING_CV_ADDR"
+    fi
+    if [[ -n "$EXISTING_TIMEZONE" ]]; then
+        log "  Timezone: $EXISTING_TIMEZONE"
     fi
     
-    log "Loaded existing values from installation"
+    log "Finished loading existing values from installation"
     return 0
 }
 
