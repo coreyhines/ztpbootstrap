@@ -1122,6 +1122,12 @@ interactive_config() {
     echo ""
     
     prompt_with_default "Main service directory" "${EXISTING_SCRIPT_DIR:-/opt/containerdata/ztpbootstrap}" SCRIPT_DIR
+    # Validate SCRIPT_DIR is a reasonable path (not just a single character or yes/no)
+    if [[ "${#SCRIPT_DIR}" -lt 3 ]] || [[ "$SCRIPT_DIR" =~ ^[yYnN]$ ]]; then
+        warn "Invalid directory path: '$SCRIPT_DIR'. Using default."
+        SCRIPT_DIR="${EXISTING_SCRIPT_DIR:-/opt/containerdata/ztpbootstrap}"
+        log "Using default: $SCRIPT_DIR"
+    fi
     prompt_with_default "SSL certificate directory" "/opt/containerdata/certs/wild" CERT_DIR
     prompt_with_default "Environment file path" "${SCRIPT_DIR}/ztpbootstrap.env" ENV_FILE
     prompt_with_default "Bootstrap script path" "${SCRIPT_DIR}/bootstrap.py" BOOTSTRAP_SCRIPT
