@@ -708,27 +708,48 @@ read_container_file() {
     local target_file=""
     
     # Check for pod file first (newer), then container file (older)
-    # But if pod file has Network=host and no IP addresses, also check container file
+    # But if pod file is missing IP addresses, also check container file
+    local pod_content=""
+    local container_content=""
+    
     if [[ -f "$pod_file" ]]; then
-        target_file="$pod_file"
-        # Check if pod file has Network=host and no IP addresses
-        # If so, also check container file for IP addresses
-        local pod_content
         if [[ $EUID -eq 0 ]]; then
             pod_content=$(cat "$pod_file" 2>/dev/null)
         else
             pod_content=$(sudo cat "$pod_file" 2>/dev/null)
         fi
-        # Check if pod has Network=host and no IP= or IP6= lines (or they're commented out)
+    fi
+    
+    if [[ -f "$container_file" ]]; then
+        if [[ $EUID -eq 0 ]]; then
+            container_content=$(cat "$container_file" 2>/dev/null)
+        else
+            container_content=$(sudo cat "$container_file" 2>/dev/null)
+        fi
+    fi
+    
+    # Prefer pod file, but if it's missing IP6 and container file has it, use container file
+    if [[ -n "$pod_content" ]]; then
+        # Check if pod has Network=host and no IP addresses
         if grep -q "^Network=host" <<< "$pod_content" 2>/dev/null; then
             if ! grep -q "^IP=" <<< "$pod_content" 2>/dev/null && ! grep -q "^IP6=" <<< "$pod_content" 2>/dev/null; then
-                # Pod has host networking and no IPs, check container file for IP addresses
-                if [[ -f "$container_file" ]]; then
+                # Pod has host networking and no IPs, use container file if available
+                if [[ -n "$container_content" ]]; then
                     target_file="$container_file"
+                else
+                    target_file="$pod_file"
                 fi
+            else
+                target_file="$pod_file"
             fi
+        # Check if pod is missing IP6 but container file has it
+        elif [[ -n "$container_content" ]] && ! grep -q "^IP6=" <<< "$pod_content" 2>/dev/null && grep -q "^IP6=" <<< "$container_content" 2>/dev/null; then
+            # Pod doesn't have IP6 but container does, use container file
+            target_file="$container_file"
+        else
+            target_file="$pod_file"
         fi
-    elif [[ -f "$container_file" ]]; then
+    elif [[ -n "$container_content" ]]; then
         target_file="$container_file"
     else
         return 1
