@@ -34,6 +34,8 @@ EXISTING_TIMEZONE=""
 EXISTING_DNS1=""
 EXISTING_DNS2=""
 EXISTING_NETWORK=""
+EXISTING_HTTP_ONLY=""
+EXISTING_HTTPS_PORT=""
 
 # Logging functions
 log() {
@@ -561,6 +563,129 @@ read_ztpbootstrap_env() {
     return 0
 }
 
+# Find which podman network contains a given IP address
+find_network_for_ip() {
+    local target_ip="$1"
+    local networks
+    
+    # Check if podman is available
+    if ! command -v podman >/dev/null 2>&1; then
+        return 1
+    fi
+    
+    # Get list of all podman networks (skip header line)
+    networks=$(podman network ls --format "{{.Name}}" 2>/dev/null || echo "")
+    
+    if [[ -z "$networks" ]]; then
+        return 1
+    fi
+    
+    # Check each network to see if the IP falls within its subnet
+    while IFS= read -r network_name; do
+        [[ -z "$network_name" ]] && continue
+        
+        # Skip default networks that don't support static IPs
+        if [[ "$network_name" == "podman" ]] || [[ "$network_name" == "default" ]]; then
+            continue
+        fi
+        
+        # Get network subnet from inspect
+        local subnet_info
+        subnet_info=$(podman network inspect "$network_name" 2>/dev/null | grep -i "subnet" | head -1 || echo "")
+        
+        if [[ -z "$subnet_info" ]]; then
+            continue
+        fi
+        
+        # Extract subnet (format: "Subnet": "10.0.0.0/24" or similar)
+        local subnet=""
+        if [[ "$subnet_info" =~ \"Subnet\":[[:space:]]*\"([^\"]+)\" ]]; then
+            subnet="${BASH_REMATCH[1]}"
+        elif [[ "$subnet_info" =~ subnet[[:space:]]*[:=][[:space:]]*([0-9.]+/[0-9]+) ]]; then
+            subnet="${BASH_REMATCH[1]}"
+        fi
+        
+        if [[ -z "$subnet" ]]; then
+            continue
+        fi
+        
+        # Check if IP is in subnet
+        # Try using ipcalc if available (most accurate)
+        if command -v ipcalc >/dev/null 2>&1; then
+            # ipcalc -c checks if IP is in subnet (returns 0 if true)
+            if ipcalc -c "$target_ip" "$subnet" >/dev/null 2>&1; then
+                echo "$network_name"
+                return 0
+            fi
+        # Fallback: use ip command to check if IP is in subnet
+        elif command -v ip >/dev/null 2>&1; then
+            # Use ip route get to see if IP would route through this network
+            # This is a heuristic but should work for most cases
+            if ip route get "$target_ip" >/dev/null 2>&1; then
+                # Check if the subnet matches by comparing network portion
+                local network_addr="${subnet%%/*}"
+                local prefix="${subnet##*/}"
+                local ip_octets=($(echo "$target_ip" | tr '.' ' '))
+                local net_octets=($(echo "$network_addr" | tr '.' ' '))
+                
+                if [[ ${#ip_octets[@]} -eq 4 ]] && [[ ${#net_octets[@]} -eq 4 ]]; then
+                    # Calculate how many octets to check based on prefix
+                    local octets_to_check=$((prefix / 8))
+                    local bits_in_partial=$((prefix % 8))
+                    local match=true
+                    
+                    # Check full octets
+                    for ((i=0; i<octets_to_check && i<4; i++)); do
+                        if [[ "${ip_octets[$i]}" != "${net_octets[$i]}" ]]; then
+                            match=false
+                            break
+                        fi
+                    done
+                    
+                    # If all full octets match and we have a partial octet, check it
+                    if [[ "$match" == "true" ]] && [[ $bits_in_partial -gt 0 ]] && [[ $octets_to_check -lt 4 ]]; then
+                        local ip_octet="${ip_octets[$octets_to_check]}"
+                        local net_octet="${net_octets[$octets_to_check]}"
+                        local mask=$((0xFF << (8 - bits_in_partial) & 0xFF))
+                        if [[ $((ip_octet & mask)) != $((net_octet & mask)) ]]; then
+                            match=false
+                        fi
+                    fi
+                    
+                    if [[ "$match" == "true" ]]; then
+                        echo "$network_name"
+                        return 0
+                    fi
+                fi
+            fi
+        else
+            # Last resort: simple prefix matching for common cases
+            local network_addr="${subnet%%/*}"
+            local prefix="${subnet##*/}"
+            local ip_octets=($(echo "$target_ip" | tr '.' ' '))
+            local net_octets=($(echo "$network_addr" | tr '.' ' '))
+            
+            if [[ ${#ip_octets[@]} -eq 4 ]] && [[ ${#net_octets[@]} -eq 4 ]]; then
+                # Check common prefix lengths
+                if [[ "$prefix" == "24" ]] && [[ "${ip_octets[0]}" == "${net_octets[0]}" ]] && \
+                   [[ "${ip_octets[1]}" == "${net_octets[1]}" ]] && [[ "${ip_octets[2]}" == "${net_octets[2]}" ]]; then
+                    echo "$network_name"
+                    return 0
+                elif [[ "$prefix" == "16" ]] && [[ "${ip_octets[0]}" == "${net_octets[0]}" ]] && \
+                     [[ "${ip_octets[1]}" == "${net_octets[1]}" ]]; then
+                    echo "$network_name"
+                    return 0
+                elif [[ "$prefix" == "8" ]] && [[ "${ip_octets[0]}" == "${net_octets[0]}" ]]; then
+                    echo "$network_name"
+                    return 0
+                fi
+            fi
+        fi
+    done <<< "$networks"
+    
+    return 1
+}
+
 # Read container/pod file
 read_container_file() {
     local base_path="${1:-/etc/containers/systemd/ztpbootstrap}"
@@ -657,6 +782,29 @@ read_nginx_conf() {
         fi
     fi
     
+    # Detect HTTP-only mode
+    # HTTP-only mode is indicated by:
+    # 1. Presence of "HTTP-ONLY MODE" comment, OR
+    # 2. Absence of "listen.*ssl" pattern (no SSL listeners)
+    local http_only="false"
+    if grep -q "HTTP-ONLY MODE" <<< "$content" || ! grep -q "listen.*ssl" <<< "$content"; then
+        http_only="true"
+    fi
+    values+=("HTTP_ONLY=${http_only}")
+    
+    # Extract HTTPS port from listen directives
+    # Look for "listen 443 ssl" or "listen [::]:443 ssl" patterns
+    local https_port="443"
+    if [[ "$http_only" == "false" ]]; then
+        # Try to extract port from listen directives
+        if [[ "$content" =~ listen[[:space:]]+([0-9]+)[[:space:]]+ssl ]]; then
+            https_port="${BASH_REMATCH[1]}"
+        elif [[ "$content" =~ listen[[:space:]]+\[::\]:([0-9]+)[[:space:]]+ssl ]]; then
+            https_port="${BASH_REMATCH[1]}"
+        fi
+    fi
+    values+=("HTTPS_PORT=${https_port}")
+    
     # Extract SSL certificate paths
     if [[ "$content" =~ ssl_certificate[[:space:]]+([^;]+) ]]; then
         local cert_path="${BASH_REMATCH[1]}"
@@ -693,6 +841,8 @@ load_existing_installation_values() {
     EXISTING_DNS1=""
     EXISTING_DNS2=""
     EXISTING_NETWORK=""
+    EXISTING_HTTP_ONLY=""
+    EXISTING_HTTPS_PORT=""
     
     log "Reading existing installation values..."
     
@@ -781,12 +931,40 @@ load_existing_installation_values() {
         log "No container values to parse"
     fi
     
+    # If we have an IPv4 address but no network (or network is not "host"), try to find which network it belongs to
+    if [[ -n "$EXISTING_IPV4" ]] && [[ -z "$EXISTING_NETWORK" ]]; then
+        log "IPv4 address found ($EXISTING_IPV4) but no network specified, attempting to detect network..."
+        local detected_network
+        detected_network=$(find_network_for_ip "$EXISTING_IPV4" 2>/dev/null || echo "")
+        if [[ -n "$detected_network" ]]; then
+            EXISTING_NETWORK="$detected_network"
+            log "  Detected network for $EXISTING_IPV4: $detected_network"
+        else
+            log "  Could not automatically detect network for $EXISTING_IPV4"
+        fi
+    fi
+    
+    # If we have an IPv6 address but no network, try to find which network it belongs to
+    if [[ -n "$EXISTING_IPV6" ]] && [[ -z "$EXISTING_NETWORK" ]]; then
+        log "IPv6 address found ($EXISTING_IPV6) but no network specified, attempting to detect network..."
+        local detected_network
+        detected_network=$(find_network_for_ip "$EXISTING_IPV6" 2>/dev/null || echo "")
+        if [[ -n "$detected_network" ]]; then
+            EXISTING_NETWORK="$detected_network"
+            log "  Detected network for $EXISTING_IPV6: $detected_network"
+        else
+            log "  Could not automatically detect network for $EXISTING_IPV6"
+        fi
+    fi
+    
     # Read nginx.conf
     local nginx_file="${script_dir}/nginx.conf"
     if [[ -f "$nginx_file" ]]; then
         while IFS='=' read -r key value; do
             case "$key" in
                 DOMAIN) EXISTING_DOMAIN="$value" ;;
+                HTTP_ONLY) EXISTING_HTTP_ONLY="$value" ;;
+                HTTPS_PORT) EXISTING_HTTPS_PORT="$value" ;;
             esac
         done < <(read_nginx_conf "$nginx_file")
     fi
@@ -800,6 +978,12 @@ load_existing_installation_values() {
     fi
     if [[ -n "$EXISTING_NETWORK" ]]; then
         log "Loaded existing Network: $EXISTING_NETWORK"
+    fi
+    if [[ -n "$EXISTING_HTTP_ONLY" ]]; then
+        log "Loaded existing HTTP-only mode: $EXISTING_HTTP_ONLY"
+    fi
+    if [[ -n "$EXISTING_HTTPS_PORT" ]]; then
+        log "Loaded existing HTTPS port: $EXISTING_HTTPS_PORT"
     fi
     
     log "Loaded existing values from installation"
@@ -952,11 +1136,32 @@ interactive_config() {
     echo ""
     
     prompt_with_default "Domain name" "${EXISTING_DOMAIN:-ztpboot.example.com}" DOMAIN
-    prompt_with_default "IPv4 address (leave empty for host network)" "${EXISTING_IPV4:-10.0.0.10}" IPV4 "false" "true"
-    prompt_with_default "IPv6 address (leave empty to disable)" "${EXISTING_IPV6:-2001:db8::10}" IPV6 "false" "true"
-    prompt_with_default "HTTPS port" "443" HTTPS_PORT
+    # For IPv4, use existing value if set, otherwise default to 10.0.0.10
+    local default_ipv4="10.0.0.10"
+    if [[ -n "${EXISTING_IPV4:-}" ]]; then
+        default_ipv4="$EXISTING_IPV4"
+    fi
+    prompt_with_default "IPv4 address (leave empty for host network)" "$default_ipv4" IPV4 "false" "true"
+    # For IPv6, use existing value if set (even if empty), otherwise default to empty
+    local default_ipv6=""
+    if [[ -n "${EXISTING_IPV6:-}" ]]; then
+        default_ipv6="$EXISTING_IPV6"
+    elif [[ -z "${EXISTING_IPV6:-}" ]] && [[ "${EXISTING_IPV6+set}" == "set" ]]; then
+        # IPv6 was explicitly set to empty in existing config
+        default_ipv6=""
+    else
+        # IPv6 was not set at all, use empty as default (to disable)
+        default_ipv6=""
+    fi
+    prompt_with_default "IPv6 address (leave empty to disable)" "$default_ipv6" IPV6 "false" "true"
+    prompt_with_default "HTTPS port" "${EXISTING_HTTPS_PORT:-443}" HTTPS_PORT
     prompt_with_default "HTTP port" "80" HTTP_PORT
-    prompt_yes_no "Use HTTP-only mode (insecure, not recommended)" "n" HTTP_ONLY
+    # Determine default for HTTP-only mode
+    local default_http_only="n"
+    if [[ "${EXISTING_HTTP_ONLY:-}" == "true" ]]; then
+        default_http_only="y"
+    fi
+    prompt_yes_no "Use HTTP-only mode (insecure, not recommended)" "$default_http_only" HTTP_ONLY
     
     echo ""
     
