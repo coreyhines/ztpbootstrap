@@ -1647,7 +1647,10 @@ create_pod_files_from_config() {
         log "Web UI container configuration installed"
         
         # Copy webui directory to script directory (required for webui container)
-        local webui_dest="${script_dir}/webui"
+        # Get script_dir from config.yaml or use default
+        local script_dir_for_webui
+        script_dir_for_webui=$(yq eval '.paths.script_dir // "/opt/containerdata/ztpbootstrap"' "${repo_dir}/config.yaml" 2>/dev/null || echo "/opt/containerdata/ztpbootstrap")
+        local webui_dest="${script_dir_for_webui}/webui"
         if [[ ! -d "$webui_dest" ]]; then
             if [[ $EUID -eq 0 ]]; then
                 mkdir -p "$webui_dest" || {
