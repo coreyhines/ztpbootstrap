@@ -305,7 +305,6 @@ else
 fi
 cd ~/ztpbootstrap
 git pull || true
-PREP_EOF
 
 # Ensure yq is installed
 if ! command -v yq &> /dev/null; then
