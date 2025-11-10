@@ -1103,23 +1103,15 @@ load_existing_installation_values() {
     
     log "Reading existing installation values..."
     
-    # First, try to read from config.yaml in installation directory (highest priority)
-    # Only use repo's config.yaml as fallback if installation directory doesn't have one
-    local repo_dir
-    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    # Only read from config.yaml in installation directory (not from repo)
+    # The repo's config.yaml has template values that would override real values
     local install_config_file="${script_dir}/config.yaml"
-    local repo_config_file="${repo_dir}/config.yaml"
     local config_file=""
     
-    # Prefer config.yaml in installation directory over repo directory
+    # Only use config.yaml from installation directory, never from repo
     if [[ -f "$install_config_file" ]] && command -v yq >/dev/null 2>&1; then
         config_file="$install_config_file"
         log "Reading from config.yaml in installation directory (highest priority)..."
-    elif [[ -f "$repo_config_file" ]] && command -v yq >/dev/null 2>&1; then
-        # Only use repo's config.yaml if installation directory doesn't have one
-        # This prevents using template values from the repo
-        config_file="$repo_config_file"
-        log "Reading from config.yaml in repo directory..."
     fi
     
     if [[ -n "$config_file" ]] && [[ -f "$config_file" ]]; then
