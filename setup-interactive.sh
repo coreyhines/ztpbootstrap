@@ -853,10 +853,16 @@ read_nginx_conf() {
         fi
     done <<< "$content"
     
+    # Debug: log all found domains
+    if [[ ${#all_domains[@]} -gt 0 ]]; then
+        log "  Found ${#all_domains[@]} domain(s) in nginx.conf: ${all_domains[*]}"
+    fi
+    
     # Prefer domains that are not example.com
     for candidate in "${all_domains[@]}"; do
         if [[ "$candidate" != *"example.com"* ]] && [[ "$candidate" != "localhost" ]] && [[ "$candidate" != "_" ]]; then
             domain="$candidate"
+            log "  Selected non-example domain: $domain"
             break
         fi
     done
@@ -864,6 +870,7 @@ read_nginx_conf() {
     # If no non-example domain found, use first valid domain
     if [[ -z "$domain" ]] && [[ ${#all_domains[@]} -gt 0 ]]; then
         domain="${all_domains[0]}"
+        log "  No non-example domain found, using first domain: $domain"
     fi
     
     # If not found with first pattern, try a more flexible pattern
@@ -949,6 +956,128 @@ read_nginx_conf() {
     return 0
 }
 
+# Read config.yaml file
+read_config_yaml() {
+    local config_file="${1:-config.yaml}"
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local full_path="${repo_dir}/${config_file}"
+    
+    # Also check in script_dir if provided
+    if [[ -n "${2:-}" ]] && [[ -f "${2}/${config_file}" ]]; then
+        full_path="${2}/${config_file}"
+    fi
+    
+    if [[ ! -f "$full_path" ]]; then
+        return 1
+    fi
+    
+    if ! command -v yq >/dev/null 2>&1; then
+        log "yq not found, cannot read config.yaml"
+        return 1
+    fi
+    
+    local values=()
+    
+    # Read network settings
+    local domain
+    domain=$(yq eval '.network.domain // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$domain" ]] && [[ "$domain" != "null" ]]; then
+        values+=("DOMAIN=$domain")
+    fi
+    
+    local ipv4
+    ipv4=$(yq eval '.network.ipv4 // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]]; then
+        values+=("IPV4=$ipv4")
+    fi
+    
+    local ipv6
+    ipv6=$(yq eval '.network.ipv6 // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]]; then
+        values+=("IPV6=$ipv6")
+    fi
+    
+    local network
+    network=$(yq eval '.network.network // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$network" ]] && [[ "$network" != "null" ]]; then
+        values+=("NETWORK=$network")
+    fi
+    
+    local http_only
+    http_only=$(yq eval '.network.http_only // false' "$full_path" 2>/dev/null || echo "false")
+    if [[ "$http_only" == "true" ]]; then
+        values+=("HTTP_ONLY=true")
+    else
+        values+=("HTTP_ONLY=false")
+    fi
+    
+    local https_port
+    https_port=$(yq eval '.network.https_port // 443' "$full_path" 2>/dev/null || echo "443")
+    values+=("HTTPS_PORT=$https_port")
+    
+    # Read CVaaS settings
+    local cv_addr
+    cv_addr=$(yq eval '.cvaas.address // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$cv_addr" ]] && [[ "$cv_addr" != "null" ]]; then
+        values+=("CV_ADDR=$cv_addr")
+    fi
+    
+    local enrollment_token
+    enrollment_token=$(yq eval '.cvaas.enrollment_token // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$enrollment_token" ]] && [[ "$enrollment_token" != "null" ]]; then
+        values+=("ENROLLMENT_TOKEN=$enrollment_token")
+    fi
+    
+    local cv_proxy
+    cv_proxy=$(yq eval '.cvaas.proxy // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$cv_proxy" ]] && [[ "$cv_proxy" != "null" ]]; then
+        values+=("CV_PROXY=$cv_proxy")
+    fi
+    
+    local eos_url
+    eos_url=$(yq eval '.cvaas.eos_url // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$eos_url" ]] && [[ "$eos_url" != "null" ]]; then
+        values+=("EOS_URL=$eos_url")
+    fi
+    
+    local ntp_server
+    ntp_server=$(yq eval '.cvaas.ntp_server // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$ntp_server" ]] && [[ "$ntp_server" != "null" ]]; then
+        values+=("NTP_SERVER=$ntp_server")
+    fi
+    
+    # Read container settings
+    local timezone
+    timezone=$(yq eval '.container.timezone // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$timezone" ]] && [[ "$timezone" != "null" ]]; then
+        values+=("TIMEZONE=$timezone")
+    fi
+    
+    local host_network
+    host_network=$(yq eval '.container.host_network // false' "$full_path" 2>/dev/null || echo "false")
+    if [[ "$host_network" == "true" ]]; then
+        values+=("HOST_NETWORK=true")
+    fi
+    
+    # Read DNS servers (array)
+    local dns1
+    dns1=$(yq eval '.container.dns[0] // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$dns1" ]] && [[ "$dns1" != "null" ]]; then
+        values+=("DNS1=$dns1")
+    fi
+    
+    local dns2
+    dns2=$(yq eval '.container.dns[1] // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$dns2" ]] && [[ "$dns2" != "null" ]]; then
+        values+=("DNS2=$dns2")
+    fi
+    
+    # Output as key=value pairs (one per line)
+    printf '%s\n' "${values[@]}"
+    return 0
+}
+
 # Load existing installation values
 load_existing_installation_values() {
     local script_dir="${1:-/opt/containerdata/ztpbootstrap}"
@@ -972,17 +1101,47 @@ load_existing_installation_values() {
     
     log "Reading existing installation values..."
     
-    # Read ztpbootstrap.env
-    local env_file="${script_dir}/ztpbootstrap.env"
-    if [[ -f "$env_file" ]]; then
+    # First, try to read from config.yaml (highest priority)
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local config_file="${repo_dir}/config.yaml"
+    
+    if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+        log "Reading from config.yaml (highest priority)..."
         while IFS='=' read -r key value; do
             case "$key" in
+                DOMAIN) EXISTING_DOMAIN="$value" ;;
+                IPV4) EXISTING_IPV4="$value" ;;
+                IPV6) EXISTING_IPV6="$value" ;;
+                NETWORK) EXISTING_NETWORK="$value" ;;
+                HTTP_ONLY) EXISTING_HTTP_ONLY="$value" ;;
+                HTTPS_PORT) EXISTING_HTTPS_PORT="$value" ;;
                 CV_ADDR) EXISTING_CV_ADDR="$value" ;;
                 ENROLLMENT_TOKEN) EXISTING_ENROLLMENT_TOKEN="$value" ;;
                 CV_PROXY) EXISTING_CV_PROXY="$value" ;;
                 EOS_URL) EXISTING_EOS_URL="$value" ;;
                 NTP_SERVER) EXISTING_NTP_SERVER="$value" ;;
-                TZ) EXISTING_TIMEZONE="$value" ;;
+                TIMEZONE) EXISTING_TIMEZONE="$value" ;;
+                DNS1) EXISTING_DNS1="$value" ;;
+                DNS2) EXISTING_DNS2="$value" ;;
+            esac
+        done < <(read_config_yaml "config.yaml" "$repo_dir")
+        log "  Loaded values from config.yaml"
+    elif [[ -f "$config_file" ]]; then
+        log "config.yaml found but yq is not installed, skipping config.yaml read"
+    fi
+    
+    # Read ztpbootstrap.env (only fill in values not already set from config.yaml)
+    local env_file="${script_dir}/ztpbootstrap.env"
+    if [[ -f "$env_file" ]]; then
+        while IFS='=' read -r key value; do
+            case "$key" in
+                CV_ADDR) [[ -z "$EXISTING_CV_ADDR" ]] && EXISTING_CV_ADDR="$value" ;;
+                ENROLLMENT_TOKEN) [[ -z "$EXISTING_ENROLLMENT_TOKEN" ]] && EXISTING_ENROLLMENT_TOKEN="$value" ;;
+                CV_PROXY) [[ -z "$EXISTING_CV_PROXY" ]] && EXISTING_CV_PROXY="$value" ;;
+                EOS_URL) [[ -z "$EXISTING_EOS_URL" ]] && EXISTING_EOS_URL="$value" ;;
+                NTP_SERVER) [[ -z "$EXISTING_NTP_SERVER" ]] && EXISTING_NTP_SERVER="$value" ;;
+                TZ) [[ -z "$EXISTING_TIMEZONE" ]] && EXISTING_TIMEZONE="$value" ;;
             esac
         done < <(read_ztpbootstrap_env "$env_file")
     fi
@@ -1022,7 +1181,8 @@ load_existing_installation_values() {
             case "$key" in
                 Network) 
                     # If Network is "null" or empty, treat it as not set (will be detected from IP)
-                    if [[ "$value" != "null" ]] && [[ -n "$value" ]]; then
+                    # Only set if not already set from config.yaml
+                    if [[ "$value" != "null" ]] && [[ -n "$value" ]] && [[ -z "$EXISTING_NETWORK" ]]; then
                         EXISTING_NETWORK="$value"
                         log "  Found Network: $value"
                         parsed_count=$((parsed_count + 1)) || true
@@ -1031,31 +1191,43 @@ load_existing_installation_values() {
                     fi
                     ;;
                 IP) 
-                    EXISTING_IPV4="$value"
-                    log "  Found IP: $value"
-                    parsed_count=$((parsed_count + 1)) || true
+                    # Only set if not already set from config.yaml
+                    if [[ -z "$EXISTING_IPV4" ]]; then
+                        EXISTING_IPV4="$value"
+                        log "  Found IP: $value"
+                        parsed_count=$((parsed_count + 1)) || true
+                    fi
                     ;;
                 IP6) 
-                    EXISTING_IPV6="$value"
-                    log "  Found IP6: $value"
-                    parsed_count=$((parsed_count + 1)) || true
+                    # Only set if not already set from config.yaml
+                    if [[ -z "$EXISTING_IPV6" ]]; then
+                        EXISTING_IPV6="$value"
+                        log "  Found IP6: $value"
+                        parsed_count=$((parsed_count + 1)) || true
+                    fi
                     ;;
-                Environment) 
+                Environment)
                     # Handle Environment="TZ=America/Central" format
-                    if [[ "$value" =~ TZ=([^\"\']+) ]]; then
+                    # Only set if not already set from config.yaml
+                    if [[ "$value" =~ TZ=([^\"\']+) ]] && [[ -z "$EXISTING_TIMEZONE" ]]; then
                         EXISTING_TIMEZONE="${BASH_REMATCH[1]}"
                         log "  Found Timezone: ${BASH_REMATCH[1]}"
                     fi
                     ;;
             esac
             # DNS entries (may be multiple)
+            # Only set if not already set from config.yaml
             if [[ "$key" == "DNS" ]]; then
                 if [[ -z "$EXISTING_DNS1" ]]; then
                     EXISTING_DNS1="$value"
                     log "  Found DNS1: $value"
+                    parsed_count=$((parsed_count + 1)) || true
                 elif [[ -z "$EXISTING_DNS2" ]]; then
                     EXISTING_DNS2="$value"
                     log "  Found DNS2: $value"
+                    parsed_count=$((parsed_count + 1)) || true
+                else
+                    log "  Found additional DNS entry: $value (already have DNS1 and DNS2)"
                 fi
             fi
         done < <(printf '%s\n' "$container_values")
@@ -1092,16 +1264,25 @@ load_existing_installation_values() {
         fi
     fi
     
-    # Read nginx.conf
+    # Read nginx.conf (only fill in values not already set from config.yaml)
     local nginx_file="${script_dir}/nginx.conf"
     if [[ -f "$nginx_file" ]]; then
+        log "Reading nginx.conf from: $nginx_file"
         while IFS='=' read -r key value; do
             case "$key" in
-                DOMAIN) EXISTING_DOMAIN="$value" ;;
-                HTTP_ONLY) EXISTING_HTTP_ONLY="$value" ;;
-                HTTPS_PORT) EXISTING_HTTPS_PORT="$value" ;;
+                DOMAIN) 
+                    # Only set if not already set from config.yaml
+                    if [[ -z "$EXISTING_DOMAIN" ]]; then
+                        EXISTING_DOMAIN="$value"
+                        log "  Found domain in nginx.conf: $value"
+                    fi
+                    ;;
+                HTTP_ONLY) [[ -z "$EXISTING_HTTP_ONLY" ]] && EXISTING_HTTP_ONLY="$value" ;;
+                HTTPS_PORT) [[ -z "$EXISTING_HTTPS_PORT" ]] && EXISTING_HTTPS_PORT="$value" ;;
             esac
         done < <(read_nginx_conf "$nginx_file")
+    else
+        log "nginx.conf not found at: $nginx_file"
     fi
     
     # If no domain found, try to detect system hostname/FQDN
@@ -1169,6 +1350,16 @@ load_existing_installation_values() {
     fi
     if [[ -n "$EXISTING_TIMEZONE" ]]; then
         log "  Timezone: $EXISTING_TIMEZONE"
+    fi
+    if [[ -n "$EXISTING_DNS1" ]]; then
+        log "  DNS server 1: $EXISTING_DNS1"
+    else
+        log "  DNS server 1: (not found)"
+    fi
+    if [[ -n "$EXISTING_DNS2" ]]; then
+        log "  DNS server 2: $EXISTING_DNS2"
+    else
+        log "  DNS server 2: (not found)"
     fi
     
     log "Finished loading existing values from installation"
