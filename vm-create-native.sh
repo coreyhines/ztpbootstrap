@@ -381,6 +381,11 @@ start_vm() {
         # Variables will be replaced with sed after heredoc creation
         cat > "$cloud_init_dir/user-data" << 'CLOUDINITEOF'
 #cloud-config
+# Set FQDN/hostname
+fqdn: __VM_FQDN__
+manage_etc_hosts: true
+preserve_hostname: false
+
 # Disable default user (if any) and create our own
 system_info:
   default_user:
@@ -643,8 +648,17 @@ CLOUDINITEOF
         rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
         
         # Create meta-data
+        # Set FQDN for test VM (use .local domain if no domain specified)
+        local vm_fqdn="${VM_NAME}.local"
         echo "instance-id: ${VM_NAME}-$(date +%s)" > "$cloud_init_dir/meta-data"
         echo "local-hostname: ${VM_NAME}" >> "$cloud_init_dir/meta-data"
+        echo "fqdn: ${vm_fqdn}" >> "$cloud_init_dir/meta-data"
+        
+        # Replace FQDN placeholder in user-data
+        sed -i.bak \
+          -e "s|__VM_FQDN__|${vm_fqdn}|g" \
+          "$cloud_init_dir/user-data" 2>/dev/null || true
+        rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
         
         # Remove auto-setup flag file creation if auto-setup is disabled
         if [[ "$AUTO_SETUP" != "true" ]]; then
