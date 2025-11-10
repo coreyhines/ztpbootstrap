@@ -27,8 +27,6 @@ HealthStartPeriod=30s
 
 [Service]
 Restart=always
-ExecStart=
-ExecStart=/usr/bin/podman run --name %n --replace --rm --cgroups=split --sdnotify=conmon -d --pod ztpbootstrap-pod -v /opt/containerdata/ztpbootstrap/webui:/app:ro -v /opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw -v /opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw -v /run/systemd/journal:/run/systemd/journal:ro -v /run/log/journal:/run/log/journal:ro -v /run/podman:/run/podman:ro -v /usr/bin/journalctl:/usr/bin/journalctl:ro -v /lib64/libsystemd.so.0:/lib64/libsystemd.so.0:ro -v /lib64/libsystemd.so.0.41.0:/lib64/libsystemd.so.0.41.0:ro -v /usr/lib64/systemd:/usr/lib64/systemd:ro --env TZ=UTC --env ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap --env FLASK_APP=app.py --env FLASK_ENV=production docker.io/python:alpine /bin/sh -c "pip install --no-cache-dir flask werkzeug systemd-python && sleep 2 && python3 /app/app.py"
 
 [Install]
 WantedBy=multi-user.target default.target

@@ -162,6 +162,50 @@ setup_ssl_certificates() {
     fi
 }
 
+# Check if a path is on an NFS filesystem
+# Returns 0 if NFS, 1 if not NFS
+is_nfs_mount() {
+    local path="$1"
+    if [[ -z "$path" ]]; then
+        return 1
+    fi
+    
+    # Resolve the path to its actual location
+    local resolved_path
+    resolved_path=$(readlink -f "$path" 2>/dev/null || realpath "$path" 2>/dev/null || echo "$path")
+    
+    # Check if the path is on an NFS mount using findmnt or mount
+    if command -v findmnt >/dev/null 2>&1; then
+        if findmnt -n -o FSTYPE -T "$resolved_path" 2>/dev/null | grep -qi "^nfs"; then
+            return 0
+        fi
+    elif command -v mount >/dev/null 2>&1; then
+        if mount | grep -E "^[^ ]+ on $resolved_path" | grep -qi "type nfs"; then
+            return 0
+        fi
+    fi
+    
+    # Check parent directories if the path itself doesn't exist yet
+    local check_path="$resolved_path"
+    while [[ "$check_path" != "/" ]] && [[ ! -e "$check_path" ]]; do
+        check_path=$(dirname "$check_path")
+    done
+    
+    if [[ -n "$check_path" ]] && [[ "$check_path" != "/" ]]; then
+        if command -v findmnt >/dev/null 2>&1; then
+            if findmnt -n -o FSTYPE -T "$check_path" 2>/dev/null | grep -qi "^nfs"; then
+                return 0
+            fi
+        elif command -v mount >/dev/null 2>&1; then
+            if mount | grep -E "^[^ ]+ on $check_path" | grep -qi "type nfs"; then
+                return 0
+            fi
+        fi
+    fi
+    
+    return 1
+}
+
 # Create logs directory with proper permissions and SELinux context
 setup_logs_directory() {
     log "Setting up logs directory..."
@@ -180,10 +224,15 @@ setup_logs_directory() {
         chown 101:101 "${SCRIPT_DIR}/logs" 2>/dev/null || chmod 777 "${SCRIPT_DIR}/logs" 2>/dev/null || true
     fi
     
-    # Set SELinux context for logs directory (if SELinux is enabled)
+    # Set SELinux context for logs directory (if SELinux is enabled and not on NFS)
+    # NFS doesn't support SELinux contexts, so we skip chcon for NFS mounts
     if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
-        chcon -R -t container_file_t "${SCRIPT_DIR}/logs" 2>/dev/null || true
-        log "Set SELinux context for logs directory"
+        if ! is_nfs_mount "${SCRIPT_DIR}/logs"; then
+            chcon -R -t container_file_t "${SCRIPT_DIR}/logs" 2>/dev/null || true
+            log "Set SELinux context for logs directory (not NFS)"
+        else
+            log "Logs directory is on NFS, skipping SELinux context (NFS doesn't support SELinux contexts)"
+        fi
     fi
     
     log "Created logs directory: ${SCRIPT_DIR}/logs"
@@ -207,19 +256,27 @@ create_self_signed_cert() {
         -subj "/C=US/ST=State/L=City/O=Organization/CN=$DOMAIN" \
         -addext "subjectAltName=DNS:$DOMAIN"
     
-    # Set proper permissions and SELinux context (if SELinux is enabled)
+    # Set proper permissions and SELinux context (if SELinux is enabled and not on NFS)
     chmod 644 "$cert_file" 2>/dev/null || true
     chmod 644 "$key_file" 2>/dev/null || true
     if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
-        # Set container_file_t context for container access (works with NFS too)
-        chcon -R -t container_file_t "$CERT_DIR" 2>/dev/null || true
-        log "Set SELinux context for certificate directory"
+        # Set container_file_t context for container access (only if not on NFS)
+        if ! is_nfs_mount "$CERT_DIR"; then
+            chcon -R -t container_file_t "$CERT_DIR" 2>/dev/null || true
+            log "Set SELinux context for certificate directory (not NFS)"
+        else
+            log "Certificate directory is on NFS, skipping SELinux context (NFS doesn't support SELinux contexts)"
+        fi
     fi
     
-    # Also set SELinux context for script directory to allow webui uploads
+    # Also set SELinux context for script directory to allow webui uploads (only if not on NFS)
     if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
-        chcon -R -t container_file_t "$SCRIPT_DIR" 2>/dev/null || true
-        log "Set SELinux context for script directory (allows webui uploads)"
+        if ! is_nfs_mount "$SCRIPT_DIR"; then
+            chcon -R -t container_file_t "$SCRIPT_DIR" 2>/dev/null || true
+            log "Set SELinux context for script directory (allows webui uploads, not NFS)"
+        else
+            log "Script directory is on NFS, skipping SELinux context (NFS doesn't support SELinux contexts)"
+        fi
     fi
     
     log "Self-signed certificate created for testing"
@@ -576,6 +633,11 @@ setup_pod() {
         fi
         if cp -r "${repo_dir}/webui"/* "$webui_dest/" 2>/dev/null; then
             log "Web UI directory copied to: $webui_dest"
+            # Ensure start-webui.sh is executable
+            if [[ -f "${webui_dest}/start-webui.sh" ]]; then
+                chmod +x "${webui_dest}/start-webui.sh" 2>/dev/null || true
+                log "Made start-webui.sh executable"
+            fi
         else
             warn "Failed to copy webui directory, Web UI may not work"
             warn "Source: ${repo_dir}/webui"
@@ -619,13 +681,58 @@ start_service() {
         log "WebUI container file found, ensuring systemd recognizes it..."
         # Manually run quadlet generator to ensure service is created
         # This is needed because systemd's automatic generator may not always process all files
+        local webui_service_generated=false
         if command -v /usr/libexec/podman/quadlet >/dev/null 2>&1; then
-            if /usr/libexec/podman/quadlet "${systemd_dir}/ztpbootstrap-webui.container" 2>/dev/null; then
-                log "WebUI service generated successfully"
-            else
-                warn "Failed to generate WebUI service via quadlet generator"
+            # Try to generate the service file
+            local quadlet_output
+            quadlet_output=$(/usr/libexec/podman/quadlet "${systemd_dir}/ztpbootstrap-webui.container" 2>&1)
+            if [[ $? -eq 0 ]] && [[ -n "$quadlet_output" ]]; then
+                # Check if service file was created in generator directory
+                if [[ -f "/run/systemd/generator/ztpbootstrap-webui.service" ]]; then
+                    log "WebUI service generated successfully by quadlet"
+                    webui_service_generated=true
+                else
+                    # Try to write the output manually
+                    echo "$quadlet_output" | grep -A 1000 "^---ztpbootstrap-webui.service---" | sed '1d' > /tmp/webui.service 2>/dev/null || true
+                    if [[ -s /tmp/webui.service ]]; then
+                        mv /tmp/webui.service /run/systemd/generator/ztpbootstrap-webui.service 2>/dev/null && {
+                            log "WebUI service file created manually from quadlet output"
+                            webui_service_generated=true
+                        } || true
+                    fi
+                fi
             fi
         fi
+        
+        # If quadlet failed, create a basic service file manually
+        if [[ "$webui_service_generated" == "false" ]]; then
+            warn "Quadlet generator did not create webui service, creating manual service file..."
+            cat > /run/systemd/generator/ztpbootstrap-webui.service << 'EOFWEBUI'
+[Unit]
+Description=ZTP Bootstrap Web UI Container
+SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container
+RequiresMountsFor=%t/containers
+BindsTo=ztpbootstrap-pod.service
+After=ztpbootstrap-pod.service
+
+[Service]
+Restart=always
+Environment=PODMAN_SYSTEMD_UNIT=%n
+KillMode=mixed
+ExecStop=/usr/bin/podman rm -v -f -i ztpbootstrap-webui
+ExecStopPost=-/usr/bin/podman rm -v -f -i ztpbootstrap-webui
+Delegate=yes
+Type=notify
+NotifyAccess=all
+SyslogIdentifier=%N
+ExecStart=/usr/bin/podman run --name ztpbootstrap-webui --replace --rm --cgroups=split --sdnotify=conmon -d --pod ztpbootstrap-pod -v /opt/containerdata/ztpbootstrap/webui:/app:ro -v /opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw -v /opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw -v /run/systemd/journal:/run/systemd/journal:ro -v /run/log/journal:/run/log/journal:ro -v /run/podman:/run/podman:ro -v /usr/bin/journalctl:/usr/bin/journalctl:ro -v /lib64/libsystemd.so.0:/lib64/libsystemd.so.0:ro -v /lib64/libsystemd.so.0.41.0:/lib64/libsystemd.so.0.41.0:ro -v /usr/lib64/systemd:/usr/lib64/systemd:ro --env TZ=UTC --env ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap --env FLASK_APP=app.py --env FLASK_ENV=production docker.io/python:alpine /app/start-webui.sh
+
+[Install]
+WantedBy=multi-user.target default.target
+EOFWEBUI
+            log "Created manual WebUI service file"
+        fi
+        
         systemctl daemon-reload
         sleep 1
     fi
