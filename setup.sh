@@ -853,6 +853,26 @@ main() {
         warn "Failed to set up logs directory - nginx container may fail to start"
     fi
     
+    # Ensure script directory is writable by webui container (runs as root)
+    # This allows the webui to upload bootstrap scripts
+    log "Setting permissions for webui script uploads..."
+    if [[ -d "$SCRIPT_DIR" ]]; then
+        # Make directory writable by root (webui container runs as root)
+        # Use 775 to allow owner and group write, or 777 for world-writable
+        # Check if on NFS first - NFS may have different permission requirements
+        if ! is_nfs_mount "$SCRIPT_DIR"; then
+            chmod 775 "$SCRIPT_DIR" 2>/dev/null || sudo chmod 775 "$SCRIPT_DIR" 2>/dev/null || true
+            # Also ensure existing files in the directory are writable
+            chmod 664 "$SCRIPT_DIR"/*.py 2>/dev/null || sudo chmod 664 "$SCRIPT_DIR"/*.py 2>/dev/null || true
+            log "Set permissions on script directory for webui uploads (not NFS)"
+        else
+            # For NFS, we may need 777 or specific ownership
+            chmod 777 "$SCRIPT_DIR" 2>/dev/null || sudo chmod 777 "$SCRIPT_DIR" 2>/dev/null || true
+            chmod 666 "$SCRIPT_DIR"/*.py 2>/dev/null || sudo chmod 666 "$SCRIPT_DIR"/*.py 2>/dev/null || true
+            log "Set permissions on script directory for webui uploads (NFS - using 777)"
+        fi
+    fi
+    
     if [[ "$HTTP_ONLY" == "true" ]]; then
         configure_http_only
         log "HTTP-only mode configured"

@@ -2258,6 +2258,33 @@ EOF
             warn "setup.sh not found. Pod files will not be created automatically."
             warn "You will need to run: sudo ./setup.sh"
         fi
+        
+        # Ensure script directory is writable by webui container (runs as root)
+        # This allows the webui to upload bootstrap scripts
+        if [[ -n "${SCRIPT_DIR:-}" ]] && [[ -d "$SCRIPT_DIR" ]]; then
+            log "Setting permissions for webui script uploads..."
+            # Check if on NFS first
+            if ! is_nfs_mount "$SCRIPT_DIR"; then
+                if [[ ("$SCRIPT_DIR" =~ ^/etc/ || "$SCRIPT_DIR" =~ ^/opt/) && $EUID -ne 0 ]]; then
+                    sudo chmod 775 "$SCRIPT_DIR" 2>/dev/null || true
+                    sudo chmod 664 "$SCRIPT_DIR"/*.py 2>/dev/null || true
+                else
+                    chmod 775 "$SCRIPT_DIR" 2>/dev/null || true
+                    chmod 664 "$SCRIPT_DIR"/*.py 2>/dev/null || true
+                fi
+                log "Set permissions on script directory for webui uploads (not NFS)"
+            else
+                # For NFS, we may need 777
+                if [[ ("$SCRIPT_DIR" =~ ^/etc/ || "$SCRIPT_DIR" =~ ^/opt/) && $EUID -ne 0 ]]; then
+                    sudo chmod 777 "$SCRIPT_DIR" 2>/dev/null || true
+                    sudo chmod 666 "$SCRIPT_DIR"/*.py 2>/dev/null || true
+                else
+                    chmod 777 "$SCRIPT_DIR" 2>/dev/null || true
+                    chmod 666 "$SCRIPT_DIR"/*.py 2>/dev/null || true
+                fi
+                log "Set permissions on script directory for webui uploads (NFS - using 777)"
+            fi
+        fi
     else
         log "Configuration saved. To apply later, run:"
         log "  bash update-config.sh $CONFIG_FILE"
