@@ -605,19 +605,19 @@ runcmd:
     # Ensure README file has correct ownership (created by write_files)
     chown __CURRENT_USER__:__CURRENT_USER__ /home/__CURRENT_USER__/README_VM_SETUP.txt 2>/dev/null || true
   - echo "Cloud-init completed. Repository cloned and macvlan network configured."
-  - cat /home/__DISTRO_USER__/README_VM_SETUP.txt
+  - cat /home/__CURRENT_USER__/README_VM_SETUP.txt
   - |
     # Optionally run interactive setup automatically
     # Check if auto-setup flag file exists (created by cloud-init write_files)
     AUTO_SETUP_VAL=$(if [ -f /tmp/auto-setup-flag ]; then echo "true"; else echo "false"; fi)
-    if [ -f /home/__DISTRO_USER__/ztpbootstrap/setup-interactive.sh ] && [ "$AUTO_SETUP_VAL" = "true" ]; then
+    if [ -f /home/__CURRENT_USER__/ztpbootstrap/setup-interactive.sh ] && [ "$AUTO_SETUP_VAL" = "true" ]; then
       echo ""
       echo "Auto-running interactive setup..."
-      cd /home/__DISTRO_USER__/ztpbootstrap
-      sudo -u __DISTRO_USER__ bash -c "cd /home/__DISTRO_USER__/ztpbootstrap && ./setup-interactive.sh" || \
+      cd /home/__CURRENT_USER__/ztpbootstrap
+      sudo -u __CURRENT_USER__ bash -c "cd /home/__CURRENT_USER__/ztpbootstrap && ./setup-interactive.sh" || \
       echo "Interactive setup failed or was cancelled. Run manually: ./setup-interactive.sh"
     else
-      echo "Auto-setup disabled. Run manually: cd /home/__DISTRO_USER__/ztpbootstrap && ./setup-interactive.sh"
+      echo "Auto-setup disabled. Run manually: cd /home/__CURRENT_USER__/ztpbootstrap && ./setup-interactive.sh"
     fi
 CLOUDINITEOF
         
