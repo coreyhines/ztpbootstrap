@@ -1129,7 +1129,18 @@ create_pod_files_from_config() {
             host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
             ipv4=$(yq eval '.network.ipv4' "$config_file" 2>/dev/null || echo "")
             ipv6=$(yq eval '.network.ipv6' "$config_file" 2>/dev/null || echo "")
-            network=$(yq eval '.network.network' "$config_file" 2>/dev/null || echo "ztpbootstrap-net")
+            network=$(yq eval '.network.network' "$config_file" 2>/dev/null || echo "")
+            
+            # If network is null or empty, use detected network or default
+            if [[ -z "$network" ]] || [[ "$network" == "null" ]]; then
+                if [[ -n "${EXISTING_NETWORK:-}" ]] && [[ "${EXISTING_NETWORK}" != "host" ]]; then
+                    network="$EXISTING_NETWORK"
+                    log "Using detected network from existing installation: $network"
+                else
+                    network="ztpbootstrap-net"
+                    log "Using default network: $network"
+                fi
+            fi
             
             log "Reading network config: host_network=$host_network, IPv4=$ipv4, IPv6=$ipv6, network=$network"
             
