@@ -977,6 +977,19 @@ load_existing_installation_values() {
         done < <(read_nginx_conf "$nginx_file")
     fi
     
+    # If no domain found, try to detect system hostname/FQDN
+    if [[ -z "$EXISTING_DOMAIN" ]]; then
+        # Try hostname -f first (FQDN)
+        if command -v hostname >/dev/null 2>&1; then
+            local system_fqdn
+            system_fqdn=$(hostname -f 2>/dev/null || echo "")
+            if [[ -n "$system_fqdn" ]] && [[ "$system_fqdn" != "localhost" ]] && [[ "$system_fqdn" != "localhost.localdomain" ]]; then
+                EXISTING_DOMAIN="$system_fqdn"
+                log "  Detected system FQDN: $system_fqdn"
+            fi
+        fi
+    fi
+    
     # Debug: Log loaded values
     log "Summary of loaded existing values:"
     if [[ -n "$EXISTING_DOMAIN" ]]; then
@@ -1159,6 +1172,8 @@ interactive_config() {
         log "Using default: $SCRIPT_DIR"
     fi
     prompt_with_default "SSL certificate directory" "/opt/containerdata/certs/wild" CERT_DIR
+    # Store CERT_DIR for later use in SSL certificate detection
+    local cert_dir_for_check="$CERT_DIR"
     prompt_with_default "Environment file path" "${SCRIPT_DIR}/ztpbootstrap.env" ENV_FILE
     prompt_with_default "Bootstrap script path" "${SCRIPT_DIR}/bootstrap.py" BOOTSTRAP_SCRIPT
     prompt_with_default "Nginx config file" "${SCRIPT_DIR}/nginx.conf" NGINX_CONF
@@ -1171,13 +1186,33 @@ interactive_config() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
-    prompt_with_default "Domain name" "${EXISTING_DOMAIN:-ztpboot.example.com}" DOMAIN
+    # Determine default domain (existing, system hostname, or example)
+    local default_domain="${EXISTING_DOMAIN:-}"
+    if [[ -z "$default_domain" ]]; then
+        # Try system hostname as fallback
+        if command -v hostname >/dev/null 2>&1; then
+            default_domain=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "")
+            if [[ -z "$default_domain" ]] || [[ "$default_domain" == "localhost" ]] || [[ "$default_domain" == "localhost.localdomain" ]]; then
+                default_domain="ztpboot.example.com"
+            fi
+        else
+            default_domain="ztpboot.example.com"
+        fi
+    fi
+    prompt_with_default "Domain name" "$default_domain" DOMAIN
+    
     # For IPv4, use existing value if set, otherwise default to 10.0.0.10
     local default_ipv4="10.0.0.10"
     if [[ -n "${EXISTING_IPV4:-}" ]]; then
         default_ipv4="$EXISTING_IPV4"
     fi
-    prompt_with_default "IPv4 address (leave empty for host network)" "$default_ipv4" IPV4 "false" "true"
+    # Clearer prompt wording: if there's a default, pressing Enter uses it
+    if [[ -n "$default_ipv4" ]]; then
+        prompt_with_default "IPv4 address (press Enter to use default, or leave empty for host network)" "$default_ipv4" IPV4 "false" "true"
+    else
+        prompt_with_default "IPv4 address (leave empty for host network)" "" IPV4 "false" "true"
+    fi
+    
     # For IPv6, use existing value if set (even if empty), otherwise default to empty
     local default_ipv6=""
     if [[ -n "${EXISTING_IPV6:-}" ]]; then
@@ -1189,7 +1224,12 @@ interactive_config() {
         # IPv6 was not set at all, use empty as default (to disable)
         default_ipv6=""
     fi
-    prompt_with_default "IPv6 address (leave empty to disable)" "$default_ipv6" IPV6 "false" "true"
+    # Clearer prompt wording: if there's a default, pressing Enter uses it
+    if [[ -n "$default_ipv6" ]]; then
+        prompt_with_default "IPv6 address (press Enter to use default, or leave empty to disable)" "$default_ipv6" IPV6 "false" "true"
+    else
+        prompt_with_default "IPv6 address (leave empty to disable)" "" IPV6 "false" "true"
+    fi
     prompt_with_default "HTTPS port" "${EXISTING_HTTPS_PORT:-443}" HTTPS_PORT
     prompt_with_default "HTTP port" "80" HTTP_PORT
     # Determine default for HTTP-only mode
@@ -1230,15 +1270,36 @@ interactive_config() {
     
     prompt_with_default "Certificate filename" "fullchain.pem" CERT_FILE
     prompt_with_default "Private key filename" "privkey.pem" KEY_FILE
-    prompt_yes_no "Use Let's Encrypt with certbot?" "n" USE_LETSENCRYPT
     
-    if [[ "$USE_LETSENCRYPT" == "true" ]]; then
-        prompt_with_default "Email for Let's Encrypt registration" "admin@example.com" LETSENCRYPT_EMAIL
-    else
-        LETSENCRYPT_EMAIL="admin@example.com"
+    # Check if certificates already exist (use the cert_dir_for_check variable set earlier)
+    local cert_path="${cert_dir_for_check}/${CERT_FILE}"
+    local key_path="${cert_dir_for_check}/${KEY_FILE}"
+    local certs_exist=false
+    
+    if [[ -f "$cert_path" ]] && [[ -f "$key_path" ]]; then
+        certs_exist=true
+        log "Existing SSL certificates detected at:"
+        log "  Certificate: $cert_path"
+        log "  Private Key: $key_path"
+        log "Skipping Let's Encrypt and self-signed certificate prompts (certificates managed externally)"
     fi
     
-    prompt_yes_no "Create self-signed certificate for testing (if no cert exists)?" "n" CREATE_SELF_SIGNED
+    if [[ "$certs_exist" == "false" ]]; then
+        prompt_yes_no "Use Let's Encrypt with certbot?" "n" USE_LETSENCRYPT
+        
+        if [[ "$USE_LETSENCRYPT" == "true" ]]; then
+            prompt_with_default "Email for Let's Encrypt registration" "admin@example.com" LETSENCRYPT_EMAIL
+        else
+            LETSENCRYPT_EMAIL="admin@example.com"
+        fi
+        
+        prompt_yes_no "Create self-signed certificate for testing (if no cert exists)?" "n" CREATE_SELF_SIGNED
+    else
+        # Certificates exist, skip these prompts
+        USE_LETSENCRYPT="false"
+        LETSENCRYPT_EMAIL="admin@example.com"
+        CREATE_SELF_SIGNED="false"
+    fi
     
     echo ""
     
