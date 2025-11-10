@@ -17,6 +17,24 @@ NC='\033[0m' # No Color
 CONFIG_FILE="config.yaml"
 CONFIG_TEMPLATE="config.yaml.template"
 
+# Backup directory (relative to repo root)
+BACKUP_BASE_DIR=".ztpbootstrap-backups"
+
+# Initialize existing installation value variables (will be populated if previous install detected)
+EXISTING_SCRIPT_DIR=""
+EXISTING_DOMAIN=""
+EXISTING_IPV4=""
+EXISTING_IPV6=""
+EXISTING_CV_ADDR=""
+EXISTING_ENROLLMENT_TOKEN=""
+EXISTING_CV_PROXY=""
+EXISTING_EOS_URL=""
+EXISTING_NTP_SERVER=""
+EXISTING_TIMEZONE=""
+EXISTING_DNS1=""
+EXISTING_DNS2=""
+EXISTING_NETWORK=""
+
 # Logging functions
 log() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -101,6 +119,788 @@ prompt_yes_no() {
     done
 }
 
+# Detect previous installation
+detect_previous_install() {
+    local script_dir="${1:-/opt/containerdata/ztpbootstrap}"
+    local systemd_dir="/etc/containers/systemd/ztpbootstrap"
+    local found=false
+    
+    # Check if service directory exists and has files
+    if [[ -d "$script_dir" ]]; then
+        local file_count
+        if [[ $EUID -eq 0 ]]; then
+            file_count=$(find "$script_dir" -type f 2>/dev/null | wc -l | tr -d ' ')
+        else
+            file_count=$(sudo find "$script_dir" -type f 2>/dev/null | wc -l | tr -d ' ')
+        fi
+        if [[ "$file_count" -gt 0 ]]; then
+            found=true
+        fi
+    fi
+    
+    # Check if systemd directory exists and has files
+    if [[ -d "$systemd_dir" ]]; then
+        local file_count
+        if [[ $EUID -eq 0 ]]; then
+            file_count=$(find "$systemd_dir" -type f 2>/dev/null | wc -l | tr -d ' ')
+        else
+            file_count=$(sudo find "$systemd_dir" -type f 2>/dev/null | wc -l | tr -d ' ')
+        fi
+        if [[ "$file_count" -gt 0 ]]; then
+            found=true
+        fi
+    fi
+    
+    if [[ "$found" == "true" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Create backup of existing installation
+create_backup() {
+    local script_dir="${1:-/opt/containerdata/ztpbootstrap}"
+    local systemd_dir="/etc/containers/systemd/ztpbootstrap"
+    
+    # Get repository directory
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Create backup directory
+    local backup_dir="${repo_dir}/${BACKUP_BASE_DIR}"
+    local timestamp
+    timestamp=$(date +"%Y%m%d_%H%M%S")
+    local backup_path="${backup_dir}/backup_${timestamp}"
+    
+    log "Creating backup of existing installation..."
+    log "Backup location: $backup_path"
+    
+    # Create backup directory structure
+    if ! mkdir -p "$backup_path" 2>/dev/null; then
+        error "Failed to create backup directory: $backup_path"
+        return 1
+    fi
+    
+    # Backup service directory
+    if [[ -d "$script_dir" ]]; then
+        log "Backing up: $script_dir"
+        if [[ $EUID -eq 0 ]]; then
+            if ! cp -r "$script_dir" "${backup_path}/containerdata_ztpbootstrap" 2>/dev/null; then
+                warn "Failed to backup $script_dir"
+            else
+                log "✓ Backed up service directory"
+            fi
+        else
+            if ! sudo cp -r "$script_dir" "${backup_path}/containerdata_ztpbootstrap" 2>/dev/null; then
+                warn "Failed to backup $script_dir (may need sudo)"
+            else
+                # Fix ownership of backup
+                sudo chown -R "$USER:$(id -gn)" "${backup_path}/containerdata_ztpbootstrap" 2>/dev/null || true
+                log "✓ Backed up service directory"
+            fi
+        fi
+    fi
+    
+    # Backup systemd directory
+    if [[ -d "$systemd_dir" ]]; then
+        log "Backing up: $systemd_dir"
+        if [[ $EUID -eq 0 ]]; then
+            if ! cp -r "$systemd_dir" "${backup_path}/etc_containers_systemd_ztpbootstrap" 2>/dev/null; then
+                warn "Failed to backup $systemd_dir"
+            else
+                log "✓ Backed up systemd directory"
+            fi
+        else
+            if ! sudo cp -r "$systemd_dir" "${backup_path}/etc_containers_systemd_ztpbootstrap" 2>/dev/null; then
+                warn "Failed to backup $systemd_dir (may need sudo)"
+            else
+                # Fix ownership of backup
+                sudo chown -R "$USER:$(id -gn)" "${backup_path}/etc_containers_systemd_ztpbootstrap" 2>/dev/null || true
+                log "✓ Backed up systemd directory"
+            fi
+        fi
+    fi
+    
+    # Create backup info file
+    cat > "${backup_path}/backup_info.txt" << EOF
+ZTP Bootstrap Backup Information
+================================
+Backup created: $(date)
+Backup location: $backup_path
+
+Original paths:
+- Service directory: $script_dir
+- Systemd directory: $systemd_dir
+
+To restore this backup, run:
+  ./setup-interactive.sh --restore $timestamp
+
+Or use the restore function:
+  restore_backup "$timestamp"
+EOF
+    
+    log "Backup completed successfully!"
+    log "Backup saved to: $backup_path"
+    echo ""
+    
+    # Store backup path for later reference
+    echo "$backup_path" > "${backup_dir}/.last_backup"
+    
+    return 0
+}
+
+# Restore from backup
+restore_backup() {
+    local backup_timestamp="$1"
+    
+    # Get repository directory
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local backup_dir="${repo_dir}/${BACKUP_BASE_DIR}"
+    
+    # If no timestamp provided, list available backups
+    if [[ -z "$backup_timestamp" ]]; then
+        if [[ ! -d "$backup_dir" ]]; then
+            error "No backups found. Backup directory does not exist: $backup_dir"
+            return 1
+        fi
+        
+        local backups
+        # Use portable find command (works on both Linux and macOS)
+        if command -v gfind >/dev/null 2>&1; then
+            # Use GNU find if available (has -printf)
+            backups=($(gfind "$backup_dir" -maxdepth 1 -type d -name "backup_*" -printf "%f\n" 2>/dev/null | sort -r))
+        else
+            # Use standard find (portable)
+            backups=($(find "$backup_dir" -maxdepth 1 -type d -name "backup_*" 2>/dev/null | sed 's|.*/||' | sort -r))
+        fi
+        
+        if [[ ${#backups[@]} -eq 0 ]]; then
+            error "No backups found in: $backup_dir"
+            return 1
+        fi
+        
+        echo ""
+        echo -e "${CYAN}Available backups:${NC}"
+        echo ""
+        local i=1
+        for backup in "${backups[@]}"; do
+            local backup_path="${backup_dir}/${backup}"
+            local backup_date
+            backup_date=$(echo "$backup" | sed 's/backup_//' | sed 's/_/ /' | awk '{print $1}' | sed 's/\(....\)\(..\)\(..\)/\1-\2-\3/')
+            local backup_time
+            backup_time=$(echo "$backup" | sed 's/backup_//' | sed 's/_/ /' | awk '{print $2}' | sed 's/\(..\)\(..\)\(..\)/\1:\2:\3/')
+            echo "  $i) $backup_date $backup_time"
+            ((i++))
+        done
+        echo ""
+        
+        echo -n -e "${CYAN}[?]${NC} Select backup to restore (1-${#backups[@]}) or 'q' to quit: "
+        read -r selection
+        
+        if [[ "$selection" == "q" ]] || [[ "$selection" == "Q" ]]; then
+            log "Restore cancelled."
+            return 1
+        fi
+        
+        if ! [[ "$selection" =~ ^[0-9]+$ ]] || [[ "$selection" -lt 1 ]] || [[ "$selection" -gt ${#backups[@]} ]]; then
+            error "Invalid selection: $selection"
+            return 1
+        fi
+        
+        backup_timestamp=$(echo "${backups[$((selection-1))]}" | sed 's/backup_//')
+    fi
+    
+    local backup_path="${backup_dir}/backup_${backup_timestamp}"
+    
+    if [[ ! -d "$backup_path" ]]; then
+        error "Backup not found: $backup_path"
+        return 1
+    fi
+    
+    echo ""
+    warn "⚠️  WARNING: This will overwrite existing files!"
+    warn "The following directories will be restored:"
+    warn "  - /opt/containerdata/ztpbootstrap"
+    warn "  - /etc/containers/systemd/ztpbootstrap"
+    echo ""
+    
+    prompt_yes_no "Are you sure you want to restore from backup?" "n" CONFIRM_RESTORE
+    
+    if [[ "$CONFIRM_RESTORE" != "true" ]]; then
+        log "Restore cancelled."
+        return 1
+    fi
+    
+    log "Restoring from backup: $backup_path"
+    
+    # Restore service directory
+    if [[ -d "${backup_path}/containerdata_ztpbootstrap" ]]; then
+        log "Restoring service directory..."
+        if [[ $EUID -eq 0 ]]; then
+            # Remove existing directory if it exists
+            if [[ -d "/opt/containerdata/ztpbootstrap" ]]; then
+                rm -rf "/opt/containerdata/ztpbootstrap" 2>/dev/null || true
+            fi
+            # Restore from backup
+            if cp -r "${backup_path}/containerdata_ztpbootstrap" "/opt/containerdata/ztpbootstrap" 2>/dev/null; then
+                log "✓ Restored service directory"
+            else
+                error "Failed to restore service directory"
+                return 1
+            fi
+        else
+            # Remove existing directory if it exists
+            if [[ -d "/opt/containerdata/ztpbootstrap" ]]; then
+                sudo rm -rf "/opt/containerdata/ztpbootstrap" 2>/dev/null || true
+            fi
+            # Restore from backup
+            if sudo cp -r "${backup_path}/containerdata_ztpbootstrap" "/opt/containerdata/ztpbootstrap" 2>/dev/null; then
+                log "✓ Restored service directory"
+            else
+                error "Failed to restore service directory (may need sudo)"
+                return 1
+            fi
+        fi
+    else
+        warn "Service directory backup not found in: ${backup_path}/containerdata_ztpbootstrap"
+    fi
+    
+    # Restore systemd directory
+    if [[ -d "${backup_path}/etc_containers_systemd_ztpbootstrap" ]]; then
+        log "Restoring systemd directory..."
+        if [[ $EUID -eq 0 ]]; then
+            # Remove existing directory if it exists
+            if [[ -d "/etc/containers/systemd/ztpbootstrap" ]]; then
+                rm -rf "/etc/containers/systemd/ztpbootstrap" 2>/dev/null || true
+            fi
+            # Create parent directory
+            mkdir -p "/etc/containers/systemd" 2>/dev/null || true
+            # Restore from backup
+            if cp -r "${backup_path}/etc_containers_systemd_ztpbootstrap" "/etc/containers/systemd/ztpbootstrap" 2>/dev/null; then
+                log "✓ Restored systemd directory"
+            else
+                error "Failed to restore systemd directory"
+                return 1
+            fi
+        else
+            # Remove existing directory if it exists
+            if [[ -d "/etc/containers/systemd/ztpbootstrap" ]]; then
+                sudo rm -rf "/etc/containers/systemd/ztpbootstrap" 2>/dev/null || true
+            fi
+            # Create parent directory
+            sudo mkdir -p "/etc/containers/systemd" 2>/dev/null || true
+            # Restore from backup
+            if sudo cp -r "${backup_path}/etc_containers_systemd_ztpbootstrap" "/etc/containers/systemd/ztpbootstrap" 2>/dev/null; then
+                log "✓ Restored systemd directory"
+            else
+                error "Failed to restore systemd directory (may need sudo)"
+                return 1
+            fi
+        fi
+    else
+        warn "Systemd directory backup not found in: ${backup_path}/etc_containers_systemd_ztpbootstrap"
+    fi
+    
+    log "Restore completed successfully!"
+    log ""
+    log "Next steps:"
+    log "  1. Reload systemd: sudo systemctl daemon-reload"
+    log "  2. Restart services if needed: sudo systemctl restart ztpbootstrap-pod"
+    echo ""
+    
+    return 0
+}
+
+# Check for running services
+check_running_services() {
+    local running_services=()
+    local service_type="none"
+    
+    # Check for old single-container service
+    if systemctl is-active --quiet ztpbootstrap.service 2>/dev/null; then
+        running_services+=("ztpbootstrap.service")
+        service_type="single-container"
+    fi
+    
+    # Check for new pod-based services
+    if systemctl is-active --quiet ztpbootstrap-pod.service 2>/dev/null; then
+        running_services+=("ztpbootstrap-pod.service")
+        service_type="pod-based"
+    fi
+    if systemctl is-active --quiet ztpbootstrap-nginx.service 2>/dev/null; then
+        running_services+=("ztpbootstrap-nginx.service")
+        if [[ "$service_type" == "none" ]]; then
+            service_type="pod-based"
+        fi
+    fi
+    if systemctl is-active --quiet ztpbootstrap-webui.service 2>/dev/null; then
+        running_services+=("ztpbootstrap-webui.service")
+        if [[ "$service_type" == "none" ]]; then
+            service_type="pod-based"
+        fi
+    fi
+    
+    # Return service type and list
+    if [[ ${#running_services[@]} -gt 0 ]]; then
+        echo "${service_type}:${running_services[*]}"
+        return 0
+    else
+        echo "none:"
+        return 1
+    fi
+}
+
+# Stop services gracefully
+stop_services_gracefully() {
+    local service_info="$1"
+    local service_type="${service_info%%:*}"
+    local services="${service_info#*:}"
+    
+    if [[ "$service_type" == "none" ]] || [[ -z "$services" ]]; then
+        return 0
+    fi
+    
+    log "Stopping services gracefully..."
+    
+    if [[ "$service_type" == "single-container" ]]; then
+        # Old version: stop single container service
+        log "Stopping ztpbootstrap.service (single-container setup)..."
+        if [[ $EUID -eq 0 ]]; then
+            systemctl stop ztpbootstrap.service 2>/dev/null || warn "Failed to stop ztpbootstrap.service"
+        else
+            sudo systemctl stop ztpbootstrap.service 2>/dev/null || warn "Failed to stop ztpbootstrap.service"
+        fi
+        sleep 2
+    elif [[ "$service_type" == "pod-based" ]]; then
+        # New version: stop containers first, then pod
+        log "Stopping pod-based services..."
+        if [[ $EUID -eq 0 ]]; then
+            systemctl stop ztpbootstrap-nginx.service ztpbootstrap-webui.service 2>/dev/null || true
+            sleep 1
+            systemctl stop ztpbootstrap-pod.service 2>/dev/null || warn "Failed to stop ztpbootstrap-pod.service"
+        else
+            sudo systemctl stop ztpbootstrap-nginx.service ztpbootstrap-webui.service 2>/dev/null || true
+            sleep 1
+            sudo systemctl stop ztpbootstrap-pod.service 2>/dev/null || warn "Failed to stop ztpbootstrap-pod.service"
+        fi
+        sleep 2
+    fi
+    
+    # Verify services are stopped
+    local still_running=false
+    IFS=' ' read -ra SERVICE_ARRAY <<< "$services"
+    for service in "${SERVICE_ARRAY[@]}"; do
+        if [[ -n "$service" ]]; then
+            if [[ $EUID -eq 0 ]]; then
+                if systemctl is-active --quiet "$service" 2>/dev/null; then
+                    warn "Service $service is still running"
+                    still_running=true
+                fi
+            else
+                if sudo systemctl is-active --quiet "$service" 2>/dev/null; then
+                    warn "Service $service is still running"
+                    still_running=true
+                fi
+            fi
+        fi
+    done
+    
+    if [[ "$still_running" == "true" ]]; then
+        warn "Some services may still be running. Proceeding anyway..."
+    else
+        log "All services stopped successfully"
+    fi
+    
+    return 0
+}
+
+# Read ztpbootstrap.env file
+read_ztpbootstrap_env() {
+    local env_file="${1:-/opt/containerdata/ztpbootstrap/ztpbootstrap.env}"
+    local values=()
+    
+    if [[ ! -f "$env_file" ]]; then
+        return 1
+    fi
+    
+    # Read file (handle sudo if needed)
+    local content
+    if [[ $EUID -eq 0 ]]; then
+        content=$(cat "$env_file" 2>/dev/null)
+    else
+        content=$(sudo cat "$env_file" 2>/dev/null)
+    fi
+    
+    if [[ -z "$content" ]]; then
+        return 1
+    fi
+    
+    # Extract values (handle comments and empty lines)
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        
+        # Extract key=value pairs
+        if [[ "$line" =~ ^[[:space:]]*([^=]+)=(.*)$ ]]; then
+            local key="${BASH_REMATCH[1]// /}"
+            local value="${BASH_REMATCH[2]}"
+            # Remove quotes if present
+            value="${value#\"}"
+            value="${value%\"}"
+            value="${value#\'}"
+            value="${value%\'}"
+            values+=("${key}=${value}")
+        fi
+    done <<< "$content"
+    
+    # Output as key=value pairs (one per line)
+    printf '%s\n' "${values[@]}"
+    return 0
+}
+
+# Read container/pod file
+read_container_file() {
+    local base_path="${1:-/etc/containers/systemd/ztpbootstrap}"
+    local container_file="${base_path}/ztpbootstrap.container"
+    local pod_file="${base_path}/ztpbootstrap.pod"
+    local target_file=""
+    
+    # Check for pod file first (newer), then container file (older)
+    if [[ -f "$pod_file" ]]; then
+        target_file="$pod_file"
+    elif [[ -f "$container_file" ]]; then
+        target_file="$container_file"
+    else
+        return 1
+    fi
+    
+    # Read file (handle sudo if needed)
+    local content
+    if [[ $EUID -eq 0 ]]; then
+        content=$(cat "$target_file" 2>/dev/null)
+    else
+        content=$(sudo cat "$target_file" 2>/dev/null)
+    fi
+    
+    if [[ -z "$content" ]]; then
+        return 1
+    fi
+    
+    # Extract key=value pairs from [Container] or [Pod] section
+    local in_section=false
+    local values=()
+    
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        [[ -z "${line// }" ]] && continue
+        
+        # Check for [Container] or [Pod] section
+        if [[ "$line" =~ ^[[:space:]]*\[(Container|Pod)\] ]]; then
+            in_section=true
+            continue
+        fi
+        
+        # Stop at next section (but continue reading if we're in the section we want)
+        if [[ "$line" =~ ^[[:space:]]*\[ ]] && [[ ! "$line" =~ ^[[:space:]]*\[(Container|Pod)\] ]]; then
+            in_section=false
+            continue
+        fi
+        
+        # Extract key=value pairs from Container/Pod section
+        if [[ "$in_section" == "true" ]] && [[ "$line" =~ ^[[:space:]]*([^=]+)=(.*)$ ]]; then
+            local key="${BASH_REMATCH[1]// /}"
+            local value="${BASH_REMATCH[2]}"
+            # Remove quotes if present
+            value="${value#\"}"
+            value="${value%\"}"
+            values+=("${key}=${value}")
+        fi
+    done <<< "$content"
+    
+    # Output as key=value pairs (one per line)
+    printf '%s\n' "${values[@]}"
+    return 0
+}
+
+# Read nginx.conf file
+read_nginx_conf() {
+    local nginx_file="${1:-/opt/containerdata/ztpbootstrap/nginx.conf}"
+    local values=()
+    
+    if [[ ! -f "$nginx_file" ]]; then
+        return 1
+    fi
+    
+    # Read file (handle sudo if needed)
+    local content
+    if [[ $EUID -eq 0 ]]; then
+        content=$(cat "$nginx_file" 2>/dev/null)
+    else
+        content=$(sudo cat "$nginx_file" 2>/dev/null)
+    fi
+    
+    if [[ -z "$content" ]]; then
+        return 1
+    fi
+    
+    # Extract server_name (domain)
+    if [[ "$content" =~ server_name[[:space:]]+([^;]+) ]]; then
+        local server_names="${BASH_REMATCH[1]}"
+        # Get first server name (usually the domain)
+        local domain=$(echo "$server_names" | awk '{print $1}')
+        if [[ -n "$domain" ]]; then
+            values+=("DOMAIN=${domain}")
+        fi
+    fi
+    
+    # Extract SSL certificate paths
+    if [[ "$content" =~ ssl_certificate[[:space:]]+([^;]+) ]]; then
+        local cert_path="${BASH_REMATCH[1]}"
+        cert_path="${cert_path// /}"
+        values+=("SSL_CERT_PATH=${cert_path}")
+    fi
+    
+    if [[ "$content" =~ ssl_certificate_key[[:space:]]+([^;]+) ]]; then
+        local key_path="${BASH_REMATCH[1]}"
+        key_path="${key_path// /}"
+        values+=("SSL_KEY_PATH=${key_path}")
+    fi
+    
+    # Output as key=value pairs (one per line)
+    printf '%s\n' "${values[@]}"
+    return 0
+}
+
+# Load existing installation values
+load_existing_installation_values() {
+    local script_dir="${1:-/opt/containerdata/ztpbootstrap}"
+    
+    # Initialize variables (global scope for use in interactive_config)
+    EXISTING_SCRIPT_DIR="$script_dir"
+    EXISTING_DOMAIN=""
+    EXISTING_IPV4=""
+    EXISTING_IPV6=""
+    EXISTING_CV_ADDR=""
+    EXISTING_ENROLLMENT_TOKEN=""
+    EXISTING_CV_PROXY=""
+    EXISTING_EOS_URL=""
+    EXISTING_NTP_SERVER=""
+    EXISTING_TIMEZONE=""
+    EXISTING_DNS1=""
+    EXISTING_DNS2=""
+    EXISTING_NETWORK=""
+    
+    log "Reading existing installation values..."
+    
+    # Read ztpbootstrap.env
+    local env_file="${script_dir}/ztpbootstrap.env"
+    if [[ -f "$env_file" ]]; then
+        while IFS='=' read -r key value; do
+            case "$key" in
+                CV_ADDR) EXISTING_CV_ADDR="$value" ;;
+                ENROLLMENT_TOKEN) EXISTING_ENROLLMENT_TOKEN="$value" ;;
+                CV_PROXY) EXISTING_CV_PROXY="$value" ;;
+                EOS_URL) EXISTING_EOS_URL="$value" ;;
+                NTP_SERVER) EXISTING_NTP_SERVER="$value" ;;
+                TZ) EXISTING_TIMEZONE="$value" ;;
+            esac
+        done < <(read_ztpbootstrap_env "$env_file")
+    fi
+    
+    # Read container file
+    local systemd_dir="/etc/containers/systemd/ztpbootstrap"
+    local container_values=""
+    if [[ -d "$systemd_dir" ]]; then
+        log "Reading container file from: $systemd_dir"
+        container_values=$(read_container_file "$systemd_dir" 2>/dev/null || echo "")
+        if [[ -z "$container_values" ]]; then
+            log "No container values found (file may not exist or parsing failed)"
+        else
+            log "Container values found: $(echo "$container_values" | wc -l) lines"
+        fi
+    else
+        log "Container directory does not exist: $systemd_dir"
+    fi
+    
+    if [[ -n "$container_values" ]]; then
+        log "Parsing container values..."
+        # Use process substitution to ensure proper line-by-line reading
+        local parsed_count=0
+        while IFS='=' read -r key value || [[ -n "$key" ]]; do
+            # Skip empty lines
+            [[ -z "$key" ]] && continue
+            # Trim whitespace from key
+            key="${key// /}"
+            # Trim whitespace and quotes from value
+            value="${value# }"
+            value="${value% }"
+            value="${value#\"}"
+            value="${value%\"}"
+            
+            case "$key" in
+                Network) 
+                    EXISTING_NETWORK="$value"
+                    log "  Found Network: $value"
+                    ((parsed_count++))
+                    ;;
+                IP) 
+                    EXISTING_IPV4="$value"
+                    log "  Found IP: $value"
+                    ((parsed_count++))
+                    ;;
+                IP6) 
+                    EXISTING_IPV6="$value"
+                    log "  Found IP6: $value"
+                    ((parsed_count++))
+                    ;;
+                Environment) 
+                    # Handle Environment="TZ=America/Central" format
+                    if [[ "$value" =~ TZ=([^\"\']+) ]]; then
+                        EXISTING_TIMEZONE="${BASH_REMATCH[1]}"
+                        log "  Found Timezone: ${BASH_REMATCH[1]}"
+                    fi
+                    ;;
+            esac
+            # DNS entries (may be multiple)
+            if [[ "$key" == "DNS" ]]; then
+                if [[ -z "$EXISTING_DNS1" ]]; then
+                    EXISTING_DNS1="$value"
+                    log "  Found DNS1: $value"
+                elif [[ -z "$EXISTING_DNS2" ]]; then
+                    EXISTING_DNS2="$value"
+                    log "  Found DNS2: $value"
+                fi
+            fi
+        done < <(printf '%s\n' "$container_values")
+        log "Parsed $parsed_count network-related values from container file"
+    else
+        log "No container values to parse"
+    fi
+    
+    # Read nginx.conf
+    local nginx_file="${script_dir}/nginx.conf"
+    if [[ -f "$nginx_file" ]]; then
+        while IFS='=' read -r key value; do
+            case "$key" in
+                DOMAIN) EXISTING_DOMAIN="$value" ;;
+            esac
+        done < <(read_nginx_conf "$nginx_file")
+    fi
+    
+    # Debug: Log loaded values
+    if [[ -n "$EXISTING_IPV4" ]]; then
+        log "Loaded existing IPv4: $EXISTING_IPV4"
+    fi
+    if [[ -n "$EXISTING_IPV6" ]]; then
+        log "Loaded existing IPv6: $EXISTING_IPV6"
+    fi
+    if [[ -n "$EXISTING_NETWORK" ]]; then
+        log "Loaded existing Network: $EXISTING_NETWORK"
+    fi
+    
+    log "Loaded existing values from installation"
+    return 0
+}
+
+# Clean installation directories
+clean_installation_directories() {
+    local script_dir="${1:-/opt/containerdata/ztpbootstrap}"
+    local systemd_dir="/etc/containers/systemd/ztpbootstrap"
+    
+    log "Cleaning installation directories..."
+    
+    # Clean service directory
+    if [[ -d "$script_dir" ]]; then
+        log "Cleaning: $script_dir"
+        if [[ $EUID -eq 0 ]]; then
+            find "$script_dir" -mindepth 1 -delete 2>/dev/null || warn "Failed to clean $script_dir"
+        else
+            sudo find "$script_dir" -mindepth 1 -delete 2>/dev/null || warn "Failed to clean $script_dir"
+        fi
+    fi
+    
+    # Clean systemd directory
+    if [[ -d "$systemd_dir" ]]; then
+        log "Cleaning: $systemd_dir"
+        if [[ $EUID -eq 0 ]]; then
+            find "$systemd_dir" -mindepth 1 -delete 2>/dev/null || warn "Failed to clean $systemd_dir"
+        else
+            sudo find "$systemd_dir" -mindepth 1 -delete 2>/dev/null || warn "Failed to clean $systemd_dir"
+        fi
+    fi
+    
+    log "Directories cleaned successfully"
+    return 0
+}
+
+# Start services after installation
+start_services_after_install() {
+    log "Starting new services..."
+    
+    # Reload systemd first
+    if [[ $EUID -eq 0 ]]; then
+        systemctl daemon-reload
+    else
+        sudo systemctl daemon-reload
+    fi
+    
+    sleep 2
+    
+    # Start pod service
+    if [[ $EUID -eq 0 ]]; then
+        if systemctl start ztpbootstrap-pod.service 2>/dev/null; then
+            log "✓ Started ztpbootstrap-pod.service"
+            sleep 2
+        else
+            warn "Failed to start ztpbootstrap-pod.service"
+        fi
+        
+        # Start nginx container
+        if systemctl start ztpbootstrap-nginx.service 2>/dev/null; then
+            log "✓ Started ztpbootstrap-nginx.service"
+        else
+            warn "Failed to start ztpbootstrap-nginx.service"
+        fi
+        
+        # Start webui container if it exists
+        if systemctl list-unit-files | grep -q ztpbootstrap-webui.service; then
+            if systemctl start ztpbootstrap-webui.service 2>/dev/null; then
+                log "✓ Started ztpbootstrap-webui.service"
+            else
+                warn "Failed to start ztpbootstrap-webui.service"
+            fi
+        fi
+    else
+        if sudo systemctl start ztpbootstrap-pod.service 2>/dev/null; then
+            log "✓ Started ztpbootstrap-pod.service"
+            sleep 2
+        else
+            warn "Failed to start ztpbootstrap-pod.service"
+        fi
+        
+        if sudo systemctl start ztpbootstrap-nginx.service 2>/dev/null; then
+            log "✓ Started ztpbootstrap-nginx.service"
+        else
+            warn "Failed to start ztpbootstrap-nginx.service"
+        fi
+        
+        if systemctl list-unit-files | grep -q ztpbootstrap-webui.service; then
+            if sudo systemctl start ztpbootstrap-webui.service 2>/dev/null; then
+                log "✓ Started ztpbootstrap-webui.service"
+            else
+                warn "Failed to start ztpbootstrap-webui.service"
+            fi
+        fi
+    fi
+    
+    log "Service startup completed"
+    return 0
+}
+
 # Load existing config if it exists
 load_existing_config() {
     if [[ -f "$CONFIG_FILE" ]] && command -v yq >/dev/null 2>&1; then
@@ -137,11 +937,10 @@ interactive_config() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
-    prompt_with_default "Main service directory" "/opt/containerdata/ztpbootstrap" SCRIPT_DIR
+    prompt_with_default "Main service directory" "${EXISTING_SCRIPT_DIR:-/opt/containerdata/ztpbootstrap}" SCRIPT_DIR
     prompt_with_default "SSL certificate directory" "/opt/containerdata/certs/wild" CERT_DIR
     prompt_with_default "Environment file path" "${SCRIPT_DIR}/ztpbootstrap.env" ENV_FILE
     prompt_with_default "Bootstrap script path" "${SCRIPT_DIR}/bootstrap.py" BOOTSTRAP_SCRIPT
-    prompt_with_default "Configured script path" "${SCRIPT_DIR}/bootstrap_configured.py" CONFIGURED_SCRIPT
     prompt_with_default "Nginx config file" "${SCRIPT_DIR}/nginx.conf" NGINX_CONF
     
     echo ""
@@ -152,9 +951,9 @@ interactive_config() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
-    prompt_with_default "Domain name" "ztpboot.example.com" DOMAIN
-    prompt_with_default "IPv4 address (leave empty for host network)" "10.0.0.10" IPV4 "false" "true"
-    prompt_with_default "IPv6 address (leave empty to disable)" "2001:db8::10" IPV6 "false" "true"
+    prompt_with_default "Domain name" "${EXISTING_DOMAIN:-ztpboot.example.com}" DOMAIN
+    prompt_with_default "IPv4 address (leave empty for host network)" "${EXISTING_IPV4:-10.0.0.10}" IPV4 "false" "true"
+    prompt_with_default "IPv6 address (leave empty to disable)" "${EXISTING_IPV6:-2001:db8::10}" IPV6 "false" "true"
     prompt_with_default "HTTPS port" "443" HTTPS_PORT
     prompt_with_default "HTTP port" "80" HTTP_PORT
     prompt_yes_no "Use HTTP-only mode (insecure, not recommended)" "n" HTTP_ONLY
@@ -174,11 +973,11 @@ interactive_config() {
     log "  - See config.yaml.template for all regional options"
     echo ""
     
-    prompt_with_default "CVaaS address" "www.arista.io" CV_ADDR
-    prompt_with_default "Enrollment token (from CVaaS Device Registration)" "" ENROLLMENT_TOKEN "true"
-    prompt_with_default "Proxy URL (leave empty if not needed)" "" CV_PROXY
-    prompt_with_default "EOS image URL (optional, for upgrades)" "" EOS_URL
-    prompt_with_default "NTP server" "time.nist.gov" NTP_SERVER
+    prompt_with_default "CVaaS address" "${EXISTING_CV_ADDR:-www.arista.io}" CV_ADDR
+    prompt_with_default "Enrollment token (from CVaaS Device Registration)" "${EXISTING_ENROLLMENT_TOKEN:-}" ENROLLMENT_TOKEN "true"
+    prompt_with_default "Proxy URL (leave empty if not needed)" "${EXISTING_CV_PROXY:-}" CV_PROXY
+    prompt_with_default "EOS image URL (optional, for upgrades)" "${EXISTING_EOS_URL:-}" EOS_URL
+    prompt_with_default "NTP server" "${EXISTING_NTP_SERVER:-time.nist.gov}" NTP_SERVER
     
     echo ""
     
@@ -210,10 +1009,15 @@ interactive_config() {
     
     prompt_with_default "Container name" "ztpbootstrap" CONTAINER_NAME
     prompt_with_default "Container image" "docker.io/nginx:alpine" CONTAINER_IMAGE
-    prompt_with_default "Timezone" "UTC" TIMEZONE
-    prompt_yes_no "Use host network mode?" "y" HOST_NETWORK
-    prompt_with_default "DNS server 1" "8.8.8.8" DNS1
-    prompt_with_default "DNS server 2" "8.8.4.4" DNS2
+    prompt_with_default "Timezone" "${EXISTING_TIMEZONE:-UTC}" TIMEZONE
+    # Determine host network mode from existing network config
+    local default_host_network="y"
+    if [[ -n "${EXISTING_NETWORK:-}" ]] && [[ "${EXISTING_NETWORK}" != "host" ]]; then
+        default_host_network="n"
+    fi
+    prompt_yes_no "Use host network mode?" "$default_host_network" HOST_NETWORK
+    prompt_with_default "DNS server 1" "${EXISTING_DNS1:-8.8.8.8}" DNS1
+    prompt_with_default "DNS server 2" "${EXISTING_DNS2:-8.8.4.4}" DNS2
     
     echo ""
     
@@ -416,7 +1220,6 @@ paths:
   cert_dir: "$CERT_DIR"
   env_file: "$ENV_FILE"
   bootstrap_script: "$BOOTSTRAP_SCRIPT"
-  configured_script: "$CONFIGURED_SCRIPT"
   nginx_conf: "$NGINX_CONF"
 
 # ============================================================================
@@ -540,8 +1343,58 @@ check_prerequisites() {
     return 0
 }
 
+# Parse command line arguments
+parse_args() {
+    RESTORE_MODE=false
+    RESTORE_TIMESTAMP=""
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --restore)
+                RESTORE_MODE=true
+                if [[ -n "${2:-}" ]] && [[ ! "$2" =~ ^- ]]; then
+                    RESTORE_TIMESTAMP="$2"
+                    shift
+                fi
+                shift
+                ;;
+            -h|--help)
+                cat << EOF
+Usage: $0 [OPTIONS]
+
+Options:
+    --restore [TIMESTAMP]    Restore from a previous backup
+                            If TIMESTAMP is not provided, will list available backups
+    -h, --help              Show this help message
+
+Examples:
+    $0                      # Run interactive setup
+    $0 --restore            # List and restore from available backups
+    $0 --restore 20240101_120000  # Restore from specific backup
+
+EOF
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1. Use --help for usage information."
+                ;;
+        esac
+    done
+}
+
 # Main function
 main() {
+    # Parse command line arguments
+    parse_args "$@"
+    
+    # Handle restore mode
+    if [[ "$RESTORE_MODE" == "true" ]]; then
+        if ! restore_backup "$RESTORE_TIMESTAMP"; then
+            exit 1
+        fi
+        exit 0
+    fi
+    
     # Check prerequisites first
     if ! check_prerequisites; then
         exit 1
@@ -550,6 +1403,84 @@ main() {
     # Check if running as root (optional for interactive mode)
     if [[ $EUID -ne 0 ]]; then
         warn "Not running as root. Some operations may require sudo."
+    fi
+    
+    # Check for previous installation
+    local default_script_dir="/opt/containerdata/ztpbootstrap"
+    if detect_previous_install "$default_script_dir"; then
+        echo ""
+        warn "⚠️  Previous installation detected!"
+        warn "Found existing files in:"
+        if [[ -d "$default_script_dir" ]] && [[ -n "$(find "$default_script_dir" -type f 2>/dev/null | head -1)" ]]; then
+            warn "  - $default_script_dir"
+        fi
+        if [[ -d "/etc/containers/systemd/ztpbootstrap" ]] && [[ -n "$(find /etc/containers/systemd/ztpbootstrap -type f 2>/dev/null | head -1)" ]]; then
+            warn "  - /etc/containers/systemd/ztpbootstrap"
+        fi
+        echo ""
+        
+        # Check for running services
+        local service_info
+        service_info=$(check_running_services 2>/dev/null || echo "none:")
+        local service_type="${service_info%%:*}"
+        local services="${service_info#*:}"
+        
+        if [[ "$service_type" != "none" ]] && [[ -n "$services" ]]; then
+            warn "⚠️  Services are currently running:"
+            IFS=' ' read -ra SERVICE_ARRAY <<< "$services"
+            for service in "${SERVICE_ARRAY[@]}"; do
+                if [[ -n "$service" ]]; then
+                    warn "  - $service"
+                fi
+            done
+            echo ""
+            warn "Services must be stopped before proceeding with installation/upgrade."
+            prompt_yes_no "Stop services gracefully before proceeding?" "n" STOP_SERVICES
+            
+            if [[ "$STOP_SERVICES" != "true" ]]; then
+                log "Setup cancelled. Please stop services manually and try again."
+                exit 0
+            fi
+            
+            # Stop services gracefully
+            if ! stop_services_gracefully "$service_info"; then
+                warn "Failed to stop some services. Proceeding anyway..."
+            fi
+            echo ""
+        fi
+        
+        # Load existing values from installation
+        load_existing_installation_values "$default_script_dir"
+        echo ""
+        
+        # Create backup
+        prompt_yes_no "Would you like to create a backup before proceeding?" "y" CREATE_BACKUP
+        
+        if [[ "$CREATE_BACKUP" == "true" ]]; then
+            if ! create_backup "$default_script_dir"; then
+                warn "Backup failed, but continuing with setup..."
+                echo ""
+                prompt_yes_no "Continue with setup anyway?" "y" CONTINUE_SETUP
+                if [[ "$CONTINUE_SETUP" != "true" ]]; then
+                    log "Setup cancelled."
+                    exit 0
+                fi
+            fi
+        else
+            warn "No backup will be created. Existing files may be overwritten."
+            echo ""
+            prompt_yes_no "Continue with setup?" "y" CONTINUE_SETUP
+            if [[ "$CONTINUE_SETUP" != "true" ]]; then
+                log "Setup cancelled."
+                exit 0
+            fi
+        fi
+        echo ""
+        
+        # Clean installation directories (after backup is safe)
+        log "Cleaning installation directories for fresh installation..."
+        clean_installation_directories "$default_script_dir"
+        echo ""
     fi
     
     # Try to load existing config
@@ -566,10 +1497,29 @@ main() {
     if [[ "$APPLY_NOW" == "true" ]]; then
         log "Configuration has been applied to all files."
         log ""
-        log "Next steps:"
-        log "  1. Review the updated files if needed"
-        log "  2. Run: sudo ./setup.sh"
-        log "  3. Or run: sudo ./setup.sh --http-only (for testing)"
+        
+        # Offer to start services if we had a previous installation
+        if [[ -n "${default_script_dir:-}" ]] && detect_previous_install "$default_script_dir" 2>/dev/null; then
+            # This shouldn't happen since we cleaned directories, but check anyway
+            true
+        fi
+        
+        # Offer to start services
+        echo ""
+        prompt_yes_no "Would you like to start the services now?" "y" START_SERVICES
+        
+        if [[ "$START_SERVICES" == "true" ]]; then
+            start_services_after_install
+            echo ""
+            log "Services have been started. You can check status with:"
+            log "  systemctl status ztpbootstrap-pod"
+            log "  systemctl status ztpbootstrap-nginx"
+        else
+            log "Next steps:"
+            log "  1. Review the updated files if needed"
+            log "  2. Run: sudo ./setup.sh"
+            log "  3. Or run: sudo ./setup.sh --http-only (for testing)"
+        fi
     else
         log "Next steps:"
         log "  1. Review config.yaml"

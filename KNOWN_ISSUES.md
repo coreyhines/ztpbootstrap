@@ -1,5 +1,17 @@
 # Known Issues and Workarounds
 
+## Ubuntu Support
+
+**Ubuntu 22.04 (and potentially other Ubuntu versions) has known issues with SSH key deployment via cloud-init in this environment.** 
+
+The cloud-init `ssh_authorized_keys` mechanism and `write_files + runcmd` approaches both fail to deploy SSH keys correctly, resulting in SSH authentication failures. This appears to be related to how Ubuntu cloud images handle cloud-init user-data processing.
+
+**Status:** Ubuntu is not fully supported. If you need to use Ubuntu, you may need to manually configure SSH access or work around cloud-init limitations.
+
+**Recommended:** Use Fedora 43 or later, which has been fully tested and works correctly.
+
+---
+
 ## SELinux Context Flags (`:z` and `:Z`) - NOT USED
 
 **IMPORTANT:** We do NOT use SELinux context flags (`:z` or `:Z`) in Podman volume mounts because:

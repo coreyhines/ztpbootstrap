@@ -80,14 +80,20 @@ fi
 create_disk() {
     if [[ -f "$VM_DISK" ]]; then
         log_warn "Disk image $VM_DISK already exists"
-        read -p "Delete and recreate? (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
+        # In headless mode, auto-delete to ensure fresh test runs
+        if [[ "$HEADLESS" == "true" ]]; then
             rm -f "$VM_DISK"
-            log_info "Deleted existing disk image"
+            log_info "Deleted existing disk image (headless mode)"
         else
-            log_info "Using existing disk image"
-            return 0
+            read -p "Delete and recreate? (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                rm -f "$VM_DISK"
+                log_info "Deleted existing disk image"
+            else
+                log_info "Using existing disk image"
+                return 0
+            fi
         fi
     fi
     
@@ -352,10 +358,13 @@ start_vm() {
         local distro_ssh_service="sshd"
         local distro_sudo_group="wheel"
         local distro_install_cmd="dnf install -y"
+        # Get current logged-in user for SSH key injection
+        local current_user="${USER:-$(whoami)}"
         
         if [[ "$ISO_PATH" == *ubuntu* ]] || [[ "$ISO_PATH" == *Ubuntu* ]] || [[ "$DOWNLOAD_DISTRO" == "ubuntu" ]] || [[ "$DOWNLOAD_DISTRO" == "Ubuntu" ]]; then
             distro_user="ubuntu"
             distro_pkg_mgr="apt"
+            # Ubuntu uses 'ssh' as the systemd service name, but we need to ensure it's installed and enabled
             distro_ssh_service="ssh"
             distro_sudo_group="sudo"
             distro_install_cmd="apt-get update && apt-get install -y"
@@ -390,10 +399,20 @@ users:
     shell: /bin/bash
     lock_passwd: false
     plain_text_passwd: '__DISTRO_USER__'
-    # SSH authorized keys will be added via write_files + runcmd for better compatibility
+    # SSH keys will be added via write_files + runcmd (more reliable)
+  - name: __CURRENT_USER__
+    gecos: __CURRENT_USER__ User
+    groups: [wheel, adm, systemd-journal]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    lock_passwd: false
+    plain_text_passwd: '__CURRENT_USER__'
+    ssh_authorized_keys:
+      - __CURRENT_USER_SSH_KEY__
 chpasswd:
   list: |
     __DISTRO_USER__:__DISTRO_USER__
+    __CURRENT_USER__:__CURRENT_USER__
   expire: false
 ssh_pwauth: true
 disable_root: false
@@ -405,6 +424,7 @@ write_files:
       PubkeyAuthentication yes
       ChallengeResponseAuthentication yes
       UsePAM yes
+      PermitRootLogin no
     permissions: '0644'
     owner: root:root
   - path: /tmp/auto-setup-flag
@@ -440,7 +460,7 @@ write_files:
         HTTP:  http://localhost:8080
         HTTPS: https://localhost:8443
     permissions: '0644'
-    owner: __DISTRO_USER__:__DISTRO_USER__
+    owner: root:root
 runcmd:
   - |
     # Configure SSH to allow password authentication - do this FIRST
@@ -466,7 +486,11 @@ runcmd:
     systemctl status __DISTRO_SSH_SERVICE__ || true
   - |
     # Install required packages
-    __DISTRO_INSTALL_CMD__ git podman curl yq
+    if command -v apt-get &>/dev/null; then
+      apt-get update -qq && apt-get install -y -qq git podman curl yq || true
+    elif command -v dnf &>/dev/null; then
+      dnf install -y -q git podman curl yq || true
+    fi
   - |
     # Set up SSH authorized_keys from host if available
     # Cloud-init write_files section copies the key to /tmp/host_ssh_key.pub
@@ -481,16 +505,35 @@ runcmd:
       echo "No SSH key found at /tmp/host_ssh_key.pub - password authentication will be required"
     fi
   - |
-    # Clone the repository
+    # Clone the repository (with retries and better error handling)
     if [ ! -d /home/__DISTRO_USER__/ztpbootstrap ]; then
-      sudo -u __DISTRO_USER__ git clone https://github.com/coreyhines/ztpbootstrap.git /home/__DISTRO_USER__/ztpbootstrap || \
-      sudo -u __DISTRO_USER__ git clone https://github.com/YOUR_USERNAME/ztpbootstrap.git /home/__DISTRO_USER__/ztpbootstrap || \
-      echo "Repository clone failed. Please clone manually."
+      # Install git if not present
+      if ! command -v git &>/dev/null; then
+        if command -v apt-get &>/dev/null; then
+          apt-get update -qq && apt-get install -y -qq git || true
+        elif command -v dnf &>/dev/null; then
+          dnf install -y -q git || true
+        fi
+      fi
+      # Try cloning with retries
+      for i in 1 2 3; do
+        if sudo -u __DISTRO_USER__ git clone https://github.com/coreyhines/ztpbootstrap.git /home/__DISTRO_USER__/ztpbootstrap 2>&1; then
+          echo "Repository cloned successfully"
+          break
+        elif [ $i -eq 3 ]; then
+          echo "Repository clone failed after 3 attempts. Will create minimal config anyway."
+        else
+          echo "Clone attempt $i failed, retrying..."
+          sleep 2
+        fi
+      done
     fi
   - |
     # Create minimal ztpbootstrap.env file for automated testing
     # This allows setup.sh to run without manual configuration
+    # Create directory first
     mkdir -p /opt/containerdata/ztpbootstrap
+    # Create env file using printf to avoid YAML heredoc issues
     printf '%s\n' \
       '# Minimal configuration for automated testing' \
       'CV_ADDR=www.arista.io' \
@@ -500,10 +543,9 @@ runcmd:
       'NTP_SERVER=time.nist.gov' \
       'TZ=UTC' \
       'NGINX_HOST=ztpboot.example.com' \
-      'NGINX_PORT=443' \
-      > /opt/containerdata/ztpbootstrap/ztpbootstrap.env
+      'NGINX_PORT=443' > /opt/containerdata/ztpbootstrap/ztpbootstrap.env
     chmod 644 /opt/containerdata/ztpbootstrap/ztpbootstrap.env
-    # Also copy bootstrap.py and nginx.conf to expected location for setup.sh
+    # Also copy bootstrap.py and nginx.conf to expected location for setup.sh if repo was cloned
     if [ -f /home/__DISTRO_USER__/ztpbootstrap/bootstrap.py ]; then
       cp /home/__DISTRO_USER__/ztpbootstrap/bootstrap.py /opt/containerdata/ztpbootstrap/bootstrap.py
       chmod 644 /opt/containerdata/ztpbootstrap/bootstrap.py
@@ -566,6 +608,7 @@ CLOUDINITEOF
         # This allows passwordless SSH access from the host machine
         local host_ssh_key=""
         local ssh_key_content=""
+        local current_user_ssh_key=""
         if [[ -f "$HOME/.ssh/id_ed25519.pub" ]]; then
             host_ssh_key="$HOME/.ssh/id_ed25519.pub"
         elif [[ -f "$HOME/.ssh/id_rsa.pub" ]]; then
@@ -574,21 +617,28 @@ CLOUDINITEOF
         
         if [[ -n "$host_ssh_key" ]] && [[ -f "$host_ssh_key" ]]; then
             ssh_key_content=$(cat "$host_ssh_key" 2>/dev/null || echo "")
+            current_user_ssh_key="$ssh_key_content"
             log_info "Including host SSH key in cloud-init: $host_ssh_key"
         else
             log_info "No SSH public key found in ~/.ssh/ - password authentication will be required"
             # Remove the SSH key write_files entry if no key available
             sed -i.bak '/path: \/tmp\/host_ssh_key.pub/,/owner: root:root/d' "$cloud_init_dir/user-data" 2>/dev/null || true
             rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
+            # Also remove current user's SSH key if no key available
+            sed -i.bak '/ssh_authorized_keys:/,/__CURRENT_USER_SSH_KEY__/d' "$cloud_init_dir/user-data" 2>/dev/null || true
+            rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
         fi
         
         # Replace all placeholders with actual values (after heredoc creation to avoid expansion issues)
+        # Use a different delimiter for install_cmd since it contains | characters
         sed -i.bak \
           -e "s|__DISTRO_USER__|${distro_user}|g" \
           -e "s|__DISTRO_SUDO_GROUP__|${distro_sudo_group}|g" \
           -e "s|__DISTRO_SSH_SERVICE__|${distro_ssh_service}|g" \
-          -e "s|__DISTRO_INSTALL_CMD__|${distro_install_cmd}|g" \
+          -e "s#__DISTRO_INSTALL_CMD__#${distro_install_cmd}#g" \
           -e "s|__SSH_KEY_CONTENT__|${ssh_key_content}|g" \
+          -e "s|__CURRENT_USER__|${current_user}|g" \
+          -e "s|__CURRENT_USER_SSH_KEY__|${current_user_ssh_key}|g" \
           "$cloud_init_dir/user-data" 2>/dev/null || true
         rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
         

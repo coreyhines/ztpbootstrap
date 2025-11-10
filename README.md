@@ -7,11 +7,13 @@ A containerized service that provides a secure HTTPS endpoint for serving Arista
 ## Tested Platforms
 
 **Architecture:** ARM64 (aarch64) - ✅ Fully tested  
-**OS:** Fedora 43 Cloud - ✅ Fully tested  
+**OS:** Fedora 43 Cloud - ✅ Fully tested and recommended  
 **Podman:** 5.6.2 - ✅ Fully tested  
 **Systemd:** Full quadlet support - ✅ Fully tested
 
-**Note:** x86_64 not tested on ARM64 macOS (would require emulation). See [ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md) for details.
+**Note:** 
+- x86_64 not tested on ARM64 macOS (would require emulation). See [ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md) for details.
+- **Ubuntu has known SSH/cloud-init issues** and is not fully supported. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for details.
 
 ---
 
@@ -406,9 +408,11 @@ podman --version
 </details>
 
 **Recommended Distributions:**
-- **Best:** Fedora 37+, RHEL 9+, Rocky Linux 9+, AlmaLinux 9+, CentOS Stream 9+
-- **Good:** Ubuntu 22.04+, Debian 12+, openSUSE Tumbleweed/Leap 15.4+
-- **Not Recommended:** Older distributions (RHEL 8, Ubuntu 20.04) - may lack full systemd quadlet support
+- **Best:** Fedora 43+ (fully tested and recommended)
+- **Good:** RHEL 9+, Rocky Linux 9+, AlmaLinux 9+, CentOS Stream 9+
+- **Not Recommended:** 
+  - Ubuntu 22.04+ - Has known SSH/cloud-init issues (see [KNOWN_ISSUES.md](KNOWN_ISSUES.md))
+  - Older distributions (RHEL 8, Ubuntu 20.04) - may lack full systemd quadlet support
 
 ### Step 2: Prepare Directories
 
@@ -976,7 +980,6 @@ See [Testing Guide](TESTING.md) for complete testing documentation.
 ```
 /opt/containerdata/ztpbootstrap/
 ├── bootstrap.py              # Arista ZTP bootstrap script (edit this)
-├── bootstrap_configured.py   # Generated script (if using setup.sh)
 ├── bootstrap.py.backup       # Backup of original script
 ├── nginx.conf               # Nginx configuration
 ├── ztpbootstrap.env         # Environment variables (for reference)

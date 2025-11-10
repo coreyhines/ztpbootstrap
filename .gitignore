@@ -5,6 +5,7 @@ ztpbootstrap.env
 *.backup
 *.bak
 *.old
+.ztpbootstrap-backups/
 
 # Generated files
 bootstrap_configured.py

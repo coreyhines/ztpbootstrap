@@ -15,9 +15,8 @@ paths:
   # Environment file path
   env_file: "/opt/containerdata/ztpbootstrap/ztpbootstrap.env"
   
-  # Bootstrap script paths
+  # Bootstrap script path
   bootstrap_script: "/opt/containerdata/ztpbootstrap/bootstrap.py"
-  configured_script: "/opt/containerdata/ztpbootstrap/bootstrap_configured.py"
   
   # Nginx configuration file
   nginx_conf: "/opt/containerdata/ztpbootstrap/nginx.conf"

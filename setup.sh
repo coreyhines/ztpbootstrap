@@ -15,7 +15,6 @@ NC='\033[0m' # No Color
 SCRIPT_DIR="/opt/containerdata/ztpbootstrap"
 ENV_FILE="${SCRIPT_DIR}/ztpbootstrap.env"
 BOOTSTRAP_SCRIPT="${SCRIPT_DIR}/bootstrap.py"
-CONFIGURED_SCRIPT="${SCRIPT_DIR}/bootstrap_configured.py"
 NGINX_CONF="${SCRIPT_DIR}/nginx.conf"
 CERT_DIR="/opt/containerdata/certs/wild"
 DOMAIN="ztpboot.example.com"
@@ -105,25 +104,6 @@ load_env() {
     log "Enrollment Token: ${ENROLLMENT_TOKEN:0:20}..."
 }
 
-# Generate configured bootstrap script
-generate_bootstrap_script() {
-    log "Generating configured bootstrap script..."
-    
-    # Create a copy of the original script
-    cp "$BOOTSTRAP_SCRIPT" "$CONFIGURED_SCRIPT"
-    
-    # Replace the environment variable calls with actual values
-    sed -i "s|os.environ.get('CV_ADDR', \"\")|\"$CV_ADDR\"|g" "$CONFIGURED_SCRIPT"
-    sed -i "s|os.environ.get('ENROLLMENT_TOKEN', \"\")|\"$ENROLLMENT_TOKEN\"|g" "$CONFIGURED_SCRIPT"
-    sed -i "s|os.environ.get('CV_PROXY', \"\")|\"${CV_PROXY:-}\"|g" "$CONFIGURED_SCRIPT"
-    sed -i "s|os.environ.get('EOS_URL', \"\")|\"${EOS_URL:-}\"|g" "$CONFIGURED_SCRIPT"
-    sed -i "s|os.environ.get('NTP_SERVER', \"\")|\"${NTP_SERVER:-}\"|g" "$CONFIGURED_SCRIPT"
-    
-    # Make the script executable
-    chmod +x "$CONFIGURED_SCRIPT"
-    
-    log "Configured bootstrap script generated: $CONFIGURED_SCRIPT"
-}
 
 # Check SSL certificates
 check_ssl_certificates() {
@@ -737,7 +717,6 @@ main() {
     
     check_env_file
     load_env
-    generate_bootstrap_script
     
     # Always set up logs directory (required for nginx container)
     if ! setup_logs_directory; then

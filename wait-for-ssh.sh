@@ -1,61 +1,61 @@
-[38;5;243m#[0m[38;5;243m!/bin/bash[0m
-[38;5;243m#[0m[38;5;243m Optimized SSH wait script[0m
-[38;5;243m#[0m[38;5;243m Checks port availability first, then SSH connection[0m
+#!/bin/bash
+# Optimized SSH wait script
+# Checks port availability first, then SSH connection
 
-[38;5;231mHOST[0m[38;5;203m=[0m[38;5;231m"[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231m1[0m[38;5;203m:-[0m[38;5;186mlocalhost[0m[38;5;186m}[0m[38;5;231m"[0m
-[38;5;231mPORT[0m[38;5;203m=[0m[38;5;231m"[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231m2[0m[38;5;203m:-[0m[38;5;186m2222[0m[38;5;186m}[0m[38;5;231m"[0m
-[38;5;231mUSER[0m[38;5;203m=[0m[38;5;231m"[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231m3[0m[38;5;203m:-[0m[38;5;186mfedora[0m[38;5;186m}[0m[38;5;231m"[0m
-[38;5;231mTIMEOUT[0m[38;5;203m=[0m[38;5;231m"[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231m4[0m[38;5;203m:-[0m[38;5;186m300[0m[38;5;186m}[0m[38;5;231m"[0m
-[38;5;231mINTERVAL[0m[38;5;203m=[0m[38;5;231m"[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231m5[0m[38;5;203m:-[0m[38;5;186m2[0m[38;5;186m}[0m[38;5;231m"[0m
+HOST="${1:-localhost}"
+PORT="${2:-2222}"
+USER="${3:-fedora}"
+TIMEOUT="${4:-300}"
+INTERVAL="${5:-2}"
 
-[38;5;81mecho[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mWaiting for SSH on [0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mUSER[0m[38;5;186m}[0m[38;5;186m@[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mHOST[0m[38;5;186m}[0m[38;5;186m:[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mPORT[0m[38;5;186m}[0m[38;5;186m...[0m[38;5;231m"[0m
-[38;5;81mecho[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mTimeout: [0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mTIMEOUT[0m[38;5;186m}[0m[38;5;186ms, Check interval: [0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mINTERVAL[0m[38;5;186m}[0m[38;5;186ms[0m[38;5;231m"[0m
-[38;5;81mecho[0m[38;5;231m [0m[38;5;231m"[0m[38;5;231m"[0m
+echo "Waiting for SSH on ${USER}@${HOST}:${PORT}..."
+echo "Timeout: ${TIMEOUT}s, Check interval: ${INTERVAL}s"
+echo ""
 
-[38;5;231mstart_time[0m[38;5;203m=[0m[38;5;231m$[0m[38;5;186m([0m[38;5;231mdate[0m[38;5;186m +[0m[38;5;231m%[0m[38;5;231ms[0m[38;5;186m)[0m
-[38;5;231melapsed[0m[38;5;203m=[0m[38;5;186m0[0m
+start_time=$(date +%s)
+elapsed=0
 
-[38;5;243m#[0m[38;5;243m Phase 1: Wait for port to be open (faster check)[0m
-[38;5;81mecho[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mPhase 1: Waiting for port [0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mPORT[0m[38;5;186m}[0m[38;5;186m to be open...[0m[38;5;231m"[0m
-[38;5;203mwhile[0m[38;5;231m [0m[38;5;81m[[0m[38;5;231m [0m[38;5;231m$[0m[38;5;231melapsed[0m[38;5;231m [0m[38;5;208m-[0m[38;5;208mlt[0m[38;5;231m [0m[38;5;231m$[0m[38;5;231mTIMEOUT[0m[38;5;231m [0m[38;5;81m][0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mdo[0m
-[38;5;231m    [0m[38;5;203mif[0m[38;5;231m [0m[38;5;231mtimeout[0m[38;5;231m 1 bash[0m[38;5;208m -[0m[38;5;208mc[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mecho > /dev/tcp/[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mHOST[0m[38;5;186m}[0m[38;5;186m/[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mPORT[0m[38;5;186m}[0m[38;5;231m"[0m[38;5;231m [0m[38;5;141m2[0m[38;5;203m>[0m[38;5;231m/dev/null[0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
-[38;5;231m        [0m[38;5;81mecho[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m✓ Port [0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mPORT[0m[38;5;186m}[0m[38;5;186m is open ([0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231melapsed[0m[38;5;186m}[0m[38;5;186ms)[0m[38;5;231m"[0m
-[38;5;231m        [0m[38;5;203mbreak[0m
-[38;5;231m    [0m[38;5;203mfi[0m
-[38;5;231m    [0m[38;5;231msleep[0m[38;5;231m [0m[38;5;231m$[0m[38;5;231mINTERVAL[0m
-[38;5;231m    [0m[38;5;231melapsed[0m[38;5;203m=[0m[38;5;231m$[0m[38;5;186m(([0m[38;5;231m$[0m[38;5;186m([0m[38;5;231mdate[0m[38;5;186m +[0m[38;5;231m%[0m[38;5;231ms[0m[38;5;186m)[0m[38;5;186m [0m[38;5;203m-[0m[38;5;186m start_time[0m[38;5;186m))[0m
-[38;5;231m    [0m[38;5;203mif[0m[38;5;231m [0m[38;5;81m[[0m[38;5;231m [0m[38;5;231m$[0m[38;5;231m(([0m[38;5;231melapsed [0m[38;5;203m%[0m[38;5;231m [0m[38;5;141m10[0m[38;5;231m))[0m[38;5;231m [0m[38;5;208m-[0m[38;5;208meq[0m[38;5;231m 0 [0m[38;5;81m][0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
-[38;5;231m        [0m[38;5;81mecho[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m  Still waiting... ([0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231melapsed[0m[38;5;186m}[0m[38;5;186ms)[0m[38;5;231m"[0m
-[38;5;231m    [0m[38;5;203mfi[0m
-[38;5;203mdone[0m
+# Phase 1: Wait for port to be open (faster check)
+echo "Phase 1: Waiting for port ${PORT} to be open..."
+while [ $elapsed -lt $TIMEOUT ]; do
+    if timeout 1 bash -c "echo > /dev/tcp/${HOST}/${PORT}" 2>/dev/null; then
+        echo "✓ Port ${PORT} is open (${elapsed}s)"
+        break
+    fi
+    sleep $INTERVAL
+    elapsed=$(($(date +%s) - start_time))
+    if [ $((elapsed % 10)) -eq 0 ]; then
+        echo "  Still waiting... (${elapsed}s)"
+    fi
+done
 
-[38;5;203mif[0m[38;5;231m [0m[38;5;81m[[0m[38;5;231m [0m[38;5;231m$[0m[38;5;231melapsed[0m[38;5;231m [0m[38;5;208m-[0m[38;5;208mge[0m[38;5;231m [0m[38;5;231m$[0m[38;5;231mTIMEOUT[0m[38;5;231m [0m[38;5;81m][0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
-[38;5;231m    [0m[38;5;81mecho[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m✗ Timeout: Port [0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mPORT[0m[38;5;186m}[0m[38;5;186m did not open within [0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mTIMEOUT[0m[38;5;186m}[0m[38;5;186ms[0m[38;5;231m"[0m
-[38;5;231m    [0m[38;5;81mexit[0m[38;5;231m 1[0m
-[38;5;203mfi[0m
+if [ $elapsed -ge $TIMEOUT ]; then
+    echo "✗ Timeout: Port ${PORT} did not open within ${TIMEOUT}s"
+    exit 1
+fi
 
-[38;5;243m#[0m[38;5;243m Phase 2: Wait for SSH to accept connections (with key auth)[0m
-[38;5;81mecho[0m[38;5;231m [0m[38;5;231m"[0m[38;5;231m"[0m
-[38;5;81mecho[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mPhase 2: Waiting for SSH to accept connections...[0m[38;5;231m"[0m
-[38;5;231mssh_ready[0m[38;5;203m=[0m[38;5;186mfalse[0m
-[38;5;203mwhile[0m[38;5;231m [0m[38;5;81m[[0m[38;5;231m [0m[38;5;231m$[0m[38;5;231melapsed[0m[38;5;231m [0m[38;5;208m-[0m[38;5;208mlt[0m[38;5;231m [0m[38;5;231m$[0m[38;5;231mTIMEOUT[0m[38;5;231m [0m[38;5;81m][0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mdo[0m
-[38;5;231m    [0m[38;5;203mif[0m[38;5;231m [0m[38;5;231mssh[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m ConnectTimeout=2[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m StrictHostKeyChecking=no[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m UserKnownHostsFile=/dev/null[0m[38;5;208m -[0m[38;5;208mo[0m[38;5;231m BatchMode=yes[0m[38;5;208m -[0m[38;5;208mp[0m[38;5;231m [0m[38;5;231m"[0m[38;5;231m$[0m[38;5;231mPORT[0m[38;5;231m"[0m[38;5;231m [0m[38;5;231m"[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mUSER[0m[38;5;186m}[0m[38;5;186m@[0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mHOST[0m[38;5;186m}[0m[38;5;231m"[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mecho 'SSH ready'[0m[38;5;231m"[0m[38;5;231m [0m[38;5;141m2[0m[38;5;203m>[0m[38;5;231m/dev/null[0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
-[38;5;231m        [0m[38;5;81mecho[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m✓ SSH is ready and accepting connections ([0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231melapsed[0m[38;5;186m}[0m[38;5;186ms)[0m[38;5;231m"[0m
-[38;5;231m        [0m[38;5;231mssh_ready[0m[38;5;203m=[0m[38;5;186mtrue[0m
-[38;5;231m        [0m[38;5;203mbreak[0m
-[38;5;231m    [0m[38;5;203mfi[0m
-[38;5;231m    [0m[38;5;231msleep[0m[38;5;231m [0m[38;5;231m$[0m[38;5;231mINTERVAL[0m
-[38;5;231m    [0m[38;5;231melapsed[0m[38;5;203m=[0m[38;5;231m$[0m[38;5;186m(([0m[38;5;231m$[0m[38;5;186m([0m[38;5;231mdate[0m[38;5;186m +[0m[38;5;231m%[0m[38;5;231ms[0m[38;5;186m)[0m[38;5;186m [0m[38;5;203m-[0m[38;5;186m start_time[0m[38;5;186m))[0m
-[38;5;231m    [0m[38;5;203mif[0m[38;5;231m [0m[38;5;81m[[0m[38;5;231m [0m[38;5;231m$[0m[38;5;231m(([0m[38;5;231melapsed [0m[38;5;203m%[0m[38;5;231m [0m[38;5;141m10[0m[38;5;231m))[0m[38;5;231m [0m[38;5;208m-[0m[38;5;208meq[0m[38;5;231m 0 [0m[38;5;81m][0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
-[38;5;231m        [0m[38;5;81mecho[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m  Still waiting for SSH... ([0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231melapsed[0m[38;5;186m}[0m[38;5;186ms)[0m[38;5;231m"[0m
-[38;5;231m    [0m[38;5;203mfi[0m
-[38;5;203mdone[0m
+# Phase 2: Wait for SSH to accept connections (with key auth)
+echo ""
+echo "Phase 2: Waiting for SSH to accept connections..."
+ssh_ready=false
+while [ $elapsed -lt $TIMEOUT ]; do
+    if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -p "$PORT" "${USER}@${HOST}" "echo 'SSH ready'" 2>/dev/null; then
+        echo "✓ SSH is ready and accepting connections (${elapsed}s)"
+        ssh_ready=true
+        break
+    fi
+    sleep $INTERVAL
+    elapsed=$(($(date +%s) - start_time))
+    if [ $((elapsed % 10)) -eq 0 ]; then
+        echo "  Still waiting for SSH... (${elapsed}s)"
+    fi
+done
 
-[38;5;203mif[0m[38;5;231m [0m[38;5;81m[[0m[38;5;231m [0m[38;5;231m"[0m[38;5;231m$[0m[38;5;231mssh_ready[0m[38;5;231m"[0m[38;5;231m [0m[38;5;203m!=[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186mtrue[0m[38;5;231m"[0m[38;5;231m [0m[38;5;81m][0m[38;5;203m;[0m[38;5;231m [0m[38;5;203mthen[0m
-[38;5;231m    [0m[38;5;81mecho[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m✗ Timeout: SSH did not become ready within [0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231mTIMEOUT[0m[38;5;186m}[0m[38;5;186ms[0m[38;5;231m"[0m
-[38;5;231m    [0m[38;5;81mexit[0m[38;5;231m 1[0m
-[38;5;203mfi[0m
+if [ "$ssh_ready" != "true" ]; then
+    echo "✗ Timeout: SSH did not become ready within ${TIMEOUT}s"
+    exit 1
+fi
 
-[38;5;81mecho[0m[38;5;231m [0m[38;5;231m"[0m[38;5;231m"[0m
-[38;5;81mecho[0m[38;5;231m [0m[38;5;231m"[0m[38;5;186m✓ SSH is fully ready! Total wait time: [0m[38;5;231m$[0m[38;5;186m{[0m[38;5;231melapsed[0m[38;5;186m}[0m[38;5;186ms[0m[38;5;231m"[0m
-[38;5;81mexit[0m[38;5;231m 0[0m
+echo ""
+echo "✓ SSH is fully ready! Total wait time: ${elapsed}s"
+exit 0
