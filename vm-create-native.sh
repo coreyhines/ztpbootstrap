@@ -442,14 +442,14 @@ write_files:
       __SSH_KEY_CONTENT__
     permissions: '0644'
     owner: root:root
-  - path: /home/__DISTRO_USER__/README_VM_SETUP.txt
+  - path: /home/__CURRENT_USER__/README_VM_SETUP.txt
     content: |
       ZTP Bootstrap VM Setup Complete!
 
-      The repository has been cloned to: /home/__DISTRO_USER__/ztpbootstrap
+      The repository has been cloned to: /home/__CURRENT_USER__/ztpbootstrap
 
       Next steps:
-      1. cd /home/__DISTRO_USER__/ztpbootstrap
+      1. cd /home/__CURRENT_USER__/ztpbootstrap
       2. Run interactive setup: ./setup-interactive.sh
          OR
          Run manual setup: ./setup.sh
@@ -457,6 +457,10 @@ write_files:
       The macvlan network 'ztpbootstrap-net' has been created (if ethernet interface was found).
 
       SSH access:
+        User: __CURRENT_USER__ (recommended, has SSH key)
+        Password: __CURRENT_USER__
+        From host: ssh __CURRENT_USER__@localhost -p 2222
+        OR
         User: __DISTRO_USER__
         Password: __DISTRO_USER__
         From host: ssh __DISTRO_USER__@localhost -p 2222
@@ -510,8 +514,16 @@ runcmd:
       echo "No SSH key found at /tmp/host_ssh_key.pub - password authentication will be required"
     fi
   - |
-    # Clone the repository (with retries and better error handling)
-    if [ ! -d /home/__DISTRO_USER__/ztpbootstrap ]; then
+    # Ensure home directory has correct ownership before cloning
+    # Cloud-init may create the home directory with root ownership
+    chown -R __DISTRO_USER__:__DISTRO_USER__ /home/__DISTRO_USER__ 2>/dev/null || true
+    # Ensure current user's home directory exists and has correct permissions
+    if [ ! -d /home/__CURRENT_USER__ ]; then
+      mkdir -p /home/__CURRENT_USER__
+      chown __CURRENT_USER__:__CURRENT_USER__ /home/__CURRENT_USER__
+    fi
+    # Clone the repository to current user's home (with retries and better error handling)
+    if [ ! -d /home/__CURRENT_USER__/ztpbootstrap ]; then
       # Install git if not present
       if ! command -v git &>/dev/null; then
         if command -v apt-get &>/dev/null; then
@@ -522,8 +534,8 @@ runcmd:
       fi
       # Try cloning with retries
       for i in 1 2 3; do
-        if sudo -u __DISTRO_USER__ git clone https://github.com/coreyhines/ztpbootstrap.git /home/__DISTRO_USER__/ztpbootstrap 2>&1; then
-          echo "Repository cloned successfully"
+        if sudo -u __CURRENT_USER__ git clone https://github.com/coreyhines/ztpbootstrap.git /home/__CURRENT_USER__/ztpbootstrap 2>&1; then
+          echo "Repository cloned successfully to /home/__CURRENT_USER__/ztpbootstrap"
           break
         elif [ $i -eq 3 ]; then
           echo "Repository clone failed after 3 attempts. Will create minimal config anyway."
@@ -551,12 +563,12 @@ runcmd:
       'NGINX_PORT=443' > /opt/containerdata/ztpbootstrap/ztpbootstrap.env
     chmod 644 /opt/containerdata/ztpbootstrap/ztpbootstrap.env
     # Also copy bootstrap.py and nginx.conf to expected location for setup.sh if repo was cloned
-    if [ -f /home/__DISTRO_USER__/ztpbootstrap/bootstrap.py ]; then
-      cp /home/__DISTRO_USER__/ztpbootstrap/bootstrap.py /opt/containerdata/ztpbootstrap/bootstrap.py
+    if [ -f /home/__CURRENT_USER__/ztpbootstrap/bootstrap.py ]; then
+      cp /home/__CURRENT_USER__/ztpbootstrap/bootstrap.py /opt/containerdata/ztpbootstrap/bootstrap.py
       chmod 644 /opt/containerdata/ztpbootstrap/bootstrap.py
     fi
-    if [ -f /home/__DISTRO_USER__/ztpbootstrap/nginx.conf ]; then
-      cp /home/__DISTRO_USER__/ztpbootstrap/nginx.conf /opt/containerdata/ztpbootstrap/nginx.conf
+    if [ -f /home/__CURRENT_USER__/ztpbootstrap/nginx.conf ]; then
+      cp /home/__CURRENT_USER__/ztpbootstrap/nginx.conf /opt/containerdata/ztpbootstrap/nginx.conf
       chmod 644 /opt/containerdata/ztpbootstrap/nginx.conf
     fi
     echo "Created minimal ztpbootstrap.env for automated testing"
@@ -588,10 +600,10 @@ runcmd:
     fi
   - |
     # Set ownership of cloned repo
-    chown -R __DISTRO_USER__:__DISTRO_USER__ /home/__DISTRO_USER__/ztpbootstrap 2>/dev/null || true
+    chown -R __CURRENT_USER__:__CURRENT_USER__ /home/__CURRENT_USER__/ztpbootstrap 2>/dev/null || true
   - |
     # Ensure README file has correct ownership (created by write_files)
-    chown __DISTRO_USER__:__DISTRO_USER__ /home/__DISTRO_USER__/README_VM_SETUP.txt 2>/dev/null || true
+    chown __CURRENT_USER__:__CURRENT_USER__ /home/__CURRENT_USER__/README_VM_SETUP.txt 2>/dev/null || true
   - echo "Cloud-init completed. Repository cloned and macvlan network configured."
   - cat /home/__DISTRO_USER__/README_VM_SETUP.txt
   - |
