@@ -787,13 +787,29 @@ read_nginx_conf() {
     fi
     
     # Extract server_name (domain)
+    # Try multiple patterns to handle different nginx.conf formats
+    local domain=""
     if [[ "$content" =~ server_name[[:space:]]+([^;]+) ]]; then
         local server_names="${BASH_REMATCH[1]}"
         # Get first server name (usually the domain)
-        local domain=$(echo "$server_names" | awk '{print $1}')
-        if [[ -n "$domain" ]]; then
-            values+=("DOMAIN=${domain}")
+        domain=$(echo "$server_names" | awk '{print $1}')
+        # Remove any trailing semicolons or whitespace
+        domain="${domain%;}"
+        domain="${domain// /}"
+    fi
+    
+    # If not found with first pattern, try a more flexible pattern
+    if [[ -z "$domain" ]]; then
+        # Look for server_name followed by domain (handles various whitespace)
+        if grep -q "server_name" <<< "$content"; then
+            domain=$(grep "server_name" <<< "$content" | head -1 | sed -n 's/.*server_name[[:space:]]*\([^;[:space:]]*\).*/\1/p' | awk '{print $1}')
+            domain="${domain%;}"
+            domain="${domain// /}"
         fi
+    fi
+    
+    if [[ -n "$domain" ]] && [[ "$domain" != "_" ]] && [[ "$domain" != "localhost" ]]; then
+        values+=("DOMAIN=${domain}")
     fi
     
     # Detect HTTP-only mode
@@ -909,9 +925,14 @@ load_existing_installation_values() {
             
             case "$key" in
                 Network) 
-                    EXISTING_NETWORK="$value"
-                    log "  Found Network: $value"
-                    parsed_count=$((parsed_count + 1)) || true
+                    # If Network is "null" or empty, treat it as not set (will be detected from IP)
+                    if [[ "$value" != "null" ]] && [[ -n "$value" ]]; then
+                        EXISTING_NETWORK="$value"
+                        log "  Found Network: $value"
+                        parsed_count=$((parsed_count + 1)) || true
+                    else
+                        log "  Found Network: null or empty (will try to detect from IP)"
+                    fi
                     ;;
                 IP) 
                     EXISTING_IPV4="$value"
