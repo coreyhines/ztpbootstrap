@@ -1090,6 +1090,130 @@ clean_installation_directories() {
 }
 
 # Start services after installation
+# Create pod and container systemd files from config.yaml
+# This replicates the setup_pod() function from setup.sh
+create_pod_files_from_config() {
+    log "Creating pod and container systemd files..."
+    
+    # Get the directory where this script is located (repository directory)
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    local systemd_dir="/etc/containers/systemd/ztpbootstrap"
+    
+    # Create systemd directory (with sudo if needed)
+    if [[ $EUID -eq 0 ]]; then
+        mkdir -p "$systemd_dir"
+    else
+        sudo mkdir -p "$systemd_dir"
+    fi
+    
+    # Copy pod file
+    if [[ -f "${repo_dir}/systemd/ztpbootstrap.pod" ]]; then
+        if [[ $EUID -eq 0 ]]; then
+            cp "${repo_dir}/systemd/ztpbootstrap.pod" "$systemd_dir/"
+        else
+            sudo cp "${repo_dir}/systemd/ztpbootstrap.pod" "$systemd_dir/"
+        fi
+        log "Pod configuration installed"
+        
+        # Update pod file with IP addresses from config.yaml
+        local pod_file="${systemd_dir}/ztpbootstrap.pod"
+        local config_file="${repo_dir}/config.yaml"
+        
+        if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+            local host_network
+            local ipv4
+            local ipv6
+            local network
+            host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
+            ipv4=$(yq eval '.network.ipv4' "$config_file" 2>/dev/null || echo "")
+            ipv6=$(yq eval '.network.ipv6' "$config_file" 2>/dev/null || echo "")
+            network=$(yq eval '.network.network' "$config_file" 2>/dev/null || echo "ztpbootstrap-net")
+            
+            log "Reading network config: host_network=$host_network, IPv4=$ipv4, IPv6=$ipv6, network=$network"
+            
+            # Use sudo for sed if not root
+            local sed_cmd="sed"
+            if [[ $EUID -ne 0 ]]; then
+                sed_cmd="sudo sed"
+            fi
+            
+            # Check if host network mode is enabled
+            if [[ "$host_network" == "true" ]]; then
+                $sed_cmd -i.tmp "s|^Network=.*|Network=host|" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
+                $sed_cmd -i.tmp "/^IP=/d" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
+                $sed_cmd -i.tmp "/^IP6=/d" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
+                log "Set Network=host in pod file"
+            else
+                # Set Network to specified network (or default ztpbootstrap-net)
+                $sed_cmd -i.tmp "s|^Network=.*|Network=$network|" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
+                log "Set Network=$network in pod file"
+                
+                # Update IPv4
+                if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]] && [[ "$ipv4" != "" ]]; then
+                    if grep -q "^IP=" "$pod_file" 2>/dev/null; then
+                        $sed_cmd -i.tmp "s|^IP=.*|IP=$ipv4|" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
+                        log "Updated pod IPv4 address to: $ipv4"
+                    else
+                        $sed_cmd -i.tmp "/^Network=/a IP=$ipv4" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
+                        log "Added IPv4 address: $ipv4"
+                    fi
+                else
+                    $sed_cmd -i.tmp "/^IP=/d" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
+                    log "Removed IPv4 address from pod file"
+                fi
+                
+                # Update IPv6
+                if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]] && [[ "$ipv6" != "" ]]; then
+                    if grep -q "^IP6=" "$pod_file" 2>/dev/null; then
+                        $sed_cmd -i.tmp "s|^IP6=.*|IP6=$ipv6|" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
+                        log "Updated pod IPv6 address to: $ipv6"
+                    else
+                        if grep -q "^IP=" "$pod_file" 2>/dev/null; then
+                            $sed_cmd -i.tmp "/^IP=/a IP6=$ipv6" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
+                        else
+                            $sed_cmd -i.tmp "/^Network=/a IP6=$ipv6" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
+                        fi
+                        log "Added IPv6 address: $ipv6"
+                    fi
+                else
+                    $sed_cmd -i.tmp "/^IP6=/d" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
+                    log "Removed IPv6 address from pod file"
+                fi
+            fi
+        fi
+    else
+        error "Pod configuration file not found: ${repo_dir}/systemd/ztpbootstrap.pod"
+        return 1
+    fi
+    
+    # Copy nginx container file
+    if [[ -f "${repo_dir}/systemd/ztpbootstrap-nginx.container" ]]; then
+        if [[ $EUID -eq 0 ]]; then
+            cp "${repo_dir}/systemd/ztpbootstrap-nginx.container" "$systemd_dir/"
+        else
+            sudo cp "${repo_dir}/systemd/ztpbootstrap-nginx.container" "$systemd_dir/"
+        fi
+        log "Nginx container configuration installed"
+    else
+        error "Nginx container configuration not found: ${repo_dir}/systemd/ztpbootstrap-nginx.container"
+        return 1
+    fi
+    
+    # Copy webui container file if it exists
+    if [[ -f "${repo_dir}/systemd/ztpbootstrap-webui.container" ]]; then
+        if [[ $EUID -eq 0 ]]; then
+            cp "${repo_dir}/systemd/ztpbootstrap-webui.container" "$systemd_dir/"
+        else
+            sudo cp "${repo_dir}/systemd/ztpbootstrap-webui.container" "$systemd_dir/"
+        fi
+        log "Web UI container configuration installed"
+    fi
+    
+    return 0
+}
+
 start_services_after_install() {
     log "Starting new services..."
     
@@ -1649,6 +1773,23 @@ EOF
         else
             warn "update-config.sh not found. Please run it manually:"
             warn "  bash update-config.sh $CONFIG_FILE"
+        fi
+        
+        # After updating config, we need to create the pod/container systemd files
+        # This is done by setup.sh's setup_pod() function, which copies files from systemd/ directory
+        # We'll call setup.sh which will handle this, but we need to make sure it doesn't fail
+        # on prerequisites that are already satisfied
+        if [[ -f "setup.sh" ]]; then
+            log "Creating pod and container systemd files..."
+            # We need to run setup.sh, but it does a lot of checks
+            # The simplest approach is to source it and call setup_pod directly
+            # But that's complex due to dependencies. Instead, let's just run setup.sh
+            # which should be mostly idempotent. However, setup.sh requires root and
+            # does full setup. Let's create a simpler function that just does the pod setup.
+            create_pod_files_from_config
+        else
+            warn "setup.sh not found. Pod files will not be created automatically."
+            warn "You will need to run: sudo ./setup.sh"
         fi
     else
         log "Configuration saved. To apply later, run:"
