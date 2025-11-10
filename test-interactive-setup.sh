@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DISTRO="${1:-fedora}"
 VERSION="${2:-43}"
 SKIP_VM_CREATE="${SKIP_VM_CREATE:-false}"
-BACKUP_HOST="${BACKUP_HOST:-fedora1}"
+BACKUP_HOST="${BACKUP_HOST:-fedora1.freeblizz.com}"
 BACKUP_USER="${BACKUP_USER:-corey}"
 
 # Check for --skip-vm flag

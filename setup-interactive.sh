@@ -984,10 +984,25 @@ load_existing_installation_values() {
     
     # If no domain found, try to detect system hostname/FQDN
     if [[ -z "$EXISTING_DOMAIN" ]]; then
-        # Try hostname -f first (FQDN)
+        # Try hostname -f first (FQDN), fallback to hostname if -f doesn't work
         if command -v hostname >/dev/null 2>&1; then
             local system_fqdn
+            # Try -f first (FQDN)
             system_fqdn=$(hostname -f 2>/dev/null || echo "")
+            # If that didn't work or returned just hostname, try to get FQDN another way
+            if [[ -z "$system_fqdn" ]] || [[ "$system_fqdn" == "$(hostname 2>/dev/null || echo "")" ]]; then
+                # Try using domainname or dnsdomainname
+                local hostname_short
+                hostname_short=$(hostname 2>/dev/null || echo "")
+                local domainname
+                domainname=$(domainname 2>/dev/null || dnsdomainname 2>/dev/null || echo "")
+                if [[ -n "$hostname_short" ]] && [[ -n "$domainname" ]] && [[ "$domainname" != "(none)" ]]; then
+                    system_fqdn="${hostname_short}.${domainname}"
+                elif [[ -n "$hostname_short" ]]; then
+                    # Fallback to just hostname if no domain available
+                    system_fqdn="$hostname_short"
+                fi
+            fi
             if [[ -n "$system_fqdn" ]] && [[ "$system_fqdn" != "localhost" ]] && [[ "$system_fqdn" != "localhost.localdomain" ]]; then
                 EXISTING_DOMAIN="$system_fqdn"
                 log "  Detected system FQDN: $system_fqdn"
@@ -1191,12 +1206,27 @@ interactive_config() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     
-    # Determine default domain (existing, system hostname, or example)
+    # Determine default domain (existing, system FQDN, or example)
     local default_domain="${EXISTING_DOMAIN:-}"
     if [[ -z "$default_domain" ]]; then
-        # Try system hostname as fallback
+        # Try system FQDN as fallback
         if command -v hostname >/dev/null 2>&1; then
-            default_domain=$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo "")
+            # Try -f first (FQDN)
+            default_domain=$(hostname -f 2>/dev/null || echo "")
+            # If that didn't work or returned just hostname, try to get FQDN another way
+            if [[ -z "$default_domain" ]] || [[ "$default_domain" == "$(hostname 2>/dev/null || echo "")" ]]; then
+                # Try using domainname or dnsdomainname
+                local hostname_short
+                hostname_short=$(hostname 2>/dev/null || echo "")
+                local domainname
+                domainname=$(domainname 2>/dev/null || dnsdomainname 2>/dev/null || echo "")
+                if [[ -n "$hostname_short" ]] && [[ -n "$domainname" ]] && [[ "$domainname" != "(none)" ]]; then
+                    default_domain="${hostname_short}.${domainname}"
+                elif [[ -n "$hostname_short" ]]; then
+                    # Fallback to just hostname if no domain available
+                    default_domain="$hostname_short"
+                fi
+            fi
             if [[ -z "$default_domain" ]] || [[ "$default_domain" == "localhost" ]] || [[ "$default_domain" == "localhost.localdomain" ]]; then
                 default_domain="ztpboot.example.com"
             fi
