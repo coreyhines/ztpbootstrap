@@ -827,14 +827,43 @@ read_nginx_conf() {
     
     # Extract server_name (domain)
     # Try multiple patterns to handle different nginx.conf formats
+    # Prefer domains that are not example.com or localhost
     local domain=""
-    if [[ "$content" =~ server_name[[:space:]]+([^;]+) ]]; then
-        local server_names="${BASH_REMATCH[1]}"
-        # Get first server name (usually the domain)
-        domain=$(echo "$server_names" | awk '{print $1}')
-        # Remove any trailing semicolons or whitespace
-        domain="${domain%;}"
-        domain="${domain// /}"
+    local all_domains=()
+    
+    # First, collect all server_name values
+    while IFS= read -r line; do
+        # Skip comments
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        # Skip lines that don't have server_name
+        [[ ! "$line" =~ server_name ]] && continue
+        
+        # Extract server_name value
+        if [[ "$line" =~ server_name[[:space:]]+([^;]+) ]]; then
+            local server_names="${BASH_REMATCH[1]}"
+            # Get first server name (usually the domain)
+            local candidate=$(echo "$server_names" | awk '{print $1}')
+            # Remove any trailing semicolons or whitespace
+            candidate="${candidate%;}"
+            candidate="${candidate// /}"
+            # Skip invalid domains
+            if [[ -n "$candidate" ]] && [[ "$candidate" != "_" ]] && [[ "$candidate" != "localhost" ]] && [[ ! "$candidate" =~ ^[0-9] ]]; then
+                all_domains+=("$candidate")
+            fi
+        fi
+    done <<< "$content"
+    
+    # Prefer domains that are not example.com
+    for candidate in "${all_domains[@]}"; do
+        if [[ "$candidate" != *"example.com"* ]] && [[ "$candidate" != "localhost" ]] && [[ "$candidate" != "_" ]]; then
+            domain="$candidate"
+            break
+        fi
+    done
+    
+    # If no non-example domain found, use first valid domain
+    if [[ -z "$domain" ]] && [[ ${#all_domains[@]} -gt 0 ]]; then
+        domain="${all_domains[0]}"
     fi
     
     # If not found with first pattern, try a more flexible pattern
