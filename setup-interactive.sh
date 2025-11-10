@@ -840,10 +840,38 @@ read_nginx_conf() {
     # If not found with first pattern, try a more flexible pattern
     if [[ -z "$domain" ]]; then
         # Look for server_name followed by domain (handles various whitespace)
+        # Try to find the first server_name that's not in a comment and has a valid domain
         if grep -q "server_name" <<< "$content"; then
-            domain=$(grep "server_name" <<< "$content" | head -1 | sed -n 's/.*server_name[[:space:]]*\([^;[:space:]]*\).*/\1/p' | awk '{print $1}')
-            domain="${domain%;}"
-            domain="${domain// /}"
+            # Get all server_name lines, skip comments, get first non-comment line
+            local server_name_line
+            server_name_line=$(grep "server_name" <<< "$content" | grep -v "^[[:space:]]*#" | head -1)
+            if [[ -n "$server_name_line" ]]; then
+                domain=$(echo "$server_name_line" | sed -n 's/.*server_name[[:space:]]*\([^;[:space:]]*\).*/\1/p' | awk '{print $1}')
+                domain="${domain%;}"
+                domain="${domain// /}"
+            fi
+        fi
+    fi
+    
+    # Additional check: if domain looks like an IP address or is invalid, try next server_name
+    if [[ -n "$domain" ]] && [[ "$domain" =~ ^[0-9] ]] || [[ "$domain" == "_" ]] || [[ "$domain" == "localhost" ]]; then
+        # Domain is an IP or invalid, try to find a better one
+        if grep -q "server_name" <<< "$content"; then
+            # Get all server_name lines, skip the first one we already tried
+            local server_name_lines
+            server_name_lines=$(grep "server_name" <<< "$content" | grep -v "^[[:space:]]*#" | tail -n +2)
+            while IFS= read -r line; do
+                [[ -z "$line" ]] && continue
+                local candidate
+                candidate=$(echo "$line" | sed -n 's/.*server_name[[:space:]]*\([^;[:space:]]*\).*/\1/p' | awk '{print $1}')
+                candidate="${candidate%;}"
+                candidate="${candidate// /}"
+                # If candidate is a valid domain (not IP, not _, not localhost), use it
+                if [[ -n "$candidate" ]] && [[ ! "$candidate" =~ ^[0-9] ]] && [[ "$candidate" != "_" ]] && [[ "$candidate" != "localhost" ]]; then
+                    domain="$candidate"
+                    break
+                fi
+            done <<< "$server_name_lines"
         fi
     fi
     
