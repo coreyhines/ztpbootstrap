@@ -705,25 +705,25 @@ start_service() {
         fi
         
         # Always ensure the service file includes the start-webui.sh command
-        # Quadlet doesn't support Command= in Container section, so we need to add it manually
+        # Quadlet regenerates the service file, so we use a systemd drop-in to override ExecStart
+        # This is more reliable than modifying the generated file
+        local override_dir="/etc/systemd/system/ztpbootstrap-webui.service.d"
         if [[ -f "/run/systemd/generator/ztpbootstrap-webui.service" ]]; then
-            # Update the ExecStart line to include the command if it's missing
-            if ! grep -q "/app/start-webui.sh" /run/systemd/generator/ztpbootstrap-webui.service 2>/dev/null; then
-                log "Adding /app/start-webui.sh command to webui service file..."
-                # Use python for reliable multi-line replacement
-                python3 -c "
-import re
-with open(\"/run/systemd/generator/ztpbootstrap-webui.service\", \"r\") as f:
-    content = f.read()
-# Replace docker.io/python:alpine at end of ExecStart line with docker.io/python:alpine /app/start-webui.sh
-content = re.sub(r\"(docker\.io/python:alpine)(\s*$)\", r\"\1 /app/start-webui.sh\2\", content, flags=re.MULTILINE)
-with open(\"/run/systemd/generator/ztpbootstrap-webui.service\", \"w\") as f:
-    f.write(content)
-" 2>/dev/null || {
-                    # Fallback to sed if python not available
-                    sed -i.tmp 's|docker\.io/python:alpine$|docker.io/python:alpine /app/start-webui.sh|g' /run/systemd/generator/ztpbootstrap-webui.service 2>/dev/null && rm -f /run/systemd/generator/ztpbootstrap-webui.service.tmp 2>/dev/null || true
-                }
-                log "Updated webui service file with start-webui.sh command"
+            mkdir -p "$override_dir"
+            # Extract the ExecStart line from the generated service file
+            local execstart_line
+            execstart_line=$(grep "^ExecStart=" /run/systemd/generator/ztpbootstrap-webui.service | head -1)
+            if [[ -n "$execstart_line" ]] && [[ "$execstart_line" != *"/app/start-webui.sh"* ]]; then
+                log "Creating systemd drop-in to add /app/start-webui.sh command to webui service..."
+                # Append /app/start-webui.sh to the ExecStart line
+                local updated_execstart
+                updated_execstart="${execstart_line} /app/start-webui.sh"
+                cat > "${override_dir}/override.conf" << EOF
+[Service]
+ExecStart=
+ExecStart=${updated_execstart#ExecStart=}
+EOF
+                log "Created systemd drop-in override for webui service"
             fi
         fi
         
