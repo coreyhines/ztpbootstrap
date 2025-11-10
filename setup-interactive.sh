@@ -2214,6 +2214,26 @@ EOF
         # Copy source files to target directory
         copy_source_files
         
+        # Copy config.yaml to installation directory (copy_source_files handles this, but ensure it's done)
+        if [[ -f "$CONFIG_FILE" ]] && [[ -n "${SCRIPT_DIR:-}" ]]; then
+            if [[ ("$SCRIPT_DIR" =~ ^/etc/ || "$SCRIPT_DIR" =~ ^/opt/) && $EUID -ne 0 ]]; then
+                if sudo cp "$CONFIG_FILE" "${SCRIPT_DIR}/config.yaml" 2>/dev/null; then
+                    sudo chown root:root "${SCRIPT_DIR}/config.yaml" 2>/dev/null || true
+                    sudo chmod 644 "${SCRIPT_DIR}/config.yaml" 2>/dev/null || true
+                    log "Copied config.yaml to installation directory: ${SCRIPT_DIR}/config.yaml"
+                fi
+            else
+                if cp "$CONFIG_FILE" "${SCRIPT_DIR}/config.yaml" 2>/dev/null; then
+                    chmod 644 "${SCRIPT_DIR}/config.yaml" 2>/dev/null || true
+                    log "Copied config.yaml to installation directory: ${SCRIPT_DIR}/config.yaml"
+                elif sudo cp "$CONFIG_FILE" "${SCRIPT_DIR}/config.yaml" 2>/dev/null; then
+                    sudo chown root:root "${SCRIPT_DIR}/config.yaml" 2>/dev/null || true
+                    sudo chmod 644 "${SCRIPT_DIR}/config.yaml" 2>/dev/null || true
+                    log "Copied config.yaml with sudo to installation directory: ${SCRIPT_DIR}/config.yaml"
+                fi
+            fi
+        fi
+        
         if [[ -f "update-config.sh" ]]; then
             log "Running update-config.sh to apply configuration..."
             QUIET=true bash update-config.sh "$CONFIG_FILE"
