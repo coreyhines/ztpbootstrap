@@ -1618,7 +1618,16 @@ main() {
     
     # Check for previous installation
     local default_script_dir="/opt/containerdata/ztpbootstrap"
+    local had_previous_install=false
+    
+    # Always try to load existing values first (before any cleanup)
+    # This allows us to use existing values even if detection fails
+    log "Attempting to load existing installation values..."
+    load_existing_installation_values "$default_script_dir"
+    echo ""
+    
     if detect_previous_install "$default_script_dir"; then
+        had_previous_install=true
         echo ""
         warn "⚠️  Previous installation detected!"
         warn "Found existing files in:"
@@ -1659,10 +1668,6 @@ main() {
             fi
             echo ""
         fi
-        
-        # Load existing values from installation
-        load_existing_installation_values "$default_script_dir"
-        echo ""
         
         # Create backup
         prompt_yes_no "Would you like to create a backup before proceeding?" "y" CREATE_BACKUP
