@@ -880,11 +880,9 @@ load_existing_installation_values() {
         log "Parsing container values..."
         # Use process substitution to ensure proper line-by-line reading
         local parsed_count=0
-        # Disable exit on error for the read loop (we handle errors explicitly)
+        # Disable exit on error for the entire read loop (read can fail on EOF)
         set +e
-        while IFS='=' read -r key value; do
-            # Re-enable exit on error for the rest of the script
-            set -e
+        while IFS='=' read -r key value || [[ -n "$key" ]]; do
             # Skip empty lines
             [[ -z "$key" ]] && continue
             # Trim whitespace from key
@@ -929,8 +927,6 @@ load_existing_installation_values() {
                     log "  Found DNS2: $value"
                 fi
             fi
-            # Disable exit on error for next read iteration
-            set +e
         done < <(printf '%s\n' "$container_values")
         # Re-enable exit on error
         set -e
