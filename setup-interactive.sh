@@ -959,13 +959,15 @@ read_nginx_conf() {
 # Read config.yaml file
 read_config_yaml() {
     local config_file="${1:-config.yaml}"
-    local repo_dir
-    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local full_path="${repo_dir}/${config_file}"
+    local base_dir="${2:-}"
     
-    # Also check in script_dir if provided
-    if [[ -n "${2:-}" ]] && [[ -f "${2}/${config_file}" ]]; then
-        full_path="${2}/${config_file}"
+    # If base_dir is provided, use it; otherwise use repo directory
+    if [[ -n "$base_dir" ]]; then
+        local full_path="${base_dir}/${config_file}"
+    else
+        local repo_dir
+        repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        local full_path="${repo_dir}/${config_file}"
     fi
     
     if [[ ! -f "$full_path" ]]; then
@@ -1101,13 +1103,26 @@ load_existing_installation_values() {
     
     log "Reading existing installation values..."
     
-    # First, try to read from config.yaml (highest priority)
+    # First, try to read from config.yaml in installation directory (highest priority)
+    # Only use repo's config.yaml as fallback if installation directory doesn't have one
     local repo_dir
     repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local config_file="${repo_dir}/config.yaml"
+    local install_config_file="${script_dir}/config.yaml"
+    local repo_config_file="${repo_dir}/config.yaml"
+    local config_file=""
     
-    if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
-        log "Reading from config.yaml (highest priority)..."
+    # Prefer config.yaml in installation directory over repo directory
+    if [[ -f "$install_config_file" ]] && command -v yq >/dev/null 2>&1; then
+        config_file="$install_config_file"
+        log "Reading from config.yaml in installation directory (highest priority)..."
+    elif [[ -f "$repo_config_file" ]] && command -v yq >/dev/null 2>&1; then
+        # Only use repo's config.yaml if installation directory doesn't have one
+        # This prevents using template values from the repo
+        config_file="$repo_config_file"
+        log "Reading from config.yaml in repo directory..."
+    fi
+    
+    if [[ -n "$config_file" ]] && [[ -f "$config_file" ]]; then
         while IFS='=' read -r key value; do
             case "$key" in
                 DOMAIN) EXISTING_DOMAIN="$value" ;;
@@ -1125,9 +1140,9 @@ load_existing_installation_values() {
                 DNS1) EXISTING_DNS1="$value" ;;
                 DNS2) EXISTING_DNS2="$value" ;;
             esac
-        done < <(read_config_yaml "config.yaml" "$repo_dir")
+        done < <(read_config_yaml "config.yaml" "$(dirname "$config_file")")
         log "  Loaded values from config.yaml"
-    elif [[ -f "$config_file" ]]; then
+    elif [[ -f "$install_config_file" ]] || [[ -f "$repo_config_file" ]]; then
         log "config.yaml found but yq is not installed, skipping config.yaml read"
     fi
     
