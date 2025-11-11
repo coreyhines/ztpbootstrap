@@ -439,6 +439,76 @@
         </div>
     </div>
 
+    <!-- Login Modal -->
+    <div x-show="showLoginModal" 
+         x-cloak
+         x-init="$watch('showLoginModal', value => { if(value) { $nextTick(() => $refs.passwordInput && $refs.passwordInput.focus()); } })"
+         class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
+         @click.self="showLoginModal = false; loginPassword = ''; loginError = ''">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
+             @click.stop>
+            <div class="mt-3">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-medium text-gray-900">Authentication Required</h3>
+                    <button @click="showLoginModal = false; loginPassword = ''; loginError = ''" 
+                            class="text-gray-400 hover:text-gray-600">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                
+                <p class="text-sm text-gray-600 mb-4">
+                    Please enter the admin password to perform this action.
+                </p>
+                
+                <form @submit.prevent="login()">
+                    <div class="mb-4">
+                        <label for="loginPassword" class="block text-sm font-medium text-gray-700 mb-2">
+                            Password
+                        </label>
+                        <input 
+                            type="password" 
+                            id="loginPassword"
+                            x-model="loginPassword"
+                            x-ref="passwordInput"
+                            @keyup.escape="showLoginModal = false; loginPassword = ''; loginError = ''"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="Enter admin password"
+                            :disabled="loginLoading"
+                            required
+                        />
+                    </div>
+                    
+                    <!-- Error message -->
+                    <div x-show="loginError" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                        <p class="text-sm text-red-800" x-text="loginError"></p>
+                    </div>
+                    
+                    <div class="flex items-center justify-end gap-3">
+                        <button 
+                            type="button"
+                            @click="showLoginModal = false; loginPassword = ''; loginError = ''"
+                            :disabled="loginLoading"
+                            class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50">
+                            Cancel
+                        </button>
+                        <button 
+                            type="submit"
+                            :disabled="loginLoading || !loginPassword"
+                            class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 flex items-center gap-2">
+                            <svg x-show="loginLoading" class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span x-text="loginLoading ? 'Logging in...' : 'Login'"></span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script>
         function dashboard() {
             return {
@@ -465,6 +535,14 @@
                 selectedBackup: null,
                 viewingScript: null,
                 theme: 'tomorrow',
+                // Authentication state
+                authenticated: false,
+                authExpiresAt: null,
+                showLoginModal: false,
+                loginPassword: '',
+                loginError: '',
+                loginLoading: false,
+                pendingAction: null,
                 
                 async init() {
                     // Load theme preference
@@ -473,6 +551,9 @@
                         this.theme = savedTheme;
                     }
                     this.applyTheme();
+                    
+                    // Check authentication status
+                    await this.checkAuthStatus();
                     
                     // Small delay to ensure Alpine.js is fully initialized
                     await new Promise(resolve => setTimeout(resolve, 100));
@@ -497,6 +578,85 @@
                             this.loadLogs();
                         }
                     }, 5000);
+                    
+                    // Check auth status every 5 minutes
+                    setInterval(() => {
+                        this.checkAuthStatus();
+                    }, 300000);
+                },
+                
+                // Authentication methods
+                async checkAuthStatus() {
+                    try {
+                        const response = await fetch('/api/auth/status');
+                        const data = await response.json();
+                        this.authenticated = data.authenticated || false;
+                        this.authExpiresAt = data.expires_at || null;
+                    } catch (error) {
+                        console.error('Failed to check auth status:', error);
+                        this.authenticated = false;
+                    }
+                },
+                
+                async login() {
+                    this.loginLoading = true;
+                    this.loginError = '';
+                    
+                    try {
+                        const response = await fetch('/api/auth/login', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ password: this.loginPassword })
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (response.ok && data.success) {
+                            this.authenticated = true;
+                            this.authExpiresAt = data.expires_at;
+                            this.showLoginModal = false;
+                            this.loginPassword = '';
+                            this.loginError = '';
+                            
+                            // Execute pending action if any
+                            if (this.pendingAction) {
+                                await this.pendingAction();
+                                this.pendingAction = null;
+                            }
+                        } else {
+                            this.loginError = data.error || 'Login failed';
+                            this.loginPassword = '';
+                        }
+                    } catch (error) {
+                        console.error('Login error:', error);
+                        this.loginError = 'Login failed. Please try again.';
+                        this.loginPassword = '';
+                    } finally {
+                        this.loginLoading = false;
+                    }
+                },
+                
+                async logout() {
+                    try {
+                        await fetch('/api/auth/logout', {
+                            method: 'POST'
+                        });
+                        this.authenticated = false;
+                        this.authExpiresAt = null;
+                    } catch (error) {
+                        console.error('Logout error:', error);
+                    }
+                },
+                
+                requireAuth(action) {
+                    if (this.authenticated) {
+                        return action();
+                    } else {
+                        this.pendingAction = action;
+                        this.showLoginModal = true;
+                    }
                 },
                 
                 async loadStatus() {
@@ -558,110 +718,142 @@
                     const file = event.target.files[0];
                     if (!file) return;
                     
-                    const formData = new FormData();
-                    formData.append('file', file);
-                    
-                    try {
-                        const response = await fetch('/api/bootstrap-script/upload', {
-                            method: 'POST',
-                            body: formData
-                        });
-                        const data = await response.json();
-                        if (data.success) {
-                            await this.loadScripts();
-                            await this.loadBackups();
-                        } else {
-                            alert('Upload failed: ' + (data.error || 'Unknown error'));
+                    await this.requireAuth(async () => {
+                        const formData = new FormData();
+                        formData.append('file', file);
+                        
+                        try {
+                            const response = await fetch('/api/bootstrap-script/upload', {
+                                method: 'POST',
+                                body: formData
+                            });
+                            const data = await response.json();
+                            if (response.status === 401) {
+                                this.authenticated = false;
+                                this.pendingAction = () => this.uploadScript(event);
+                                this.showLoginModal = true;
+                                return;
+                            }
+                            if (data.success) {
+                                await this.loadScripts();
+                                await this.loadBackups();
+                            } else {
+                                alert('Upload failed: ' + (data.error || 'Unknown error'));
+                            }
+                        } catch (error) {
+                            alert('Upload failed: ' + error.message);
                         }
-                    } catch (error) {
-                        alert('Upload failed: ' + error.message);
-                    }
+                    });
                     event.target.value = ''; // Reset file input
                 },
                 
                 async setActiveScript(filename) {
-                    try {
-                        const response = await fetch(`/api/bootstrap-script/${filename}/set-active`, {
-                            method: 'POST'
-                        });
-                        const data = await response.json();
-                        if (data.success) {
-                            // Refresh scripts list immediately to show updated active status
-                            await this.loadScripts();
-                            // Close modal if open
-                            this.showScriptModal = false;
-                            this.viewingScript = null;
-                        } else {
-                            alert('Failed to set active: ' + (data.error || 'Unknown error'));
+                    await this.requireAuth(async () => {
+                        try {
+                            const response = await fetch(`/api/bootstrap-script/${filename}/set-active`, {
+                                method: 'POST'
+                            });
+                            const data = await response.json();
+                            if (response.status === 401) {
+                                this.authenticated = false;
+                                this.pendingAction = () => this.setActiveScript(filename);
+                                this.showLoginModal = true;
+                                return;
+                            }
+                            if (data.success) {
+                                // Refresh scripts list immediately to show updated active status
+                                await this.loadScripts();
+                                // Close modal if open
+                                this.showScriptModal = false;
+                                this.viewingScript = null;
+                            } else {
+                                alert('Failed to set active: ' + (data.error || 'Unknown error'));
+                            }
+                        } catch (error) {
+                            alert('Failed to set active: ' + error.message);
                         }
-                    } catch (error) {
-                        alert('Failed to set active: ' + error.message);
-                    }
+                    });
                 },
                 
                 async renameScript(filename) {
-                    const newName = prompt(`Enter new name for ${filename}:`, filename);
-                    if (!newName || newName === filename) {
-                        return;
-                    }
-                    
-                    // Validate name
-                    if (!newName.endsWith('.py')) {
-                        alert('Script name must end with .py');
-                        return;
-                    }
-                    
-                    try {
-                        const response = await fetch(`/api/bootstrap-script/${filename}/rename`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                new_name: newName
-                            })
-                        });
-                        const data = await response.json();
-                        if (data.success) {
-                            // Refresh scripts list immediately
-                            await this.loadScripts();
-                            // Close modal if viewing the renamed script
-                            if (this.viewingScript && this.viewingScript.name === filename) {
-                                this.showScriptModal = false;
-                                this.viewingScript = null;
-                            }
-                        } else {
-                            alert('Failed to rename: ' + (data.error || 'Unknown error'));
+                    await this.requireAuth(async () => {
+                        const newName = prompt(`Enter new name for ${filename}:`, filename);
+                        if (!newName || newName === filename) {
+                            return;
                         }
-                    } catch (error) {
-                        alert('Failed to rename: ' + error.message);
-                    }
+                        
+                        // Validate name
+                        if (!newName.endsWith('.py')) {
+                            alert('Script name must end with .py');
+                            return;
+                        }
+                        
+                        try {
+                            const response = await fetch(`/api/bootstrap-script/${filename}/rename`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    new_name: newName
+                                })
+                            });
+                            const data = await response.json();
+                            if (response.status === 401) {
+                                this.authenticated = false;
+                                this.pendingAction = () => this.renameScript(filename);
+                                this.showLoginModal = true;
+                                return;
+                            }
+                            if (data.success) {
+                                // Refresh scripts list immediately
+                                await this.loadScripts();
+                                // Close modal if viewing the renamed script
+                                if (this.viewingScript && this.viewingScript.name === filename) {
+                                    this.showScriptModal = false;
+                                    this.viewingScript = null;
+                                }
+                            } else {
+                                alert('Failed to rename: ' + (data.error || 'Unknown error'));
+                            }
+                        } catch (error) {
+                            alert('Failed to rename: ' + error.message);
+                        }
+                    });
                 },
                 
                 async deleteScript(filename) {
-                    if (!confirm(`Are you sure you want to delete ${filename}? This action cannot be undone.`)) {
-                        return;
-                    }
-                    
-                    try {
-                        const response = await fetch(`/api/bootstrap-script/${filename}`, {
-                            method: 'DELETE'
-                        });
-                        const data = await response.json();
-                        if (data.success) {
-                            // Refresh scripts list immediately
-                            await this.loadScripts();
-                            // Close modal if viewing the deleted script
-                            if (this.viewingScript && this.viewingScript.name === filename) {
-                                this.showScriptModal = false;
-                                this.viewingScript = null;
-                            }
-                        } else {
-                            alert('Failed to delete: ' + (data.error || 'Unknown error'));
+                    await this.requireAuth(async () => {
+                        if (!confirm(`Are you sure you want to delete ${filename}? This action cannot be undone.`)) {
+                            return;
                         }
-                    } catch (error) {
-                        alert('Failed to delete: ' + error.message);
-                    }
+                        
+                        try {
+                            const response = await fetch(`/api/bootstrap-script/${filename}`, {
+                                method: 'DELETE'
+                            });
+                            const data = await response.json();
+                            if (response.status === 401) {
+                                this.authenticated = false;
+                                this.pendingAction = () => this.deleteScript(filename);
+                                this.showLoginModal = true;
+                                return;
+                            }
+                            if (data.success) {
+                                // Refresh scripts list immediately
+                                await this.loadScripts();
+                                // Close modal if viewing the deleted script
+                                if (this.viewingScript && this.viewingScript.name === filename) {
+                                    this.showScriptModal = false;
+                                    this.viewingScript = null;
+                                }
+                            } else {
+                                alert('Failed to delete: ' + (data.error || 'Unknown error'));
+                            }
+                        } catch (error) {
+                            alert('Failed to delete: ' + error.message);
+                        }
+                    });
                 },
                 
                 async toggleServeAsFilename(filename, serveAsFilename) {
@@ -688,38 +880,46 @@
                 },
                 
                 async restoreBackup(filename, restoreAs) {
-                    if (!filename) {
-                        alert('Please select a backup to restore');
-                        return;
-                    }
-                    
-                    const action = restoreAs === 'active' ? 'restore as active (bootstrap.py)' : 'restore as a new script';
-                    if (!confirm(`Are you sure you want to restore ${filename} and ${action}?`)) {
-                        return;
-                    }
-                    
-                    try {
-                        const response = await fetch(`/api/bootstrap-script/backup/${filename}/restore`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                restore_as: restoreAs
-                            })
-                        });
-                        const data = await response.json();
-                        if (data.success) {
-                            await this.loadScripts();
-                            await this.loadBackups();
-                            this.showRestoreDialog = false;
-                            this.selectedBackup = null;
-                        } else {
-                            alert('Failed to restore backup: ' + (data.error || 'Unknown error'));
+                    await this.requireAuth(async () => {
+                        if (!filename) {
+                            alert('Please select a backup to restore');
+                            return;
                         }
-                    } catch (error) {
-                        alert('Failed to restore backup: ' + error.message);
-                    }
+                        
+                        const action = restoreAs === 'active' ? 'restore as active (bootstrap.py)' : 'restore as a new script';
+                        if (!confirm(`Are you sure you want to restore ${filename} and ${action}?`)) {
+                            return;
+                        }
+                        
+                        try {
+                            const response = await fetch(`/api/bootstrap-script/backup/${filename}/restore`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    restore_as: restoreAs
+                                })
+                            });
+                            const data = await response.json();
+                            if (response.status === 401) {
+                                this.authenticated = false;
+                                this.pendingAction = () => this.restoreBackup(filename, restoreAs);
+                                this.showLoginModal = true;
+                                return;
+                            }
+                            if (data.success) {
+                                await this.loadScripts();
+                                await this.loadBackups();
+                                this.showRestoreDialog = false;
+                                this.selectedBackup = null;
+                            } else {
+                                alert('Failed to restore backup: ' + (data.error || 'Unknown error'));
+                            }
+                        } catch (error) {
+                            alert('Failed to restore backup: ' + error.message);
+                        }
+                    });
                 },
                 
                 async loadConfig() {
@@ -891,22 +1091,30 @@
                 },
                 
                 async markLogs() {
-                    try {
-                        // Mark the currently selected log source (or both if container logs)
-                        const source = this.logSource === 'container' ? 'both' : this.logSource;
-                        const response = await fetch(`/api/logs/mark?source=${source}`, {
-                            method: 'POST'
-                        });
-                        const data = await response.json();
-                        if (data.success) {
-                            // Reload logs to show the new MARK
-                            await this.loadLogs();
-                        } else {
-                            alert('Failed to mark logs: ' + (data.error || 'Unknown error'));
+                    await this.requireAuth(async () => {
+                        try {
+                            // Mark the currently selected log source (or both if container logs)
+                            const source = this.logSource === 'container' ? 'both' : this.logSource;
+                            const response = await fetch(`/api/logs/mark?source=${source}`, {
+                                method: 'POST'
+                            });
+                            const data = await response.json();
+                            if (response.status === 401) {
+                                this.authenticated = false;
+                                this.pendingAction = () => this.markLogs();
+                                this.showLoginModal = true;
+                                return;
+                            }
+                            if (data.success) {
+                                // Reload logs to show the new MARK
+                                await this.loadLogs();
+                            } else {
+                                alert('Failed to mark logs: ' + (data.error || 'Unknown error'));
+                            }
+                        } catch (error) {
+                            alert('Failed to mark logs: ' + error.message);
                         }
-                    } catch (error) {
-                        alert('Failed to mark logs: ' + error.message);
-                    }
+                    });
                 }
             }
         }
