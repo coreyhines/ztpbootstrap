@@ -6,8 +6,10 @@ A containerized service that provides a secure HTTPS endpoint for serving Arista
 
 ### Prerequisites
 
-- **Podman** installed (`podman --version`)
-- **Macvlan network** created (run `./check-macvlan.sh` to verify)
+- **Podman** 5.6+ installed (`podman --version`)
+- **Network configuration** - Choose one:
+  - **Macvlan network** (recommended for production) - Provides dedicated IP address, isolates containers from host network. Run `./check-macvlan.sh` to verify or create.
+  - **Host networking** (simpler, good for testing) - Containers share host's network stack, uses host IP addresses directly.
 - **Enrollment token** from CVaaS Device Registration page
 - **SSL certificates** ready (or use HTTP-only mode for testing)
 - **Root/sudo access** for setup
@@ -99,7 +101,7 @@ The service runs as a **Podman pod** with multiple containers:
 - **Infra Container**: Pod infrastructure
 - **Nginx Container**: Serves bootstrap script, handles HTTPS, proxies Web UI
 - **Web UI Container**: Flask-based management interface (optional)
-- **Macvlan Network**: Direct network access with dedicated IP
+- **Network**: Macvlan (dedicated IP) or host networking (shared host network)
 - **Systemd Integration**: Quadlet files for automatic service management
 
 ```
@@ -334,13 +336,15 @@ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for detailed troubleshooting guide.
 
 **Tested Platforms:**
 - **Architecture:** ARM64 (aarch64) - ✅ Fully tested
-- **OS:** Fedora 43 Cloud - ✅ Fully tested and recommended
-- **Podman:** 5.6.2 - ✅ Fully tested
+- **OS:** 
+  - Fedora 40+ (43+ recommended) - ✅ Fully tested
+  - Ubuntu 22.04+ (with Podman 5.6+) - ✅ Should work out-of-the-box
+- **Podman:** 5.6+ (5.6.2 tested) - ✅ Fully tested
 - **Systemd:** Full quadlet support - ✅ Fully tested
 
 **Notes:**
 - x86_64 not tested on ARM64 macOS (would require emulation). See [ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md) for details.
-- **Ubuntu has known SSH/cloud-init issues** and is not fully supported. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for details.
+- Ubuntu may have SSH/cloud-init issues in VM creation workflows. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for details.
 
 ---
 
