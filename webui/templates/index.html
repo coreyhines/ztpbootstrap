@@ -630,40 +630,35 @@
                             // Update authentication state first
                             this.authenticated = true;
                             this.authExpiresAt = data.expires_at;
-                            
-                            // Verify authentication status from server
-                            await this.checkAuthStatus();
+                            console.log('Login successful, authenticated:', this.authenticated);
                             
                             // Store pending action before clearing modal
                             const pendingAction = this.pendingAction;
                             this.pendingAction = null;
                             
-                            // Hide modal and clear form immediately
+                            // Hide modal and clear form immediately - do this FIRST
                             this.showLoginModal = false;
                             this.loginPassword = '';
                             this.loginError = '';
                             
-                            // Force Alpine.js to update
+                            // Force Alpine.js to process the modal hide
                             await this.$nextTick();
                             
-                            // Double-check modal is hidden
+                            // Verify modal is actually hidden
                             if (this.showLoginModal) {
-                                console.warn('Modal still showing, forcing hide');
+                                console.warn('Modal still showing after hide attempt, forcing again');
                                 this.showLoginModal = false;
                                 await this.$nextTick();
                             }
                             
+                            console.log('Modal should be hidden now, showLoginModal:', this.showLoginModal);
+                            
                             // Execute pending action if any (now that we're authenticated)
                             if (pendingAction) {
                                 try {
-                                    console.log('Executing pending action after login, authenticated:', this.authenticated);
-                                    // Ensure we're still authenticated before executing
-                                    if (this.authenticated) {
-                                        await pendingAction();
-                                        console.log('Pending action completed');
-                                    } else {
-                                        console.warn('Authentication lost, cannot execute pending action');
-                                    }
+                                    console.log('Executing pending action after login');
+                                    await pendingAction();
+                                    console.log('Pending action completed');
                                 } catch (error) {
                                     console.error('Error executing pending action:', error);
                                     alert('Action failed: ' + error.message);
