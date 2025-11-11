@@ -97,17 +97,17 @@ The service runs as a **Podman pod** with multiple containers:
 │  ┌───────────────────────────────────────────────────────┐ │
 │  │              Podman Pod                               │ │
 │  │                                                       │ │
-│  │  ┌──────────────────┐  ┌──────────────────────────┐ │ │
-│  │  │  Nginx Container │  │   Web UI Container       │ │ │
-│  │  │                  │  │   (Flask Application)    │ │ │
-│  │  │  • Serves Script │  │   • Management UI        │ │ │
-│  │  │  • HTTPS/TLS     │  │   • Status Monitoring    │ │ │
-│  │  │  • Proxies /ui/  │  │   • Device Tracking      │ │ │
-│  │  └────────┬─────────┘  └──────────────────────────┘ │ │
-│  │           │                                           │ │
-│  │           │ 3. HTTPS Request                          │ │
-│  │           │    (via Nginx)                            │ │
-│  └───────────┼───────────────────────────────────────────┘ │
+│  │  ┌──────────────────┐    ┌──────────────────────────┐ │ │
+│  │  │  Nginx Container │    │   Web UI Container       │ │ │
+│  │  │                  │    │   (Flask Application)    │ │ │
+│  │  │  • Serves Script │    │   • Management UI        │ │ │
+│  │  │  • HTTPS/TLS     │    │   • Status Monitoring    │ │ │
+│  │  │  • Proxies /ui/  │    │   • Device Tracking      │ │ │
+│  │  └────────┬─────────┘    └──────────────────────────┘ │ │
+│  │           │                                             │ │
+│  │           │ 3. HTTPS Request                            │ │
+│  │           │    (via Nginx)                              │ │
+│  └───────────┼─────────────────────────────────────────────┘ │
 └───────────────┼─────────────────────────────────────────────┘
                 │
                 │ 4. Script Download
