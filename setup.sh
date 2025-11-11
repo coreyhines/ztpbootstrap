@@ -761,12 +761,12 @@ EOFWEBUI
     fi
     
     log "Starting ztpbootstrap pod..."
-    if systemctl start ztpbootstrap-pod; then
+    if systemctl start ztpbootstrap; then
         log "Pod started successfully"
         # Wait a moment for pod to be ready
         sleep 2
     else
-        error "Failed to start pod. Check logs with: journalctl -u ztpbootstrap-pod -f"
+        error "Failed to start pod. Check logs with: journalctl -u ztpbootstrap -f"
         return 1
     fi
     
@@ -813,11 +813,11 @@ EOFWEBUI
 # Check service status
 check_service_status() {
     log "Checking pod status..."
-    systemctl status ztpbootstrap-pod --no-pager -l
+    systemctl status ztpbootstrap --no-pager -l
     
     log ""
     log "Container status:"
-    podman pod ps --filter name=ztpbootstrap-pod
+    podman pod ps --filter name=ztpbootstrap
     podman ps --filter pod=ztpbootstrap
 }
 
