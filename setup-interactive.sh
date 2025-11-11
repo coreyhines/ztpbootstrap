@@ -2571,41 +2571,63 @@ EOF
             # Manually run quadlet generator for pod and container files to ensure services are created
             # This is needed because systemd's automatic generator may not always process all files
             local systemd_dir="/etc/containers/systemd/ztpbootstrap"
+            local generator_dir="/run/systemd/generator"
+            
+            # Ensure generator directory exists
+            if [[ $EUID -eq 0 ]]; then
+                mkdir -p "$generator_dir" 2>/dev/null || true
+            else
+                sudo mkdir -p "$generator_dir" 2>/dev/null || true
+            fi
+            
             if command -v /usr/libexec/podman/quadlet >/dev/null 2>&1; then
                 # Generate pod service
                 local pod_file="${systemd_dir}/ztpbootstrap.pod"
+                local pod_service_generated=false
                 if [[ -f "$pod_file" ]]; then
                     log "Generating pod service file..."
+                    local pod_output
                     local pod_exit_code=0
                     if [[ $EUID -eq 0 ]]; then
-                        /usr/libexec/podman/quadlet "$pod_file" >/dev/null 2>&1 || pod_exit_code=$?
+                        pod_output=$(/usr/libexec/podman/quadlet "$pod_file" 2>&1) || pod_exit_code=$?
                     else
-                        sudo /usr/libexec/podman/quadlet "$pod_file" >/dev/null 2>&1 || pod_exit_code=$?
+                        pod_output=$(sudo /usr/libexec/podman/quadlet "$pod_file" 2>&1) || pod_exit_code=$?
                     fi
-                    if [[ $pod_exit_code -eq 0 ]]; then
+                    if [[ $pod_exit_code -eq 0 ]] && [[ -f "${generator_dir}/ztpbootstrap.service" ]]; then
                         log "Pod service file generated successfully"
+                        pod_service_generated=true
                     else
-                        warn "Failed to generate pod service file via quadlet"
+                        if [[ -n "$pod_output" ]]; then
+                            warn "Quadlet generator output for pod: ${pod_output:0:200}"
+                        fi
                     fi
                 fi
                 
                 # Generate nginx container service
                 local nginx_container_file="${systemd_dir}/ztpbootstrap-nginx.container"
+                local nginx_service_generated=false
                 if [[ -f "$nginx_container_file" ]]; then
                     log "Generating nginx container service file..."
+                    local nginx_output
                     local nginx_exit_code=0
                     if [[ $EUID -eq 0 ]]; then
-                        /usr/libexec/podman/quadlet "$nginx_container_file" >/dev/null 2>&1 || nginx_exit_code=$?
+                        nginx_output=$(/usr/libexec/podman/quadlet "$nginx_container_file" 2>&1) || nginx_exit_code=$?
                     else
-                        sudo /usr/libexec/podman/quadlet "$nginx_container_file" >/dev/null 2>&1 || nginx_exit_code=$?
+                        nginx_output=$(sudo /usr/libexec/podman/quadlet "$nginx_container_file" 2>&1) || nginx_exit_code=$?
                     fi
-                    if [[ $nginx_exit_code -eq 0 ]]; then
+                    if [[ $nginx_exit_code -eq 0 ]] && [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]]; then
                         log "Nginx container service file generated successfully"
+                        nginx_service_generated=true
                     else
-                        warn "Failed to generate nginx container service file via quadlet"
+                        if [[ -n "$nginx_output" ]]; then
+                            warn "Quadlet generator output for nginx: ${nginx_output:0:200}"
+                        fi
                     fi
                 fi
             fi
+            
+            # Note: We rely on systemd's automatic generator to create service files after daemon-reload
+            # If quadlet fails, systemd should still process the files automatically
             
             # Reload systemd to process the new quadlet files
             log "Reloading systemd to process new service files..."
