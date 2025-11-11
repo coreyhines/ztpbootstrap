@@ -1766,6 +1766,66 @@ start_services_after_install() {
     
     sleep 2
     
+    # Ensure webui drop-in is created after systemd reload (so generated service file exists)
+    # This is needed because the drop-in creation in create_pod_files_from_config might run
+    # before the generated service file exists
+    if [[ -f "/etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container" ]]; then
+        local override_dir="/etc/systemd/system/ztpbootstrap-webui.service.d"
+        if [[ -f "/run/systemd/generator/ztpbootstrap-webui.service" ]]; then
+            if [[ $EUID -eq 0 ]]; then
+                mkdir -p "$override_dir" 2>/dev/null || true
+            else
+                sudo mkdir -p "$override_dir" 2>/dev/null || true
+            fi
+            
+            # Check if drop-in already exists and has the correct command
+            local dropin_exists=false
+            if [[ -f "${override_dir}/override.conf" ]]; then
+                if grep -q "/app/start-webui.sh" "${override_dir}/override.conf" 2>/dev/null; then
+                    dropin_exists=true
+                fi
+            fi
+            
+            if [[ "$dropin_exists" == "false" ]]; then
+                # Extract the ExecStart line from the generated service file
+                local execstart_line
+                if [[ $EUID -eq 0 ]]; then
+                    execstart_line=$(grep "^ExecStart=" /run/systemd/generator/ztpbootstrap-webui.service | head -1)
+                else
+                    execstart_line=$(sudo grep "^ExecStart=" /run/systemd/generator/ztpbootstrap-webui.service | head -1)
+                fi
+                
+                if [[ -n "$execstart_line" ]]; then
+                    log "Creating systemd drop-in to add /app/start-webui.sh command to webui service..."
+                    # Append /app/start-webui.sh to the ExecStart line
+                    local updated_execstart
+                    updated_execstart="${execstart_line} /app/start-webui.sh"
+                    if [[ $EUID -eq 0 ]]; then
+                        cat > "${override_dir}/override.conf" << EOF
+[Service]
+ExecStart=
+ExecStart=${updated_execstart#ExecStart=}
+EOF
+                    else
+                        sudo tee "${override_dir}/override.conf" > /dev/null << EOF
+[Service]
+ExecStart=
+ExecStart=${updated_execstart#ExecStart=}
+EOF
+                    fi
+                    log "Created systemd drop-in override for webui service"
+                    # Reload systemd again to pick up the drop-in
+                    if [[ $EUID -eq 0 ]]; then
+                        systemctl daemon-reload
+                    else
+                        sudo systemctl daemon-reload
+                    fi
+                    sleep 1
+                fi
+            fi
+        fi
+    fi
+    
     # Start pod service
     if [[ $EUID -eq 0 ]]; then
         if systemctl start ztpbootstrap-pod.service 2>/dev/null; then
