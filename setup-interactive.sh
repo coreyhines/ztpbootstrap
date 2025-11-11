@@ -2220,14 +2220,15 @@ interactive_config() {
             # Password is valid
             password_valid=true
             
-            # Hash the password using Python (werkzeug is included in Flask)
+            # Hash the password using Python
             log "Hashing password..."
-            ADMIN_PASSWORD_HASH=$(python3 -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('$ADMIN_PASSWORD'))" 2>/dev/null)
+            # Try werkzeug first (if available in webui container), but fall back to hashlib
+            # Use || true to prevent script exit due to set -e
+            ADMIN_PASSWORD_HASH=$(python3 -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('$ADMIN_PASSWORD'))" 2>/dev/null || true)
             
             if [[ -z "$ADMIN_PASSWORD_HASH" ]]; then
-                warn "Failed to hash password. Trying alternative method..."
-                # Fallback: use Python's built-in hashlib if werkzeug is not available
-                ADMIN_PASSWORD_HASH=$(python3 -c "import hashlib, base64; print('pbkdf2:sha256:' + base64.b64encode(hashlib.pbkdf2_hmac('sha256', b'$ADMIN_PASSWORD', b'ztpbootstrap', 100000)).decode())" 2>/dev/null)
+                # Fallback: use Python's built-in hashlib (should always be available)
+                ADMIN_PASSWORD_HASH=$(python3 -c "import hashlib, base64; print('pbkdf2:sha256:' + base64.b64encode(hashlib.pbkdf2_hmac('sha256', b'$ADMIN_PASSWORD', b'ztpbootstrap', 100000)).decode())" 2>/dev/null || true)
             fi
             
             if [[ -n "$ADMIN_PASSWORD_HASH" ]]; then
@@ -2256,10 +2257,12 @@ interactive_config() {
     
     # Generate session secret
     if command -v python3 >/dev/null 2>&1; then
-        SESSION_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null)
-    else
-        # Fallback to openssl if python3 is not available
-        SESSION_SECRET=$(openssl rand -hex 32 2>/dev/null || echo "")
+        SESSION_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || true)
+    fi
+    
+    # Fallback to openssl if python3 method failed or is not available
+    if [[ -z "$SESSION_SECRET" ]] && command -v openssl >/dev/null 2>&1; then
+        SESSION_SECRET=$(openssl rand -hex 32 2>/dev/null || true)
     fi
     
     if [[ -z "$SESSION_SECRET" ]]; then
