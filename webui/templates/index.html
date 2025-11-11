@@ -660,6 +660,8 @@
                     } else {
                         this.pendingAction = action;
                         this.showLoginModal = true;
+                        // Force Alpine.js reactivity update
+                        await this.$nextTick();
                         return; // Return early to prevent action from executing
                     }
                 },
@@ -1111,7 +1113,7 @@
                 },
                 
                 async markLogs() {
-                    await this.requireAuth(async () => {
+                    const result = await this.requireAuth(async () => {
                         try {
                             // Mark the currently selected log source (or both if container logs)
                             const source = this.logSource === 'container' ? 'both' : this.logSource;
@@ -1119,23 +1121,36 @@
                                 method: 'POST',
                                 credentials: 'same-origin'
                             });
-                            const data = await response.json();
+                            
                             if (response.status === 401) {
                                 this.authenticated = false;
                                 this.pendingAction = () => this.markLogs();
                                 this.showLoginModal = true;
-                                return;
+                                await this.$nextTick();
+                                return false;
                             }
+                            
+                            const data = await response.json();
                             if (data.success) {
                                 // Reload logs to show the new MARK
                                 await this.loadLogs();
+                                return true;
                             } else {
                                 alert('Failed to mark logs: ' + (data.error || 'Unknown error'));
+                                return false;
                             }
                         } catch (error) {
                             alert('Failed to mark logs: ' + error.message);
+                            return false;
                         }
                     });
+                    
+                    // If requireAuth returned early (user not authenticated), result will be undefined
+                    // The modal should already be shown by requireAuth
+                    if (result === undefined) {
+                        // Modal should be showing, but ensure it's visible
+                        await this.$nextTick();
+                    }
                 }
             }
         }
