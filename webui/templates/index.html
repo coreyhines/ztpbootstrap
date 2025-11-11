@@ -588,7 +588,9 @@
                 // Authentication methods
                 async checkAuthStatus() {
                     try {
-                        const response = await fetch('/api/auth/status');
+                        const response = await fetch('/api/auth/status', {
+                            credentials: 'same-origin'
+                        });
                         const data = await response.json();
                         this.authenticated = data.authenticated || false;
                         this.authExpiresAt = data.expires_at || null;
@@ -608,7 +610,8 @@
                             headers: {
                                 'Content-Type': 'application/json'
                             },
-                            body: JSON.stringify({ password: this.loginPassword })
+                            body: JSON.stringify({ password: this.loginPassword }),
+                            credentials: 'same-origin'
                         });
                         
                         const data = await response.json();
@@ -641,7 +644,8 @@
                 async logout() {
                     try {
                         await fetch('/api/auth/logout', {
-                            method: 'POST'
+                            method: 'POST',
+                            credentials: 'same-origin'
                         });
                         this.authenticated = false;
                         this.authExpiresAt = null;
@@ -725,7 +729,8 @@
                         try {
                             const response = await fetch('/api/bootstrap-script/upload', {
                                 method: 'POST',
-                                body: formData
+                                body: formData,
+                                credentials: 'same-origin'
                             });
                             const data = await response.json();
                             if (response.status === 401) {
@@ -751,7 +756,8 @@
                     await this.requireAuth(async () => {
                         try {
                             const response = await fetch(`/api/bootstrap-script/${filename}/set-active`, {
-                                method: 'POST'
+                                method: 'POST',
+                                credentials: 'same-origin'
                             });
                             const data = await response.json();
                             if (response.status === 401) {
@@ -796,7 +802,8 @@
                                 },
                                 body: JSON.stringify({
                                     new_name: newName
-                                })
+                                }),
+                                credentials: 'same-origin'
                             });
                             const data = await response.json();
                             if (response.status === 401) {
@@ -830,7 +837,8 @@
                         
                         try {
                             const response = await fetch(`/api/bootstrap-script/${filename}`, {
-                                method: 'DELETE'
+                                method: 'DELETE',
+                                credentials: 'same-origin'
                             });
                             const data = await response.json();
                             if (response.status === 401) {
@@ -899,7 +907,8 @@
                                 },
                                 body: JSON.stringify({
                                     restore_as: restoreAs
-                                })
+                                }),
+                                credentials: 'same-origin'
                             });
                             const data = await response.json();
                             if (response.status === 401) {
@@ -1096,7 +1105,8 @@
                             // Mark the currently selected log source (or both if container logs)
                             const source = this.logSource === 'container' ? 'both' : this.logSource;
                             const response = await fetch(`/api/logs/mark?source=${source}`, {
-                                method: 'POST'
+                                method: 'POST',
+                                credentials: 'same-origin'
                             });
                             const data = await response.json();
                             if (response.status === 401) {
