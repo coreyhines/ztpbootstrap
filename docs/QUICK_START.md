@@ -138,4 +138,4 @@ subnet 10.0.0.0 netmask 255.255.255.0 {
 
 - **Troubleshooting**: See [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 - **Testing**: See [TESTING.md](TESTING.md)
-- **Full Documentation**: See [README.md](README.md)
+- **Full Documentation**: See [../README.md](../README.md)

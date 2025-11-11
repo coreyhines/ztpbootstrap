@@ -577,4 +577,4 @@ After completing development and testing:
 - [Testing Guide](TESTING.md) - General testing documentation
 - [Known Issues](KNOWN_ISSUES.md) - Known issues and workarounds
 - [Troubleshooting](TROUBLESHOOTING.md) - Common troubleshooting steps
-- [README](README.md) - Main project documentation
+- [README](../README.md) - Main project documentation

@@ -2,19 +2,19 @@
 
 A containerized service that provides a secure HTTPS endpoint for serving Arista Zero Touch Provisioning (ZTP) bootstrap scripts to network devices.
 
-![ZTP Bootstrap Service Dashboard](docs/dashboard-screenshot.png)
+![ZTP Bootstrap Service Dashboard](docs/images/dashboard-screenshot.png)
 
 ## Documentation
 
 **Getting Started:**
-- **[QUICK_START.md](QUICK_START.md)** - Complete step-by-step installation guide (start here!)
-- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and solutions
-- **[TESTING.md](TESTING.md)** - Testing procedures and validation scripts
+- **[docs/QUICK_START.md](docs/QUICK_START.md)** - Complete step-by-step installation guide (start here!)
+- **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Common issues and solutions
+- **[docs/TESTING.md](docs/TESTING.md)** - Testing procedures and validation scripts
 
 **For Developers:**
-- **[DEVELOPMENT.md](DEVELOPMENT.md)** - Development workflow, VM testing, and upgrade scenarios
-- **[ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md)** - Detailed architecture and design decisions
-- **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)** - Known issues and implementation notes
+- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - Development workflow, VM testing, and upgrade scenarios
+- **[docs/ARCHITECTURE_COMPARISON.md](docs/ARCHITECTURE_COMPARISON.md)** - Detailed architecture and design decisions
+- **[docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md)** - Known issues and implementation notes
 
 ## Quick Start
 
@@ -32,7 +32,7 @@ cd ztpbootstrap
 sudo ./setup.sh
 ```
 
-**📖 For detailed installation instructions, see [QUICK_START.md](QUICK_START.md)**
+**📖 For detailed installation instructions, see [docs/QUICK_START.md](docs/QUICK_START.md)**
 
 ---
 
@@ -72,7 +72,7 @@ The service runs as a **Podman pod** with multiple containers:
 - **Network**: Macvlan (dedicated IP) or host networking (shared host network)
 - **Systemd Integration**: Quadlet files for automatic service management
 
-**📖 For detailed architecture information, see [ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md)**
+**📖 For detailed architecture information, see [docs/ARCHITECTURE_COMPARISON.md](docs/ARCHITECTURE_COMPARISON.md)**
 
 ```
 ┌─────────────────┐
@@ -274,7 +274,7 @@ sudo podman logs ztpbootstrap-nginx
 curl -k https://ztpboot.example.com/health
 ```
 
-**📖 For detailed troubleshooting guide, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)**
+**📖 For detailed troubleshooting guide, see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)**
 
 ---
 
@@ -289,8 +289,8 @@ curl -k https://ztpboot.example.com/health
 - **Systemd:** Full quadlet support - ✅ Fully tested
 
 **Notes:**
-- x86_64 not tested on ARM64 macOS (would require emulation). See [ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md) for details.
-- Ubuntu may have SSH/cloud-init issues in VM creation workflows. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for details.
+- x86_64 not tested on ARM64 macOS (would require emulation). See [docs/ARCHITECTURE_COMPARISON.md](docs/ARCHITECTURE_COMPARISON.md) for details.
+- Ubuntu may have SSH/cloud-init issues in VM creation workflows. See [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) for details.
 
 **Network Configuration:**
 - **Macvlan network** (recommended for production) - Provides dedicated IP address, isolates containers from host network. Run `./check-macvlan.sh` to verify or create.
@@ -301,7 +301,7 @@ curl -k https://ztpboot.example.com/health
 ## Support
 
 **Need help?**
-- **This Service**: See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) or [GitHub Issues](https://github.com/coreyhines/ztpbootstrap/issues)
+- **This Service**: See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) or [GitHub Issues](https://github.com/coreyhines/ztpbootstrap/issues)
 - **Arista ZTP**: Check [Arista Documentation](https://www.arista.com/en/support/documentation)
 - **CVaaS**: Contact Arista Support or check [CVaaS Documentation](https://www.arista.com/en/products/eos/eos-cloudvision)
 
