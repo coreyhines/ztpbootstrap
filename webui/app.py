@@ -19,6 +19,8 @@ from flask import Flask, render_template, request, jsonify, send_from_directory,
 from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
+# Enable template auto-reload in production for development/testing
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 # Configuration paths
 CONFIG_DIR = Path(os.environ.get('ZTP_CONFIG_DIR', '/opt/containerdata/ztpbootstrap'))

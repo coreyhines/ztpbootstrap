@@ -659,9 +659,12 @@
                         return await action();
                     } else {
                         this.pendingAction = action;
-                        this.showLoginModal = true;
-                        // Force Alpine.js reactivity update
+                        // Force Alpine.js reactivity by updating the property
+                        this.showLoginModal = false;
                         await this.$nextTick();
+                        this.showLoginModal = true;
+                        await this.$nextTick();
+                        console.log('Login modal should be visible:', this.showLoginModal);
                         return; // Return early to prevent action from executing
                     }
                 },
@@ -1113,16 +1116,19 @@
                 },
                 
                 async markLogs() {
+                    console.log('markLogs called, authenticated:', this.authenticated);
                     const result = await this.requireAuth(async () => {
                         try {
                             // Mark the currently selected log source (or both if container logs)
                             const source = this.logSource === 'container' ? 'both' : this.logSource;
+                            console.log('Marking logs for source:', source);
                             const response = await fetch(`/api/logs/mark?source=${source}`, {
                                 method: 'POST',
                                 credentials: 'same-origin'
                             });
                             
                             if (response.status === 401) {
+                                console.log('Received 401, showing login modal');
                                 this.authenticated = false;
                                 this.pendingAction = () => this.markLogs();
                                 this.showLoginModal = true;
@@ -1132,6 +1138,7 @@
                             
                             const data = await response.json();
                             if (data.success) {
+                                console.log('Mark successful, reloading logs');
                                 // Reload logs to show the new MARK
                                 await this.loadLogs();
                                 return true;
@@ -1140,6 +1147,7 @@
                                 return false;
                             }
                         } catch (error) {
+                            console.error('Error marking logs:', error);
                             alert('Failed to mark logs: ' + error.message);
                             return false;
                         }
@@ -1148,6 +1156,7 @@
                     // If requireAuth returned early (user not authenticated), result will be undefined
                     // The modal should already be shown by requireAuth
                     if (result === undefined) {
+                        console.log('requireAuth returned early, modal should be showing');
                         // Modal should be showing, but ensure it's visible
                         await this.$nextTick();
                     }
