@@ -2564,7 +2564,10 @@ check_prerequisites() {
     local missing_deps=()
     
     # Check for yq (required for YAML parsing)
-    if ! command -v yq >/dev/null 2>&1; then
+    local yq_path
+    yq_path=$(command -v yq 2>/dev/null || echo "")
+    
+    if [[ -z "$yq_path" ]]; then
         missing_deps+=("yq")
         error "yq is required but not installed."
         echo ""
@@ -2575,6 +2578,23 @@ check_prerequisites() {
         echo "  Or visit: https://github.com/mikefarah/yq"
         echo ""
         return 1
+    else
+        # Verify yq actually works (not a broken Python wrapper)
+        if ! yq --version >/dev/null 2>&1; then
+            warn "yq found at $yq_path but it appears to be broken (Python version?)"
+            warn "Trying to use system yq at /usr/bin/yq..."
+            if [[ -x "/usr/bin/yq" ]] && /usr/bin/yq --version >/dev/null 2>&1; then
+                warn "Using /usr/bin/yq instead. Consider removing broken yq from PATH."
+                # Prepend /usr/bin to PATH for this session
+                export PATH="/usr/bin:$PATH"
+            else
+                error "yq is required but not working. Please install it with:"
+                error "  sudo dnf install yq  # Fedora/RHEL"
+                error "  sudo apt-get install yq  # Debian/Ubuntu"
+                missing_deps+=("yq")
+                return 1
+            fi
+        fi
     fi
     
     # Check if config template exists
