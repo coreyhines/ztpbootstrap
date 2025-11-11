@@ -441,7 +441,7 @@
 
     <!-- Login Modal -->
     <div x-show="showLoginModal" 
-         x-cloak
+         x-transition
          x-init="$watch('showLoginModal', value => { if(value) { $nextTick(() => $refs.passwordInput && $refs.passwordInput.focus()); } })"
          class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
          @click.self="showLoginModal = false; loginPassword = ''; loginError = ''">
