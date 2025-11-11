@@ -2,7 +2,7 @@
 
 A containerized service that provides a secure HTTPS endpoint for serving Arista Zero Touch Provisioning (ZTP) bootstrap scripts to network devices.
 
-<img src="docs/images/dashboard-screenshot.png" alt="ZTP Bootstrap Service Dashboard" style="box-shadow: 0 4px 8px rgba(0,0,0,0.2); border: 1px solid #ccc; border-radius: 4px;">
+<img src="docs/images/dashboard-screenshot.png" alt="ZTP Bootstrap Service Dashboard" style="border: 1px solid #ccc; border-radius: 4px;">
 
 ## Documentation
 
