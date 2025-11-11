@@ -2,6 +2,8 @@
 
 A containerized service that provides a secure HTTPS endpoint for serving Arista Zero Touch Provisioning (ZTP) bootstrap scripts to network devices.
 
+![ZTP Bootstrap Service Dashboard](docs/dashboard-screenshot.png)
+
 ## Documentation
 
 **Getting Started:**
@@ -54,16 +56,7 @@ When an Arista switch boots, it requests network configuration from a DHCP serve
 
 ### Web UI Dashboard
 
-The service includes a web-based management interface for monitoring and configuration:
-
-![ZTP Bootstrap Service Dashboard](docs/dashboard-screenshot.png)
-
-**Features:**
-- Service status and health monitoring
-- Device connection tracking
-- Bootstrap script management
-- Configuration viewing
-- Service logs
+The service includes a web-based management interface for monitoring and configuration with features for service status, device connection tracking, bootstrap script management, configuration viewing, and service logs.
 
 Access the Web UI at: `https://ztpboot.example.com/ui/`
 
