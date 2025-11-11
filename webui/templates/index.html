@@ -441,8 +441,19 @@
 
     <!-- Login Modal -->
     <div x-show="showLoginModal" 
-         x-transition
-         x-init="$watch('showLoginModal', value => { if(value) { $nextTick(() => $refs.passwordInput && $refs.passwordInput.focus()); } })"
+         x-transition:enter="transition ease-out duration-300"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-200"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         x-init="$watch('showLoginModal', value => { 
+             if(value) { 
+                 $nextTick(() => $refs.passwordInput && $refs.passwordInput.focus()); 
+             }
+         })"
+         style="display: none;"
+         x-bind:style="showLoginModal ? '' : 'display: none !important;'"
          class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
          @click.self="showLoginModal = false; loginPassword = ''; loginError = ''">
         <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
@@ -621,22 +632,33 @@
                             this.authenticated = true;
                             this.authExpiresAt = data.expires_at;
                             
-                            // Wait for Alpine.js to process the state change
-                            await this.$nextTick();
+                            // Store pending action before clearing modal
+                            const pendingAction = this.pendingAction;
+                            this.pendingAction = null;
                             
-                            // Hide modal and clear form
+                            // Hide modal and clear form immediately
                             this.showLoginModal = false;
                             this.loginPassword = '';
                             this.loginError = '';
                             
-                            // Wait again to ensure modal is hidden
+                            // Force Alpine.js to update
                             await this.$nextTick();
                             
+                            // Double-check modal is hidden
+                            if (this.showLoginModal) {
+                                console.warn('Modal still showing, forcing hide');
+                                this.showLoginModal = false;
+                                await this.$nextTick();
+                            }
+                            
                             // Execute pending action if any (now that we're authenticated)
-                            if (this.pendingAction) {
-                                const action = this.pendingAction;
-                                this.pendingAction = null;
-                                await action();
+                            if (pendingAction) {
+                                try {
+                                    await pendingAction();
+                                } catch (error) {
+                                    console.error('Error executing pending action:', error);
+                                    // Don't re-show modal if action fails
+                                }
                             }
                         } else {
                             this.loginError = data.error || 'Login failed';
