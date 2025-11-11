@@ -61,15 +61,16 @@ log_step() {
     echo -e "${BLUE}=== $1 ===${NC}"
 }
 
-# Cleanup function
-cleanup() {
+# Cleanup function (only runs on error, not on normal exit)
+cleanup_on_error() {
     echo ""
-    log_warn "Cleaning up..."
+    log_warn "Error occurred - cleaning up VM..."
     pkill -f qemu-system-aarch64 2>/dev/null || true
     sleep 2
 }
 
-trap cleanup EXIT
+# Only trap errors, not normal exit
+trap cleanup_on_error ERR
 
 echo "=========================================="
 echo "Interactive Setup Test"
@@ -398,4 +399,7 @@ echo "     - Install/upgrade the service"
 echo "     - Start services"
 echo ""
 echo "VM is ready for interactive testing!"
+echo ""
+echo "Note: The VM will continue running after this script exits."
+echo "To stop the VM manually, run: pkill -f qemu-system-aarch64"
 echo ""
