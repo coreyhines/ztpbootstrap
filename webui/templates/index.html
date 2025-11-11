@@ -522,16 +522,30 @@
                 async loadScripts() {
                     try {
                         const response = await fetch('/api/bootstrap-scripts');
+                        if (!response.ok) {
+                            console.error('Scripts API returned:', response.status, response.statusText);
+                            this.scripts = [];
+                            return;
+                        }
                         const data = await response.json();
+                        console.log('Scripts API response:', data);
+                        // Update scripts array for Alpine.js reactivity
                         this.scripts = data.scripts || [];
+                        console.log('Scripts array after update:', this.scripts);
                     } catch (error) {
                         console.error('Failed to load scripts:', error);
+                        this.scripts = [];
                     }
                 },
                 
                 async loadBackups() {
                     try {
                         const response = await fetch('/api/bootstrap-scripts/backups');
+                        if (!response.ok) {
+                            console.error('Backups API returned:', response.status, response.statusText);
+                            this.backups = [];
+                            return;
+                        }
                         const data = await response.json();
                         this.backups = data.backups || [];
                     } catch (error) {
@@ -711,7 +725,15 @@
                 async loadConfig() {
                     try {
                         const response = await fetch('/api/config');
-                        this.config = await response.json();
+                        if (!response.ok) {
+                            console.error('Config API returned:', response.status, response.statusText);
+                            this.config = {};
+                            return;
+                        }
+                        const data = await response.json();
+                        console.log('Config API response:', data);
+                        // Update config object for Alpine.js reactivity
+                        this.config = data;
                         // Highlight syntax after config loads
                         this.$nextTick(() => {
                             if (window.Prism && this.$refs.yamlCode) {
@@ -807,8 +829,16 @@
                 async loadDeviceConnections() {
                     try {
                         const response = await fetch('/api/device-connections');
+                        if (!response.ok) {
+                            console.error('Device connections API returned:', response.status, response.statusText);
+                            this.devices = [];
+                            return;
+                        }
                         const data = await response.json();
+                        console.log('Device connections API response:', data);
+                        // Update devices array for Alpine.js reactivity
                         this.devices = data.devices || [];
+                        console.log('Devices array after update:', this.devices);
                     } catch (error) {
                         console.error('Failed to load device connections:', error);
                         this.devices = [];
