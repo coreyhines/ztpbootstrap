@@ -1168,10 +1168,7 @@
                 async markLogs() {
                     console.log('markLogs called, authenticated:', this.authenticated);
                     
-                    // Verify authentication status from server
-                    await this.checkAuthStatus();
-                    
-                    // Check authentication first
+                    // Check authentication first (don't verify from server here as it might reset state)
                     if (!this.authenticated) {
                         console.log('Not authenticated, showing login modal');
                         this.pendingAction = () => this.markLogs();
@@ -1194,6 +1191,7 @@
                         
                         if (response.status === 401) {
                             console.log('Received 401, authentication expired');
+                            this.authenticated = false;
                             await this.checkAuthStatus(); // Update auth status
                             this.pendingAction = () => this.markLogs();
                             this.showLoginModal = true;
