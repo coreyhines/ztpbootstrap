@@ -2568,6 +2568,45 @@ EOF
             # does full setup. Let's create a simpler function that just does the pod setup.
             create_pod_files_from_config
             
+            # Manually run quadlet generator for pod and container files to ensure services are created
+            # This is needed because systemd's automatic generator may not always process all files
+            local systemd_dir="/etc/containers/systemd/ztpbootstrap"
+            if command -v /usr/libexec/podman/quadlet >/dev/null 2>&1; then
+                # Generate pod service
+                local pod_file="${systemd_dir}/ztpbootstrap.pod"
+                if [[ -f "$pod_file" ]]; then
+                    log "Generating pod service file..."
+                    local pod_exit_code=0
+                    if [[ $EUID -eq 0 ]]; then
+                        /usr/libexec/podman/quadlet "$pod_file" >/dev/null 2>&1 || pod_exit_code=$?
+                    else
+                        sudo /usr/libexec/podman/quadlet "$pod_file" >/dev/null 2>&1 || pod_exit_code=$?
+                    fi
+                    if [[ $pod_exit_code -eq 0 ]]; then
+                        log "Pod service file generated successfully"
+                    else
+                        warn "Failed to generate pod service file via quadlet"
+                    fi
+                fi
+                
+                # Generate nginx container service
+                local nginx_container_file="${systemd_dir}/ztpbootstrap-nginx.container"
+                if [[ -f "$nginx_container_file" ]]; then
+                    log "Generating nginx container service file..."
+                    local nginx_exit_code=0
+                    if [[ $EUID -eq 0 ]]; then
+                        /usr/libexec/podman/quadlet "$nginx_container_file" >/dev/null 2>&1 || nginx_exit_code=$?
+                    else
+                        sudo /usr/libexec/podman/quadlet "$nginx_container_file" >/dev/null 2>&1 || nginx_exit_code=$?
+                    fi
+                    if [[ $nginx_exit_code -eq 0 ]]; then
+                        log "Nginx container service file generated successfully"
+                    else
+                        warn "Failed to generate nginx container service file via quadlet"
+                    fi
+                fi
+            fi
+            
             # Reload systemd to process the new quadlet files
             log "Reloading systemd to process new service files..."
             if [[ $EUID -eq 0 ]]; then
