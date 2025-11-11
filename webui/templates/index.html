@@ -660,6 +660,7 @@
                     } else {
                         this.pendingAction = action;
                         this.showLoginModal = true;
+                        return; // Return early to prevent action from executing
                     }
                 },
                 
@@ -1016,11 +1017,12 @@
                             const nginxMatch = logText.match(/=== ztpbootstrap-nginx\.service ===([\s\S]*?)(?=== |$)/);
                             const webuiMatch = logText.match(/=== ztpbootstrap-webui\.service ===([\s\S]*?)(?=== |$)/);
                             
+                            // Update individual properties for Alpine.js reactivity
                             this.logsPod = podMatch ? podMatch[1].trim() : 'No pod logs available';
                             this.logsNginx = nginxMatch ? nginxMatch[1].trim() : 'No nginx logs available';
                             this.logsWebUI = webuiMatch ? webuiMatch[1].trim() : 'No webui logs available';
                         } else {
-                            // Ensure logs is a string
+                            // Ensure logs is a string and update directly for reactivity
                             this.logs = typeof data.logs === 'string' ? data.logs : (data.logs || 'No logs available');
                             // Auto-scroll to bottom
                             this.$nextTick(() => {
