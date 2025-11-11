@@ -632,6 +632,9 @@
                             this.authenticated = true;
                             this.authExpiresAt = data.expires_at;
                             
+                            // Verify authentication status from server
+                            await this.checkAuthStatus();
+                            
                             // Store pending action before clearing modal
                             const pendingAction = this.pendingAction;
                             this.pendingAction = null;
@@ -654,9 +657,14 @@
                             // Execute pending action if any (now that we're authenticated)
                             if (pendingAction) {
                                 try {
-                                    console.log('Executing pending action after login');
-                                    await pendingAction();
-                                    console.log('Pending action completed');
+                                    console.log('Executing pending action after login, authenticated:', this.authenticated);
+                                    // Ensure we're still authenticated before executing
+                                    if (this.authenticated) {
+                                        await pendingAction();
+                                        console.log('Pending action completed');
+                                    } else {
+                                        console.warn('Authentication lost, cannot execute pending action');
+                                    }
                                 } catch (error) {
                                     console.error('Error executing pending action:', error);
                                     alert('Action failed: ' + error.message);
@@ -1160,6 +1168,9 @@
                 async markLogs() {
                     console.log('markLogs called, authenticated:', this.authenticated);
                     
+                    // Verify authentication status from server
+                    await this.checkAuthStatus();
+                    
                     // Check authentication first
                     if (!this.authenticated) {
                         console.log('Not authenticated, showing login modal');
@@ -1179,9 +1190,11 @@
                             credentials: 'same-origin'
                         });
                         
+                        console.log('Mark response status:', response.status);
+                        
                         if (response.status === 401) {
                             console.log('Received 401, authentication expired');
-                            this.authenticated = false;
+                            await this.checkAuthStatus(); // Update auth status
                             this.pendingAction = () => this.markLogs();
                             this.showLoginModal = true;
                             await this.$nextTick();
@@ -1193,6 +1206,8 @@
                         }
                         
                         const data = await response.json();
+                        console.log('Mark response data:', data);
+                        
                         if (data.success) {
                             console.log('Mark successful, reloading logs');
                             // Reload logs to show the new MARK
