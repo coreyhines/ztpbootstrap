@@ -441,18 +441,23 @@
 
     <!-- Login Modal -->
     <div x-show="showLoginModal" 
+         x-cloak
          x-transition:enter="transition ease-out duration-300"
          x-transition:enter-start="opacity-0"
          x-transition:enter-end="opacity-100"
          x-transition:leave="transition ease-in duration-200"
          x-transition:leave-start="opacity-100"
          x-transition:leave-end="opacity-0"
-         x-init="$watch('showLoginModal', value => { 
-             console.log('showLoginModal changed to:', value);
-             if(value) { 
-                 $nextTick(() => $refs.passwordInput && $refs.passwordInput.focus()); 
-             }
-         })"
+         x-init="
+             // Ensure modal is hidden on init
+             showLoginModal = false;
+             $watch('showLoginModal', value => { 
+                 console.log('showLoginModal changed to:', value);
+                 if(value) { 
+                     $nextTick(() => $refs.passwordInput && $refs.passwordInput.focus()); 
+                 }
+             });
+         "
          class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
          @click.self="showLoginModal = false; loginPassword = ''; loginError = ''">
         <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
@@ -555,6 +560,9 @@
                 pendingAction: null,
                 
                 async init() {
+                    // Ensure modal is hidden on initial load
+                    this.showLoginModal = false;
+                    
                     // Load theme preference
                     const savedTheme = localStorage.getItem('ztpbootstrap-theme');
                     if (savedTheme) {
