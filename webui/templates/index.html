@@ -441,6 +441,7 @@
 
     <!-- Login Modal -->
     <div x-show="showLoginModal" 
+         x-cloak
          x-transition:enter="transition ease-out duration-300"
          x-transition:enter-start="opacity-0"
          x-transition:enter-end="opacity-100"
@@ -448,12 +449,11 @@
          x-transition:leave-start="opacity-100"
          x-transition:leave-end="opacity-0"
          x-init="$watch('showLoginModal', value => { 
+             console.log('showLoginModal changed to:', value);
              if(value) { 
                  $nextTick(() => $refs.passwordInput && $refs.passwordInput.focus()); 
              }
          })"
-         style="display: none;"
-         x-bind:style="showLoginModal ? '' : 'display: none !important;'"
          class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
          @click.self="showLoginModal = false; loginPassword = ''; loginError = ''">
         <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
@@ -1172,8 +1172,14 @@
                     if (!this.authenticated) {
                         console.log('Not authenticated, showing login modal');
                         this.pendingAction = () => this.markLogs();
-                        this.showLoginModal = true;
+                        // Force modal to show
+                        this.showLoginModal = false; // Reset first
                         await this.$nextTick();
+                        this.showLoginModal = true; // Then set to true
+                        await this.$nextTick();
+                        console.log('showLoginModal set to:', this.showLoginModal);
+                        // Force a DOM update
+                        this.$dispatch('force-update');
                         return;
                     }
                     
