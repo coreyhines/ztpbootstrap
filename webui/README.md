@@ -17,6 +17,17 @@ A lightweight, modern web interface for managing and monitoring the ZTP Bootstra
 - **Networking**: Uses macvlan network with dedicated IP addresses
 - **Communication**: nginx proxies `/ui/` and `/api/` to Flask container
 
+## Content Security Policy (CSP)
+
+The Web UI requires specific CSP settings to function properly:
+
+- **Alpine.js**: Requires `'unsafe-eval'` in `script-src` for its reactivity system
+- **Prism.js**: Works with current CSP settings (no additional requirements)
+- **Tailwind CSS**: CSS-only, no CSP restrictions
+- **CDN Resources**: Allowed from `cdn.jsdelivr.net`, `cdn.tailwindcss.com`, and `cdnjs.cloudflare.com`
+
+**Note**: For enhanced security in the future, consider migrating to Alpine.js CSP-compliant build (`@alpinejs/csp`) which doesn't require `'unsafe-eval'`, but requires refactoring inline expressions to use `Alpine.data()`.
+
 ## Setup
 
 ### Prerequisites
