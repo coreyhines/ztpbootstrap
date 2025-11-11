@@ -659,10 +659,10 @@
                         return await action();
                     } else {
                         this.pendingAction = action;
-                        // Force Alpine.js reactivity by updating the property
-                        this.showLoginModal = false;
-                        await this.$nextTick();
+                        // Set showLoginModal to true and force Alpine.js reactivity
                         this.showLoginModal = true;
+                        // Use $dispatch to ensure Alpine.js processes the change
+                        this.$dispatch('login-modal-show');
                         await this.$nextTick();
                         console.log('Login modal should be visible:', this.showLoginModal);
                         return; // Return early to prevent action from executing
