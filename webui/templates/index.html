@@ -474,6 +474,8 @@
                     }
                     this.applyTheme();
                     
+                    // Small delay to ensure Alpine.js is fully initialized
+                    await new Promise(resolve => setTimeout(resolve, 100));
                     await this.loadStatus();
                     await this.loadScripts();
                     await this.loadBackups();
