@@ -203,10 +203,14 @@ def auth_login():
         password_hash = AUTH_CONFIG['admin_password_hash']
         password_valid = False
         
+        print(f"DEBUG: Attempting login with hash format: {password_hash[:50]}...")
+        
         # Try Werkzeug's check_password_hash first (standard format)
         try:
             password_valid = check_password_hash(password_hash, password)
-        except (ValueError, TypeError):
+            print(f"DEBUG: Werkzeug check_password_hash result: {password_valid}")
+        except (ValueError, TypeError) as e:
+            print(f"DEBUG: Werkzeug check_password_hash failed: {e}")
             # If that fails, try the fallback format from setup-interactive.sh
             # Format: pbkdf2:sha256:<base64_hash>
             if password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
@@ -215,12 +219,15 @@ def auth_login():
                 try:
                     # Extract the base64 hash
                     hash_part = password_hash.split(':', 2)[2]
+                    print(f"DEBUG: Using fallback format, hash_part length: {len(hash_part)}")
                     # Decode the base64 hash
                     stored_hash = base64.b64decode(hash_part)
                     # Generate hash with same parameters (salt='ztpbootstrap', iterations=100000)
                     computed_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)
                     password_valid = (stored_hash == computed_hash)
-                except Exception:
+                    print(f"DEBUG: Fallback hash comparison result: {password_valid}")
+                except Exception as e2:
+                    print(f"DEBUG: Fallback hash verification failed: {e2}")
                     password_valid = False
         
         if password_valid:
