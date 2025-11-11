@@ -2474,6 +2474,15 @@ EOF
             # which should be mostly idempotent. However, setup.sh requires root and
             # does full setup. Let's create a simpler function that just does the pod setup.
             create_pod_files_from_config
+            
+            # Reload systemd to process the new quadlet files
+            log "Reloading systemd to process new service files..."
+            if [[ $EUID -eq 0 ]]; then
+                systemctl daemon-reload
+            else
+                sudo systemctl daemon-reload
+            fi
+            sleep 2  # Give systemd time to generate service files
         else
             warn "setup.sh not found. Pod files will not be created automatically."
             warn "You will need to run: sudo ./setup.sh"
