@@ -662,11 +662,13 @@ def parse_nginx_access_log():
             user_agent = match.group(9)
             
             # Skip health checks, UI requests, and API requests (WebUI's own requests)
+            # Note: We allow browser downloads of /bootstrap.py to be tracked (for testing purposes)
+            # but filter out other browser requests (UI, API, etc.)
             if (path in ['/health', '/ui', '/api'] or 
                 path.startswith('/ui/') or 
                 path.startswith('/api/') or
                 '/api/' in path or
-                user_agent and ('Mozilla' in user_agent or 'Gecko' in user_agent or 'Chrome' in user_agent or 'Safari' in user_agent)):
+                (user_agent and ('Mozilla' in user_agent or 'Gecko' in user_agent or 'Chrome' in user_agent or 'Safari' in user_agent) and path != '/bootstrap.py')):
                 # Mark as processed but don't count
                 new_processed_lines.add(line_stripped)
                 continue
