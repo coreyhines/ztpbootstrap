@@ -34,3 +34,10 @@ __pycache__/
 SANITIZATION_NOTES.md
 *.qcow2
 *.raw
+
+# Test-specific scripts (not needed by end users)
+restore-backup-from-fedora1.sh
+run-full-e2e-test.sh
+test-interactive-setup.sh
+wait-for-ssh.sh
+vm-create-native.sh

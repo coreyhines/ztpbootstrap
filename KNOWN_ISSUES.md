@@ -1,6 +1,10 @@
 # Known Issues and Workarounds
 
-## Ubuntu Support
+This document tracks known issues, their workarounds, and planned fixes.
+
+## Important Implementation Notes
+
+### Ubuntu Support
 
 **Ubuntu 22.04 (and potentially other Ubuntu versions) has known issues with SSH key deployment via cloud-init in this environment.** 
 
@@ -12,102 +16,30 @@ The cloud-init `ssh_authorized_keys` mechanism and `write_files + runcmd` approa
 
 ---
 
-## SELinux Context Flags (`:z` and `:Z`) - NOT USED
+### SELinux Context Flags (`:z` and `:Z`) - Conditionally Used
 
-**IMPORTANT:** We do NOT use SELinux context flags (`:z` or `:Z`) in Podman volume mounts because:
-- These flags do NOT work with NFS shares
+**IMPORTANT:** We conditionally use SELinux context flags (`:z`) in Podman volume mounts:
+- `:z` flags do NOT work with NFS shares
 - Many users (including the maintainer) deploy this service on NFS-mounted NAS shares
-- SELinux contexts are set via `chcon` on the host directories instead
+- We automatically detect NFS mounts and skip `:z` flags when on NFS
 
 **How we handle SELinux:**
-- We use `chcon -R -t container_file_t` to set SELinux contexts on host directories
-- This works with both local filesystems and NFS shares
-- Volume mounts in quadlet files use only `:ro` (read-only) or `:rw` (read-write) flags
+- We detect if directories are on NFS using `stat -f` or `findmnt`
+- For local filesystems: We use `:z` flags in volume mounts AND `chcon` for host directories
+- For NFS filesystems: We skip `:z` flags and rely on `chcon` only (which works with NFS)
+- This ensures compatibility with both local and NFS deployments
 
 **Files affected:**
-- `systemd/ztpbootstrap-nginx.container` - No `:z` or `:Z` flags
-- `systemd/ztpbootstrap-webui.container` - No `:z` or `:Z` flags
-- `setup.sh` - Uses `chcon` instead of volume mount flags
-
-This document tracks known issues, their workarounds, and planned fixes.
-
-## Minor Issues
-
-### 1. Cloud-init Deprecation Warnings
-
-**Issue:** Cloud-init reports deprecated configuration keys in `vm-create-native.sh`:
-- `chpasswd.list` deprecated in 22.2 (use `users` instead)
-- `system_info` deprecated in 24.2
-- Config key 'lists' deprecated in 22.3
-
-**Impact:** Non-critical - cloud-init completes successfully but shows warnings
-
-**Workaround:** None required - service works correctly
-
-**Planned Fix:** Update `vm-create-native.sh` cloud-init configuration to use modern syntax
-
-**Status:** Documented for future improvement
+- `systemd/ztpbootstrap-nginx.container` - Conditionally adds `:z` flag (not on NFS)
+- `systemd/ztpbootstrap-webui.container` - Conditionally adds `:z` flag (not on NFS)
+- `setup.sh` - Uses `is_nfs_mount()` to detect NFS and conditionally apply `:z` flags
+- `setup-interactive.sh` - Same NFS detection logic
 
 ---
 
-### 2. README_VM_SETUP.txt Missing
+## Known Issues
 
-**Issue:** Expected file `/home/fedora/README_VM_SETUP.txt` not created by cloud-init
-
-**Impact:** Low - documentation file, not required for functionality
-
-**Workaround:** None required
-
-**Planned Fix:** Verify if this file should be created by cloud-init and add if needed
-
-**Status:** Documented for investigation
-
----
-
-### 3. Cloud-init Status Shows "Degraded"
-
-**Issue:** Cloud-init extended status shows `degraded done` instead of just `done`
-
-**Impact:** Non-critical - cloud-init completed successfully, likely due to deprecation warnings
-
-**Workaround:** None required - service works correctly
-
-**Planned Fix:** Resolve deprecation warnings (see Issue #1)
-
-**Status:** Documented for future improvement
-
----
-
-### 4. Interactive Setup Script Piped Input
-
-**Issue:** Yes/no prompts (`prompt_yes_no` function) do not handle piped input correctly. Script gets stuck in loop asking "Please answer yes or no." even when valid input is provided.
-
-**Impact:** Cannot fully automate testing of interactive script with piped input
-
-**Workaround:** 
-- Test manually by running `./setup-interactive.sh` interactively
-- Use `expect` script for automation if needed
-- Use `config.yaml` directly and skip interactive setup for automated deployments
-
-**Planned Fix:** 
-- Consider creating a non-interactive mode for CI/CD
-- Or use `expect` script for automated testing
-
-**Status:** Documented - limitation of interactive script design
-
----
-
-### 5. SSH Key Setup Not Automated
-
-**Issue:** SSH key setup (ssh-copy-id) is not automated in cloud-init, requiring manual step
-
-**Impact:** Low - manual step required after VM creation
-
-**Workaround:** Manually run `ssh-copy-id` after VM is created
-
-**Planned Fix:** Add SSH key setup to cloud-init configuration in `vm-create-native.sh`
-
-**Status:** Enhancement for future improvement
+Active issues are tracked in [GitHub Issues](https://github.com/coreyhines/ztpbootstrap/issues). See the issues list for current known issues and their status.
 
 ---
 
@@ -130,6 +62,26 @@ This document tracks known issues, their workarounds, and planned fixes.
 **Fix:** Added `chown 101:101` and `chmod 777` to logs directory creation in `setup.sh`
 
 **Status:** ✅ FIXED and verified in fresh setup
+
+---
+
+### ✅ Fixed: Interactive Setup Script Piped Input
+
+**Issue:** Yes/no prompts did not handle piped input correctly, preventing automation
+
+**Fix:** Added `--non-interactive` mode to `setup-interactive.sh` for automated deployments and CI/CD
+
+**Status:** ✅ FIXED - Use `./setup-interactive.sh --non-interactive` for automation
+
+---
+
+### ✅ Fixed: SSH Key Setup Not Automated
+
+**Issue:** SSH key setup was not automated in cloud-init, requiring manual step
+
+**Fix:** `vm-create-native.sh` now automatically detects the current user and sets up SSH key authentication
+
+**Status:** ✅ FIXED - SSH keys are automatically configured for the current user
 
 ---
 
