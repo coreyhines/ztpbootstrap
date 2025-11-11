@@ -1693,20 +1693,106 @@ create_pod_files_from_config() {
         # Manually run quadlet generator to ensure service is created
         # This is needed because systemd's automatic generator may not always process all files
         local webui_container_file="${systemd_dir}/ztpbootstrap-webui.container"
+        local webui_service_generated=false
         if command -v /usr/libexec/podman/quadlet >/dev/null 2>&1; then
+            local quadlet_output
             if [[ $EUID -eq 0 ]]; then
-                if /usr/libexec/podman/quadlet "$webui_container_file" 2>/dev/null; then
-                    log "WebUI service generated successfully"
-                else
-                    warn "Failed to generate WebUI service via quadlet generator"
-                fi
+                quadlet_output=$(/usr/libexec/podman/quadlet "$webui_container_file" 2>&1)
             else
-                if sudo /usr/libexec/podman/quadlet "$webui_container_file" 2>/dev/null; then
-                    log "WebUI service generated successfully"
+                quadlet_output=$(sudo /usr/libexec/podman/quadlet "$webui_container_file" 2>&1)
+            fi
+            if [[ $? -eq 0 ]] && [[ -n "$quadlet_output" ]]; then
+                # Check if service file was created in generator directory
+                if [[ -f "/run/systemd/generator/ztpbootstrap-webui.service" ]]; then
+                    log "WebUI service generated successfully by quadlet"
+                    webui_service_generated=true
                 else
-                    warn "Failed to generate WebUI service via quadlet generator"
+                    # Try to write the output manually
+                    echo "$quadlet_output" | grep -A 1000 "^---ztpbootstrap-webui.service---" | sed '1d' > /tmp/webui.service 2>/dev/null || true
+                    if [[ -s /tmp/webui.service ]]; then
+                        if [[ $EUID -eq 0 ]]; then
+                            mv /tmp/webui.service /run/systemd/generator/ztpbootstrap-webui.service 2>/dev/null && {
+                                log "WebUI service file created manually from quadlet output"
+                                webui_service_generated=true
+                            } || true
+                        else
+                            sudo mv /tmp/webui.service /run/systemd/generator/ztpbootstrap-webui.service 2>/dev/null && {
+                                log "WebUI service file created manually from quadlet output"
+                                webui_service_generated=true
+                            } || true
+                        fi
+                    fi
                 fi
             fi
+            if [[ "$webui_service_generated" == "false" ]] && [[ -n "$quadlet_output" ]]; then
+                warn "Quadlet generator output: ${quadlet_output:0:200}"
+            fi
+        fi
+        
+        # If quadlet failed, create a basic service file manually
+        if [[ "$webui_service_generated" == "false" ]]; then
+            warn "Quadlet generator did not create webui service, creating manual service file..."
+            local generator_dir="/run/systemd/generator"
+            if [[ $EUID -eq 0 ]]; then
+                mkdir -p "$generator_dir"
+            else
+                sudo mkdir -p "$generator_dir"
+            fi
+            
+            # Get the pod name from config or use default
+            local pod_name="ztpbootstrap"
+            if [[ -f "${systemd_dir}/ztpbootstrap.pod" ]] && command -v yq >/dev/null 2>&1; then
+                local pod_name_from_file
+                pod_name_from_file=$(grep "^PodName=" "${systemd_dir}/ztpbootstrap.pod" 2>/dev/null | cut -d'=' -f2 || echo "")
+                if [[ -n "$pod_name_from_file" ]]; then
+                    pod_name="$pod_name_from_file"
+                fi
+            fi
+            
+            if [[ $EUID -eq 0 ]]; then
+                cat > "${generator_dir}/ztpbootstrap-webui.service" << EOFWEBUI
+[Unit]
+Description=ZTP Bootstrap Web UI Container
+SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container
+RequiresMountsFor=%t/containers
+BindsTo=${pod_name}.service
+After=${pod_name}.service
+
+[Service]
+Restart=always
+Environment=PODMAN_SYSTEMD_UNIT=%n
+KillMode=mixed
+ExecStop=/usr/bin/podman rm -v -f -i ztpbootstrap-webui
+ExecStopPost=-/usr/bin/podman rm -v -f -i ztpbootstrap-webui
+Delegate=yes
+Type=notify
+NotifyAccess=all
+SyslogIdentifier=%N
+ExecStart=/usr/bin/podman run --name ztpbootstrap-webui --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name} -v /opt/containerdata/ztpbootstrap/webui:/app:ro -v /opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw -v /opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw -v /run/systemd/journal:/run/systemd/journal:ro -v /run/log/journal:/run/log/journal:ro -v /run/podman:/run/podman:ro -v /usr/bin/journalctl:/usr/bin/journalctl:ro -v /lib64/libsystemd.so.0:/lib64/libsystemd.so.0:ro -v /lib64/libsystemd.so.0.41.0:/lib64/libsystemd.so.0.41.0:ro -v /usr/lib64/systemd:/usr/lib64/systemd:ro --env TZ=UTC --env ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap --env FLASK_APP=app.py --env FLASK_ENV=production docker.io/python:alpine /app/start-webui.sh
+EOFWEBUI
+            else
+                sudo tee "${generator_dir}/ztpbootstrap-webui.service" > /dev/null << EOFWEBUI
+[Unit]
+Description=ZTP Bootstrap Web UI Container
+SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container
+RequiresMountsFor=%t/containers
+BindsTo=${pod_name}.service
+After=${pod_name}.service
+
+[Service]
+Restart=always
+Environment=PODMAN_SYSTEMD_UNIT=%n
+KillMode=mixed
+ExecStop=/usr/bin/podman rm -v -f -i ztpbootstrap-webui
+ExecStopPost=-/usr/bin/podman rm -v -f -i ztpbootstrap-webui
+Delegate=yes
+Type=notify
+NotifyAccess=all
+SyslogIdentifier=%N
+ExecStart=/usr/bin/podman run --name ztpbootstrap-webui --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name} -v /opt/containerdata/ztpbootstrap/webui:/app:ro -v /opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw -v /opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw -v /run/systemd/journal:/run/systemd/journal:ro -v /run/log/journal:/run/log/journal:ro -v /run/podman:/run/podman:ro -v /usr/bin/journalctl:/usr/bin/journalctl:ro -v /lib64/libsystemd.so.0:/lib64/libsystemd.so.0:ro -v /lib64/libsystemd.so.0.41.0:/lib64/libsystemd.so.0.41.0:ro -v /usr/lib64/systemd:/usr/lib64/systemd:ro --env TZ=UTC --env ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap --env FLASK_APP=app.py --env FLASK_ENV=production docker.io/python:alpine /app/start-webui.sh
+EOFWEBUI
+            fi
+            log "Created manual webui service file"
         fi
         
         # Always ensure the service file includes the start-webui.sh command
@@ -1828,11 +1914,14 @@ EOF
     
     # Start pod service
     if [[ $EUID -eq 0 ]]; then
-        if systemctl start ztpbootstrap.service 2>/dev/null; then
+        if systemctl start ztpbootstrap.service 2>&1; then
             log "✓ Started ztpbootstrap.service"
             sleep 2
         else
+            local pod_error
+            pod_error=$(systemctl status ztpbootstrap.service --no-pager -l 2>&1 | tail -10 || echo "Could not get status")
             warn "Failed to start ztpbootstrap.service"
+            warn "Error details: ${pod_error:0:300}"
         fi
         
         # Start nginx container
@@ -1851,11 +1940,14 @@ EOF
             fi
         fi
     else
-        if sudo systemctl start ztpbootstrap.service 2>/dev/null; then
+        if sudo systemctl start ztpbootstrap.service 2>&1; then
             log "✓ Started ztpbootstrap.service"
             sleep 2
         else
+            local pod_error
+            pod_error=$(sudo systemctl status ztpbootstrap.service --no-pager -l 2>&1 | tail -10 || echo "Could not get status")
             warn "Failed to start ztpbootstrap.service"
+            warn "Error details: ${pod_error:0:300}"
         fi
         
         if sudo systemctl start ztpbootstrap-nginx.service 2>/dev/null; then
