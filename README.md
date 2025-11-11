@@ -97,17 +97,17 @@ The service runs as a **Podman pod** with multiple containers:
 │  ┌───────────────────────────────────────────────────────┐ │
 │  │              Podman Pod                               │ │
 │  │                                                       │ │
-│  │  ┌──────────────────┐    ┌──────────────────────────┐ │ │
-│  │  │  Nginx Container │    │   Web UI Container       │ │ │
-│  │  │                  │    │   (Flask Application)    │ │ │
-│  │  │  • Serves Script │    │   • Management UI        │ │ │
-│  │  │  • HTTPS/TLS     │    │   • Status Monitoring    │ │ │
-│  │  │  • Proxies /ui/  │    │   • Device Tracking      │ │ │
-│  │  └────────┬─────────┘    └──────────────────────────┘ │ │
-│  │           │                                             │ │
-│  │           │ 3. HTTPS Request                            │ │
-│  │           │    (via Nginx)                              │ │
-│  └───────────┼─────────────────────────────────────────────┘ │
+│  │  ┌──────────────────┐  ┌──────────────────────────┐ │ │
+│  │  │  Nginx Container │  │   Web UI Container       │ │ │
+│  │  │                  │  │   (Flask Application)    │ │ │
+│  │  │  • Serves Script │  │   • Management UI        │ │ │
+│  │  │  • HTTPS/TLS     │  │   • Status Monitoring    │ │ │
+│  │  │  • Proxies /ui/  │  │   • Device Tracking      │ │ │
+│  │  └────────┬─────────┘  └──────────────────────────┘ │ │
+│  │           │                                           │ │
+│  │           │ 3. HTTPS Request                          │ │
+│  │           │    (via Nginx)                            │ │
+│  └───────────┼───────────────────────────────────────────┘ │
 └───────────────┼─────────────────────────────────────────────┘
                 │
                 │ 4. Script Download
@@ -157,19 +157,19 @@ sudo ./setup.sh
 
 ```bash
 # Start
-sudo systemctl start ztpbootstrap-pod
+sudo systemctl start ztpbootstrap
 
 # Stop
-sudo systemctl stop ztpbootstrap-pod
+sudo systemctl stop ztpbootstrap
 
 # Restart
-sudo systemctl restart ztpbootstrap-pod
+sudo systemctl restart ztpbootstrap
 
 # Status
-sudo systemctl status ztpbootstrap-pod
+sudo systemctl status ztpbootstrap
 
 # Enable on boot
-sudo systemctl enable ztpbootstrap-pod
+sudo systemctl enable ztpbootstrap
 ```
 
 ### View Logs
@@ -180,7 +180,7 @@ sudo podman logs ztpbootstrap-nginx
 sudo podman logs ztpbootstrap-webui
 
 # Systemd logs
-sudo journalctl -u ztpbootstrap-pod -f
+sudo journalctl -u ztpbootstrap -f
 sudo journalctl -u ztpbootstrap-nginx -f
 sudo journalctl -u ztpbootstrap-webui -f
 ```
@@ -272,7 +272,7 @@ sudo /opt/containerdata/ztpbootstrap/test-service.sh
 **Quick checks:**
 ```bash
 # Service status
-sudo systemctl status ztpbootstrap-pod
+sudo systemctl status ztpbootstrap
 
 # Container logs
 sudo podman logs ztpbootstrap-nginx

@@ -442,7 +442,7 @@ restore_backup() {
     log ""
     log "Next steps:"
     log "  1. Reload systemd: sudo systemctl daemon-reload"
-    log "  2. Restart services if needed: sudo systemctl restart ztpbootstrap-pod"
+    log "  2. Restart services if needed: sudo systemctl restart ztpbootstrap"
     echo ""
     
     return 0
@@ -460,8 +460,8 @@ check_running_services() {
     fi
     
     # Check for new pod-based services
-    if systemctl is-active --quiet ztpbootstrap-pod.service 2>/dev/null; then
-        running_services+=("ztpbootstrap-pod.service")
+    if systemctl is-active --quiet ztpbootstrap.service 2>/dev/null; then
+        running_services+=("ztpbootstrap.service")
         service_type="pod-based"
     fi
     if systemctl is-active --quiet ztpbootstrap-nginx.service 2>/dev/null; then
@@ -514,11 +514,11 @@ stop_services_gracefully() {
         if [[ $EUID -eq 0 ]]; then
             systemctl stop ztpbootstrap-nginx.service ztpbootstrap-webui.service 2>/dev/null || true
             sleep 1
-            systemctl stop ztpbootstrap-pod.service 2>/dev/null || warn "Failed to stop ztpbootstrap-pod.service"
+            systemctl stop ztpbootstrap.service 2>/dev/null || warn "Failed to stop ztpbootstrap.service"
         else
             sudo systemctl stop ztpbootstrap-nginx.service ztpbootstrap-webui.service 2>/dev/null || true
             sleep 1
-            sudo systemctl stop ztpbootstrap-pod.service 2>/dev/null || warn "Failed to stop ztpbootstrap-pod.service"
+            sudo systemctl stop ztpbootstrap.service 2>/dev/null || warn "Failed to stop ztpbootstrap.service"
         fi
         sleep 2
     fi
@@ -1828,11 +1828,11 @@ EOF
     
     # Start pod service
     if [[ $EUID -eq 0 ]]; then
-        if systemctl start ztpbootstrap-pod.service 2>/dev/null; then
-            log "✓ Started ztpbootstrap-pod.service"
+        if systemctl start ztpbootstrap.service 2>/dev/null; then
+            log "✓ Started ztpbootstrap.service"
             sleep 2
         else
-            warn "Failed to start ztpbootstrap-pod.service"
+            warn "Failed to start ztpbootstrap.service"
         fi
         
         # Start nginx container
@@ -1851,11 +1851,11 @@ EOF
             fi
         fi
     else
-        if sudo systemctl start ztpbootstrap-pod.service 2>/dev/null; then
-            log "✓ Started ztpbootstrap-pod.service"
+        if sudo systemctl start ztpbootstrap.service 2>/dev/null; then
+            log "✓ Started ztpbootstrap.service"
             sleep 2
         else
-            warn "Failed to start ztpbootstrap-pod.service"
+            warn "Failed to start ztpbootstrap.service"
         fi
         
         if sudo systemctl start ztpbootstrap-nginx.service 2>/dev/null; then
@@ -2823,7 +2823,7 @@ main() {
             start_services_after_install
             echo ""
             log "Services have been started. You can check status with:"
-            log "  systemctl status ztpbootstrap-pod"
+            log "  systemctl status ztpbootstrap"
             log "  systemctl status ztpbootstrap-nginx"
         else
             log "Next steps:"

@@ -735,8 +735,8 @@ EOF
 Description=ZTP Bootstrap Web UI Container
 SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container
 RequiresMountsFor=%t/containers
-BindsTo=ztpbootstrap-pod.service
-After=ztpbootstrap-pod.service
+BindsTo=ztpbootstrap.service
+After=ztpbootstrap.service
 
 [Service]
 Restart=always
@@ -748,7 +748,7 @@ Delegate=yes
 Type=notify
 NotifyAccess=all
 SyslogIdentifier=%N
-ExecStart=/usr/bin/podman run --name ztpbootstrap-webui --replace --rm --cgroups=split --sdnotify=conmon -d --pod ztpbootstrap-pod -v /opt/containerdata/ztpbootstrap/webui:/app:ro -v /opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw -v /opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw -v /run/systemd/journal:/run/systemd/journal:ro -v /run/log/journal:/run/log/journal:ro -v /run/podman:/run/podman:ro -v /usr/bin/journalctl:/usr/bin/journalctl:ro -v /lib64/libsystemd.so.0:/lib64/libsystemd.so.0:ro -v /lib64/libsystemd.so.0.41.0:/lib64/libsystemd.so.0.41.0:ro -v /usr/lib64/systemd:/usr/lib64/systemd:ro --env TZ=UTC --env ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap --env FLASK_APP=app.py --env FLASK_ENV=production docker.io/python:alpine /app/start-webui.sh
+ExecStart=/usr/bin/podman run --name ztpbootstrap-webui --replace --rm --cgroups=split --sdnotify=conmon -d --pod ztpbootstrap -v /opt/containerdata/ztpbootstrap/webui:/app:ro -v /opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw -v /opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw -v /run/systemd/journal:/run/systemd/journal:ro -v /run/log/journal:/run/log/journal:ro -v /run/podman:/run/podman:ro -v /usr/bin/journalctl:/usr/bin/journalctl:ro -v /lib64/libsystemd.so.0:/lib64/libsystemd.so.0:ro -v /lib64/libsystemd.so.0.41.0:/lib64/libsystemd.so.0.41.0:ro -v /usr/lib64/systemd:/usr/lib64/systemd:ro --env TZ=UTC --env ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap --env FLASK_APP=app.py --env FLASK_ENV=production docker.io/python:alpine /app/start-webui.sh
 
 [Install]
 WantedBy=multi-user.target default.target
@@ -792,7 +792,7 @@ EOFWEBUI
         # Container file exists but service not generated - try manual start as fallback
         warn "WebUI container file exists but systemd service not found"
         warn "Attempting to start WebUI container manually..."
-        if podman run -d --name ztpbootstrap-webui --pod ztpbootstrap-pod \
+        if podman run -d --name ztpbootstrap-webui --pod ztpbootstrap \
             -v /opt/containerdata/ztpbootstrap/webui:/app:ro \
             -v /opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw \
             -v /opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw \
@@ -818,7 +818,7 @@ check_service_status() {
     log ""
     log "Container status:"
     podman pod ps --filter name=ztpbootstrap-pod
-    podman ps --filter pod=ztpbootstrap-pod
+    podman ps --filter pod=ztpbootstrap
 }
 
 # Main function

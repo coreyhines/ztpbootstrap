@@ -556,7 +556,7 @@ def get_status():
         container_running = False
         try:
             result = subprocess.run(
-                ['systemctl', 'is-active', '--quiet', 'ztpbootstrap-pod.service'],
+                ['systemctl', 'is-active', '--quiet', 'ztpbootstrap.service'],
                 capture_output=True,
                 text=True,
                 timeout=2
@@ -858,7 +858,7 @@ def get_logs():
             # Works with both host networking and macvlan approaches
             log_parts = []
             containers = {
-                'ztpbootstrap-pod.service': 'ztpbootstrap-pod-infra',
+                'ztpbootstrap.service': 'ztpbootstrap-infra',
                 'ztpbootstrap-nginx.service': 'ztpbootstrap-nginx',
                 'ztpbootstrap-webui.service': 'ztpbootstrap-webui'
             }
@@ -941,7 +941,7 @@ def get_logs():
                         pass
                     
                     # Build SSH instruction
-                    if hostname and hostname not in ['ztpbootstrap-pod', 'localhost']:
+                    if hostname and hostname not in ['ztpbootstrap', 'localhost']:
                         ssh_target = hostname
                         if host_ip:
                             ssh_instruction = f'  ssh user@{hostname}  # or ssh user@{host_ip}'
@@ -961,7 +961,7 @@ def get_logs():
                     logs += f'{ssh_instruction}\n\n'
                     logs += 'Once connected, run one of these commands:\n\n'
                     logs += 'Using journalctl (recommended):\n'
-                    logs += '  sudo journalctl -u ztpbootstrap-pod.service -n 50 -f\n'
+                    logs += '  sudo journalctl -u ztpbootstrap.service -n 50 -f\n'
                     logs += '  sudo journalctl -u ztpbootstrap-nginx.service -n 50 -f\n'
                     logs += '  sudo journalctl -u ztpbootstrap-webui.service -n 50 -f\n\n'
                     logs += 'Or using podman logs:\n'

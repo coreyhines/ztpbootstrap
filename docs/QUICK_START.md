@@ -52,7 +52,7 @@ The interactive setup will:
 
 ```bash
 # Check service status
-sudo systemctl status ztpbootstrap-pod
+sudo systemctl status ztpbootstrap
 
 # Test health endpoint
 curl -k https://ztpboot.example.com/health

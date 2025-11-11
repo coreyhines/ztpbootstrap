@@ -69,8 +69,8 @@ sudo cp systemd/*.pod systemd/*.container /etc/containers/systemd/ztpbootstrap/
 
 # 4. Reload and start
 sudo systemctl daemon-reload
-sudo systemctl start ztpbootstrap-pod
-sudo systemctl enable ztpbootstrap-pod
+sudo systemctl start ztpbootstrap
+sudo systemctl enable ztpbootstrap
 ```
 
 ## Access
@@ -83,7 +83,7 @@ Once running, access the Web UI at:
 
 ### Pod Structure
 
-- **Pod**: `ztpbootstrap-pod` - Uses macvlan network with dedicated IPs
+- **Pod**: `ztpbootstrap` - Uses macvlan network with dedicated IPs
 - **Nginx Container**: `ztpbootstrap-nginx` - Serves bootstrap scripts and proxies to Web UI
 - **Web UI Container**: `ztpbootstrap-webui` - Flask application
 
@@ -97,24 +97,24 @@ Once running, access the Web UI at:
 
 ```bash
 # Check pod status
-sudo systemctl status ztpbootstrap-pod
+sudo systemctl status ztpbootstrap
 
 # View pod logs
-sudo journalctl -u ztpbootstrap-pod -f
+sudo journalctl -u ztpbootstrap -f
 
 # View container logs
 podman logs ztpbootstrap-nginx
 podman logs ztpbootstrap-webui
 
 # Restart pod
-sudo systemctl restart ztpbootstrap-pod
+sudo systemctl restart ztpbootstrap
 
 # Stop pod
-sudo systemctl stop ztpbootstrap-pod
+sudo systemctl stop ztpbootstrap
 
 # Check container status
 podman pod ps
-podman ps --filter pod=ztpbootstrap-pod
+podman ps --filter pod=ztpbootstrap
 ```
 
 ## Troubleshooting
@@ -129,7 +129,7 @@ podman ps --filter pod=ztpbootstrap-pod
 # See check-macvlan.sh for instructions and authoritative documentation
 
 # Check systemd logs
-sudo journalctl -u ztpbootstrap-pod -n 50
+sudo journalctl -u ztpbootstrap -n 50
 ```
 
 ### Web UI not accessible
@@ -152,7 +152,7 @@ podman exec ztpbootstrap-nginx wget -O- http://ztpbootstrap-webui:5000/api/statu
 podman network inspect ztpbootstrap-net
 
 # Check pod IP addresses
-podman pod inspect ztpbootstrap-pod | grep -A 10 IP
+podman pod inspect ztpbootstrap | grep -A 10 IP
 
 # Test connectivity between containers
 podman exec ztpbootstrap-nginx ping -c 2 ztpbootstrap-webui

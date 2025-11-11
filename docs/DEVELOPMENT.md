@@ -192,12 +192,12 @@ After running the interactive setup, verify everything works:
 
 ```bash
 # Check service status
-sudo systemctl status ztpbootstrap-pod
+sudo systemctl status ztpbootstrap
 sudo systemctl status ztpbootstrap-nginx
 sudo systemctl status ztpbootstrap-webui
 
 # Check containers
-sudo podman ps --filter pod=ztpbootstrap-pod
+sudo podman ps --filter pod=ztpbootstrap
 
 # Test endpoints
 curl -k https://localhost/health
@@ -281,12 +281,12 @@ ssh -p 2222 user@localhost './restore-backup-from-fedora1.sh'
 ./setup-interactive.sh --non-interactive
 
 # Check service status
-sudo systemctl status ztpbootstrap-pod
+sudo systemctl status ztpbootstrap
 sudo systemctl status ztpbootstrap-nginx
 sudo systemctl status ztpbootstrap-webui
 
 # View service logs
-sudo journalctl -u ztpbootstrap-pod -f
+sudo journalctl -u ztpbootstrap -f
 sudo journalctl -u ztpbootstrap-nginx -f
 sudo journalctl -u ztpbootstrap-webui -f
 
@@ -324,7 +324,7 @@ git pull  # or scp your changes from host
 # ... interact with prompts, verify behavior ...
 
 # 7. Verify services started correctly
-sudo systemctl status ztpbootstrap-pod
+sudo systemctl status ztpbootstrap
 
 # 8. Test the feature end-to-end
 curl -k https://localhost/health
@@ -375,7 +375,7 @@ cd ~/ztpbootstrap
 # Verify services were stopped and restarted
 
 # 7. Verify upgrade succeeded
-sudo systemctl status ztpbootstrap-pod
+sudo systemctl status ztpbootstrap
 curl -k https://localhost/health
 ```
 
@@ -400,7 +400,7 @@ cd ~/ztpbootstrap
 # Should start services automatically
 
 # 5. Verify services are running
-sudo systemctl status ztpbootstrap-pod
+sudo systemctl status ztpbootstrap
 ```
 
 ---
@@ -477,12 +477,12 @@ chmod +x setup-interactive.sh
 
 ```bash
 # Check service status
-sudo systemctl status ztpbootstrap-pod
+sudo systemctl status ztpbootstrap
 sudo systemctl status ztpbootstrap-nginx
 sudo systemctl status ztpbootstrap-webui
 
 # Check service logs
-sudo journalctl -u ztpbootstrap-pod -n 50
+sudo journalctl -u ztpbootstrap -n 50
 sudo journalctl -u ztpbootstrap-nginx -n 50
 sudo journalctl -u ztpbootstrap-webui -n 50
 
@@ -496,7 +496,7 @@ cat /etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod
 
 # Reload systemd and restart
 sudo systemctl daemon-reload
-sudo systemctl restart ztpbootstrap-pod
+sudo systemctl restart ztpbootstrap
 ```
 
 ---

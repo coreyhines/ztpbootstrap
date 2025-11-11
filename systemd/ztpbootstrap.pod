@@ -2,7 +2,7 @@
 Description=ZTP Bootstrap Service Pod
 
 [Pod]
-PodName=ztpbootstrap-pod
+PodName=ztpbootstrap
 Network=ztpbootstrap-net
 # IP and IP6 are set by setup.sh based on configuration
 # If not set, Podman will use DHCP to assign addresses
