@@ -35,6 +35,11 @@ SANITIZATION_NOTES.md
 *.qcow2
 *.raw
 
+# Documentation assets (keep screenshots)
+!docs/*.png
+!docs/*.jpg
+!docs/*.jpeg
+
 # Test-specific scripts (not needed by end users)
 restore-backup-from-fedora1.sh
 run-full-e2e-test.sh
