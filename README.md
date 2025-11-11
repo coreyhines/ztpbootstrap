@@ -2,60 +2,35 @@
 
 A containerized service that provides a secure HTTPS endpoint for serving Arista Zero Touch Provisioning (ZTP) bootstrap scripts to network devices.
 
+## Documentation
+
+**Getting Started:**
+- **[QUICK_START.md](QUICK_START.md)** - Complete step-by-step installation guide (start here!)
+- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and solutions
+- **[TESTING.md](TESTING.md)** - Testing procedures and validation scripts
+
+**For Developers:**
+- **[DEVELOPMENT.md](DEVELOPMENT.md)** - Development workflow, VM testing, and upgrade scenarios
+- **[ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md)** - Detailed architecture and design decisions
+- **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)** - Known issues and implementation notes
+
 ## Quick Start
 
-### Prerequisites
-
-- **Podman** 5.6+ installed (`podman --version`)
-- **Network configuration** - Choose one:
-  - **Macvlan network** (recommended for production) - Provides dedicated IP address, isolates containers from host network. Run `./check-macvlan.sh` to verify or create.
-  - **Host networking** (simpler, good for testing) - Containers share host's network stack, uses host IP addresses directly.
-- **Enrollment token** from CVaaS Device Registration page
-- **SSL certificates** ready (or use HTTP-only mode for testing)
-- **Root/sudo access** for setup
-
-### Installation
-
-**Recommended: Interactive Setup** (first-time users)
+**Prerequisites:** Podman 5.6+, enrollment token from CVaaS, SSL certificates (or HTTP-only mode for testing)
 
 ```bash
-# Install yq if needed
-# macOS: brew install yq
-# Linux: sudo dnf install yq  # or apt-get install yq
+# Clone repository
+git clone https://github.com/coreyhines/ztpbootstrap.git
+cd ztpbootstrap
 
-# Run interactive setup
+# Run interactive setup (recommended)
 ./setup-interactive.sh
 
-# Follow prompts to configure everything
-# Script will generate config.yaml and start the service
-```
-
-**Alternative: Automated Setup** (quick setup)
-
-```bash
-# 1. Create environment file
-cp ztpbootstrap.env.template ztpbootstrap.env
-# Edit ztpbootstrap.env and set ENROLLMENT_TOKEN
-
-# 2. Run automated setup
+# Or use automated setup
 sudo ./setup.sh
-
-# For HTTP-only mode (testing only):
-sudo ./setup.sh --http-only
 ```
 
-### Verify Installation
-
-```bash
-# Check service status
-sudo systemctl status ztpbootstrap-pod
-
-# Test health endpoint
-curl -k https://ztpboot.example.com/health
-
-# Access Web UI
-# Navigate to: https://ztpboot.example.com/ui/
-```
+**📖 For detailed installation instructions, see [QUICK_START.md](QUICK_START.md)**
 
 ---
 
@@ -103,6 +78,8 @@ The service runs as a **Podman pod** with multiple containers:
 - **Web UI Container**: Flask-based management interface (optional)
 - **Network**: Macvlan (dedicated IP) or host networking (shared host network)
 - **Systemd Integration**: Quadlet files for automatic service management
+
+**📖 For detailed architecture information, see [ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md)**
 
 ```
 ┌─────────────────┐
@@ -152,32 +129,25 @@ The service runs as a **Podman pod** with multiple containers:
 
 ## Setup Methods
 
-### Interactive Setup (Recommended)
-
-Guided setup with prompts for all configuration. Generates `config.yaml` for centralized configuration.
+**Interactive Setup** (Recommended for first-time users)
+- Guided prompts for all configuration
+- Generates `config.yaml` for centralized configuration
+- Detects and upgrades existing installations
+- Creates backups automatically
 
 ```bash
 ./setup-interactive.sh
 ```
 
-**Benefits:**
-- No manual file editing
-- Centralized YAML configuration
-- Detects and upgrades existing installations
-- Creates backups automatically
-
-See [Interactive Setup Details](#interactive-setup) for more information.
-
-### Automated Setup
-
-Quick setup using environment variables. Good for repeat deployments.
+**Automated Setup** (Quick setup for repeat deployments)
+- Uses environment variables from `ztpbootstrap.env`
+- Good for automation and repeat deployments
 
 ```bash
-# Configure ztpbootstrap.env first
 sudo ./setup.sh
 ```
 
-See [Automated Setup Details](#automated-setup) for more information.
+**📖 For detailed setup instructions, see [QUICK_START.md](QUICK_START.md)**
 
 ---
 
@@ -293,42 +263,25 @@ sudo ./integration-test.sh --http-only
 sudo /opt/containerdata/ztpbootstrap/test-service.sh
 ```
 
-See [TESTING.md](TESTING.md) for complete testing documentation.
+**📖 For complete testing documentation, see [TESTING.md](TESTING.md)**
 
 ---
 
 ## Troubleshooting
 
-**Service won't start?**
+**Quick checks:**
 ```bash
-sudo journalctl -u ztpbootstrap-pod -n 50
-sudo podman logs ztpbootstrap-nginx
-```
+# Service status
+sudo systemctl status ztpbootstrap-pod
 
-**Can't access bootstrap script?**
-```bash
-curl -k https://ztpboot.example.com/bootstrap.py
+# Container logs
+sudo podman logs ztpbootstrap-nginx
+
+# Health check
 curl -k https://ztpboot.example.com/health
 ```
 
-**SSL certificate issues?**
-```bash
-ls -la /opt/containerdata/certs/wild/
-openssl x509 -in /opt/containerdata/certs/wild/fullchain.pem -text -noout
-```
-
-See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for detailed troubleshooting guide.
-
----
-
-## Documentation
-
-- **[QUICK_START.md](QUICK_START.md)** - Step-by-step installation guide
-- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and solutions
-- **[TESTING.md](TESTING.md)** - Testing procedures and scripts
-- **[DEVELOPMENT.md](DEVELOPMENT.md)** - Development workflow and testing
-- **[KNOWN_ISSUES.md](KNOWN_ISSUES.md)** - Known issues and implementation notes
-- **[ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md)** - Architecture details
+**📖 For detailed troubleshooting guide, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)**
 
 ---
 
@@ -346,14 +299,18 @@ See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for detailed troubleshooting guide.
 - x86_64 not tested on ARM64 macOS (would require emulation). See [ARCHITECTURE_COMPARISON.md](ARCHITECTURE_COMPARISON.md) for details.
 - Ubuntu may have SSH/cloud-init issues in VM creation workflows. See [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for details.
 
+**Network Configuration:**
+- **Macvlan network** (recommended for production) - Provides dedicated IP address, isolates containers from host network. Run `./check-macvlan.sh` to verify or create.
+- **Host networking** (simpler, good for testing) - Containers share host's network stack, uses host IP addresses directly.
+
 ---
 
 ## Support
 
-For issues related to:
+**Need help?**
+- **This Service**: See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) or [GitHub Issues](https://github.com/coreyhines/ztpbootstrap/issues)
 - **Arista ZTP**: Check [Arista Documentation](https://www.arista.com/en/support/documentation)
 - **CVaaS**: Contact Arista Support or check [CVaaS Documentation](https://www.arista.com/en/products/eos/eos-cloudvision)
-- **This Service**: See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) or [GitHub Issues](https://github.com/coreyhines/ztpbootstrap/issues)
 
 ---
 
