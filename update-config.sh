@@ -313,11 +313,14 @@ update_nginx_conf() {
     
     # Update server_name in the first two server blocks only (HTTPS and HTTP redirect)
     # Do NOT update the default server block (which should have server_name _;)
-    # Use a more specific pattern that matches only the first two occurrences
-    # First, update the HTTPS server block (first occurrence)
-    sed -i.tmp "0,/server_name .*;/s|server_name .*;|server_name $server_name;|" "$nginx_file"
-    # Then, update the HTTP redirect server block (second occurrence)
-    sed -i.tmp "0,/server_name .*;/s|server_name .*;|server_name $server_name;|" "$nginx_file"
+    # Use awk to replace only the first two occurrences, skipping the default server block
+    awk -v new_server_name="$server_name" '
+        /server_name/ && count < 2 && !/server_name _;/ {
+            sub(/server_name .*;/, "server_name " new_server_name ";")
+            count++
+        }
+        { print }
+    ' "$nginx_file" > "${nginx_file}.tmp2" && mv "${nginx_file}.tmp2" "$nginx_file"
     
     # Update ports if needed
     if [[ "$http_only" == "true" ]]; then
