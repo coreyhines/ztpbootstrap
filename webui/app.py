@@ -7,13 +7,16 @@ Lightweight Flask application for configuration and monitoring
 import json
 import os
 import re
+import secrets
 import subprocess
 import time
 import yaml
 from collections import defaultdict
 from datetime import datetime, timedelta
+from functools import wraps
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_from_directory, session
+from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
 
@@ -32,6 +35,205 @@ if not NGINX_ACCESS_LOG.exists():
     NGINX_ACCESS_LOG = CONFIG_DIR / 'logs' / 'ztpbootstrap_access.log'
 if not NGINX_ERROR_LOG.exists():
     NGINX_ERROR_LOG = CONFIG_DIR / 'logs' / 'ztpbootstrap_error.log'
+
+# ============================================================================
+# Authentication Configuration
+# ============================================================================
+
+# Load authentication configuration
+def load_auth_config():
+    """Load authentication configuration from config.yaml or environment"""
+    config = {
+        'admin_password_hash': None,
+        'session_timeout': 3600,  # Default: 1 hour
+        'session_secret': None
+    }
+    
+    # Try to load from config.yaml
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                yaml_config = yaml.safe_load(f)
+                if yaml_config and 'auth' in yaml_config:
+                    auth_config = yaml_config['auth']
+                    if 'admin_password_hash' in auth_config:
+                        config['admin_password_hash'] = auth_config['admin_password_hash']
+                    if 'session_timeout' in auth_config:
+                        config['session_timeout'] = auth_config['session_timeout']
+                    if 'session_secret' in auth_config:
+                        config['session_secret'] = auth_config['session_secret']
+        except Exception as e:
+            print(f"Warning: Failed to load auth config from {CONFIG_FILE}: {e}")
+    
+    # Override with environment variable if set
+    env_password = os.environ.get('ZTP_ADMIN_PASSWORD')
+    if env_password:
+        # Hash the plain text password from environment
+        config['admin_password_hash'] = generate_password_hash(env_password)
+    
+    # Generate session secret if not provided
+    if not config['session_secret']:
+        config['session_secret'] = secrets.token_hex(32)
+    
+    return config
+
+# Load auth config
+AUTH_CONFIG = load_auth_config()
+
+# Configure Flask session
+app.secret_key = AUTH_CONFIG['session_secret']
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# Only set Secure flag if HTTPS is available
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('HTTPS_ENABLED', 'false').lower() == 'true'
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(seconds=AUTH_CONFIG['session_timeout'])
+
+# Rate limiting storage (simple in-memory dict)
+login_attempts = {}
+
+def clean_old_attempts():
+    """Clean up old login attempts (older than 15 minutes)"""
+    cutoff = time.time() - 900  # 15 minutes
+    to_remove = [ip for ip, data in login_attempts.items() if data['reset_time'] < cutoff]
+    for ip in to_remove:
+        del login_attempts[ip]
+
+def is_rate_limited(ip):
+    """Check if IP is rate limited"""
+    clean_old_attempts()
+    if ip in login_attempts:
+        data = login_attempts[ip]
+        if data['attempts'] >= 5 and time.time() < data['reset_time']:
+            return True
+    return False
+
+def record_login_attempt(ip, success):
+    """Record a login attempt"""
+    clean_old_attempts()
+    if ip not in login_attempts:
+        login_attempts[ip] = {'attempts': 0, 'reset_time': time.time() + 900}
+    
+    if success:
+        # Reset on successful login
+        if ip in login_attempts:
+            del login_attempts[ip]
+    else:
+        # Increment failed attempts
+        login_attempts[ip]['attempts'] += 1
+        # Reset time is 15 minutes from first failed attempt
+        if login_attempts[ip]['attempts'] == 1:
+            login_attempts[ip]['reset_time'] = time.time() + 900
+
+def is_authenticated():
+    """Check if current session is authenticated"""
+    if 'authenticated' not in session:
+        return False
+    if not session['authenticated']:
+        return False
+    # Check if session has expired
+    if 'expires_at' in session:
+        if time.time() > session['expires_at']:
+            # Session expired
+            session.clear()
+            return False
+    return True
+
+def require_auth(f):
+    """Decorator to require authentication for write endpoints"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not is_authenticated():
+            return jsonify({'error': 'Authentication required', 'code': 'AUTH_REQUIRED'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+# ============================================================================
+# Authentication Endpoints
+# ============================================================================
+
+@app.route('/api/auth/status')
+def auth_status():
+    """Get current authentication status"""
+    if is_authenticated():
+        return jsonify({
+            'authenticated': True,
+            'expires_at': session.get('expires_at')
+        })
+    return jsonify({
+        'authenticated': False,
+        'expires_at': None
+    })
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    """Login endpoint"""
+    try:
+        # Get client IP
+        client_ip = request.remote_addr or 'unknown'
+        
+        # Check rate limiting
+        if is_rate_limited(client_ip):
+            return jsonify({
+                'error': 'Too many login attempts. Please try again later.',
+                'code': 'RATE_LIMITED'
+            }), 429
+        
+        # Check if authentication is configured
+        if not AUTH_CONFIG['admin_password_hash']:
+            return jsonify({
+                'error': 'Authentication is not configured',
+                'code': 'AUTH_NOT_CONFIGURED'
+            }), 503
+        
+        # Get password from request
+        data = request.get_json()
+        if not data or 'password' not in data:
+            record_login_attempt(client_ip, False)
+            return jsonify({
+                'error': 'Password is required',
+                'code': 'MISSING_PASSWORD'
+            }), 400
+        
+        password = data['password']
+        
+        # Verify password
+        if check_password_hash(AUTH_CONFIG['admin_password_hash'], password):
+            # Successful login
+            record_login_attempt(client_ip, True)
+            
+            # Create session
+            session['authenticated'] = True
+            session['login_time'] = time.time()
+            session['expires_at'] = time.time() + AUTH_CONFIG['session_timeout']
+            session.permanent = True
+            
+            return jsonify({
+                'success': True,
+                'expires_at': session['expires_at']
+            })
+        else:
+            # Failed login
+            record_login_attempt(client_ip, False)
+            return jsonify({
+                'error': 'Invalid password',
+                'code': 'INVALID_PASSWORD'
+            }), 401
+    except Exception as e:
+        print(f"Login error: {e}")
+        return jsonify({
+            'error': 'Login failed',
+            'code': 'LOGIN_ERROR'
+        }), 500
+
+@app.route('/api/auth/logout', methods=['POST'])
+def auth_logout():
+    """Logout endpoint"""
+    session.clear()
+    return jsonify({'success': True})
+
+# ============================================================================
+# Original Routes (Read-Only - No Auth Required)
+# ============================================================================
 
 @app.route('/')
 def index():
@@ -244,6 +446,7 @@ def get_bootstrap_script(filename):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/bootstrap-script/<filename>/set-active', methods=['POST'])
+@require_auth
 def set_active_script(filename):
     """Set a bootstrap script as active"""
     try:
@@ -315,6 +518,7 @@ def set_active_script(filename):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/bootstrap-script/<filename>/rename', methods=['POST'])
+@require_auth
 def rename_bootstrap_script(filename):
     """Rename a bootstrap script"""
     try:
@@ -376,6 +580,7 @@ def rename_bootstrap_script(filename):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/bootstrap-script/<filename>', methods=['DELETE'])
+@require_auth
 def delete_bootstrap_script(filename):
     """Delete a bootstrap script"""
     try:
@@ -455,6 +660,7 @@ def list_backup_scripts():
     return jsonify({'backups': backups})
 
 @app.route('/api/bootstrap-script/backup/<filename>/restore', methods=['POST'])
+@require_auth
 def restore_backup_script(filename):
     """Restore a backup script"""
     try:
@@ -505,6 +711,7 @@ def restore_backup_script(filename):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/bootstrap-script/upload', methods=['POST'])
+@require_auth
 def upload_bootstrap_script():
     """Upload a new bootstrap script"""
     try:
@@ -981,6 +1188,7 @@ def get_logs():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/logs/mark', methods=['POST'])
+@require_auth
 def mark_logs():
     """Insert a MARK line into the nginx logs"""
     try:

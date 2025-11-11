@@ -131,3 +131,20 @@ service:
   
   # Restart policy
   restart_policy: "on-failure"
+
+# ============================================================================
+# Authentication Configuration
+# ============================================================================
+auth:
+  # Admin password hash (never store plain text passwords)
+  # Generated during setup or set via ZTP_ADMIN_PASSWORD environment variable
+  # Leave empty to disable authentication (read-only mode will still work)
+  admin_password_hash: ""
+  
+  # Session timeout in seconds (default: 3600 = 1 hour)
+  session_timeout: 3600
+  
+  # Session secret key for signing session tokens
+  # Auto-generated if not set, but should be set explicitly for production
+  # Use a long random string (e.g., generated with: python3 -c "import secrets; print(secrets.token_hex(32))")
+  session_secret: ""
