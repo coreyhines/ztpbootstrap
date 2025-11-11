@@ -1696,12 +1696,13 @@ create_pod_files_from_config() {
         local webui_service_generated=false
         if command -v /usr/libexec/podman/quadlet >/dev/null 2>&1; then
             local quadlet_output
+            local quadlet_exit_code=0
             if [[ $EUID -eq 0 ]]; then
-                quadlet_output=$(/usr/libexec/podman/quadlet "$webui_container_file" 2>&1)
+                quadlet_output=$(/usr/libexec/podman/quadlet "$webui_container_file" 2>&1) || quadlet_exit_code=$?
             else
-                quadlet_output=$(sudo /usr/libexec/podman/quadlet "$webui_container_file" 2>&1)
+                quadlet_output=$(sudo /usr/libexec/podman/quadlet "$webui_container_file" 2>&1) || quadlet_exit_code=$?
             fi
-            if [[ $? -eq 0 ]] && [[ -n "$quadlet_output" ]]; then
+            if [[ $quadlet_exit_code -eq 0 ]] && [[ -n "$quadlet_output" ]]; then
                 # Check if service file was created in generator directory
                 if [[ -f "/run/systemd/generator/ztpbootstrap-webui.service" ]]; then
                     log "WebUI service generated successfully by quadlet"
