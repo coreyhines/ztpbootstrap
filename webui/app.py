@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import time
+import yaml
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -42,18 +43,14 @@ def get_config():
     """Get current configuration"""
     try:
         if CONFIG_FILE.exists():
-            # Try to read YAML if yq is available
+            raw_content = CONFIG_FILE.read_text()
+            # Try to parse YAML using PyYAML
             try:
-                result = subprocess.run(
-                    ['yq', 'eval', '-o=json', str(CONFIG_FILE)],
-                    capture_output=True,
-                    text=True,
-                    check=True
-                )
-                return jsonify({'parsed': json.loads(result.stdout), 'raw': CONFIG_FILE.read_text()})
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                # Fallback: read as text
-                return jsonify({'raw': CONFIG_FILE.read_text(), 'parsed': None})
+                parsed_config = yaml.safe_load(raw_content)
+                return jsonify({'parsed': parsed_config, 'raw': raw_content})
+            except yaml.YAMLError as e:
+                # YAML parsing failed, return raw content
+                return jsonify({'raw': raw_content, 'parsed': None, 'error': f'YAML parse error: {str(e)}'})
         else:
             return jsonify({'error': 'Config file not found'}), 404
     except Exception as e:
