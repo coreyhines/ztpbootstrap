@@ -20,7 +20,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
 # Enable template auto-reload in production for development/testing
-app.config['TEMPLATES_AUTO_RELOAD'] = True
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 # Configuration paths
 CONFIG_DIR = Path(os.environ.get('ZTP_CONFIG_DIR', '/opt/containerdata/ztpbootstrap'))
@@ -199,7 +199,31 @@ def auth_login():
         password = data['password']
         
         # Verify password
-        if check_password_hash(AUTH_CONFIG['admin_password_hash'], password):
+        # Handle both Werkzeug format and fallback format from setup script
+        password_hash = AUTH_CONFIG['admin_password_hash']
+        password_valid = False
+        
+        # Try Werkzeug's check_password_hash first (standard format)
+        try:
+            password_valid = check_password_hash(password_hash, password)
+        except (ValueError, TypeError):
+            # If that fails, try the fallback format from setup-interactive.sh
+            # Format: pbkdf2:sha256:<base64_hash>
+            if password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
+                import hashlib
+                import base64
+                try:
+                    # Extract the base64 hash
+                    hash_part = password_hash.split(':', 2)[2]
+                    # Decode the base64 hash
+                    stored_hash = base64.b64decode(hash_part)
+                    # Generate hash with same parameters (salt='ztpbootstrap', iterations=100000)
+                    computed_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)
+                    password_valid = (stored_hash == computed_hash)
+                except Exception:
+                    password_valid = False
+        
+        if password_valid:
             # Successful login
             record_login_attempt(client_ip, True)
             
