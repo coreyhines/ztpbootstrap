@@ -617,16 +617,26 @@
                         const data = await response.json();
                         
                         if (response.ok && data.success) {
+                            // Update authentication state first
                             this.authenticated = true;
                             this.authExpiresAt = data.expires_at;
+                            
+                            // Wait for Alpine.js to process the state change
+                            await this.$nextTick();
+                            
+                            // Hide modal and clear form
                             this.showLoginModal = false;
                             this.loginPassword = '';
                             this.loginError = '';
                             
-                            // Execute pending action if any
+                            // Wait again to ensure modal is hidden
+                            await this.$nextTick();
+                            
+                            // Execute pending action if any (now that we're authenticated)
                             if (this.pendingAction) {
-                                await this.pendingAction();
+                                const action = this.pendingAction;
                                 this.pendingAction = null;
+                                await action();
                             }
                         } else {
                             this.loginError = data.error || 'Login failed';
@@ -655,16 +665,23 @@
                 },
                 
                 async requireAuth(action) {
+                    // Double-check authentication status
                     if (this.authenticated) {
                         return await action();
                     } else {
-                        this.pendingAction = action;
-                        // Set showLoginModal to true and force Alpine.js reactivity
-                        this.showLoginModal = true;
-                        // Use $dispatch to ensure Alpine.js processes the change
-                        this.$dispatch('login-modal-show');
-                        await this.$nextTick();
-                        console.log('Login modal should be visible:', this.showLoginModal);
+                        // Only show modal if not already showing
+                        if (!this.showLoginModal) {
+                            this.pendingAction = action;
+                            // Set showLoginModal to true and force Alpine.js reactivity
+                            this.showLoginModal = true;
+                            // Use $dispatch to ensure Alpine.js processes the change
+                            this.$dispatch('login-modal-show');
+                            await this.$nextTick();
+                            console.log('Login modal should be visible:', this.showLoginModal);
+                        } else {
+                            // Modal already showing, just store the action
+                            this.pendingAction = action;
+                        }
                         return; // Return early to prevent action from executing
                     }
                 },
