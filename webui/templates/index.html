@@ -650,9 +650,9 @@
                     }
                 },
                 
-                requireAuth(action) {
+                async requireAuth(action) {
                     if (this.authenticated) {
-                        return action();
+                        return await action();
                     } else {
                         this.pendingAction = action;
                         this.showLoginModal = true;
