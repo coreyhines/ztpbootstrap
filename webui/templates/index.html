@@ -505,11 +505,13 @@
                             return;
                         }
                         const data = await response.json();
+                        console.log('Status API response:', data);
                         // Update status properties individually for Alpine.js reactivity
                         this.status.container_running = data.container_running || false;
                         this.status.health_ok = data.health_ok || false;
                         this.status.config_exists = data.config_exists || false;
                         this.status.bootstrap_script_exists = data.bootstrap_script_exists || false;
+                        console.log('Status object after update:', this.status);
                     } catch (error) {
                         console.error('Failed to load status:', error);
                     }
