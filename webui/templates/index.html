@@ -866,26 +866,35 @@
                 },
                 
                 async toggleServeAsFilename(filename, serveAsFilename) {
-                    try {
-                        const response = await fetch(`/api/bootstrap-script/${filename}/serve-as-filename`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                serve_as_filename: serveAsFilename
-                            })
-                        });
-                        const data = await response.json();
-                        if (data.success) {
-                            // Refresh scripts list to show updated status
-                            await this.loadScripts();
-                        } else {
-                            alert('Failed to update setting: ' + (data.error || 'Unknown error'));
+                    await this.requireAuth(async () => {
+                        try {
+                            const response = await fetch(`/api/bootstrap-script/${filename}/serve-as-filename`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({
+                                    serve_as_filename: serveAsFilename
+                                }),
+                                credentials: 'same-origin'
+                            });
+                            const data = await response.json();
+                            if (response.status === 401) {
+                                this.authenticated = false;
+                                this.pendingAction = () => this.toggleServeAsFilename(filename, serveAsFilename);
+                                this.showLoginModal = true;
+                                return;
+                            }
+                            if (data.success) {
+                                // Refresh scripts list to show updated status
+                                await this.loadScripts();
+                            } else {
+                                alert('Failed to update setting: ' + (data.error || 'Unknown error'));
+                            }
+                        } catch (error) {
+                            alert('Failed to update setting: ' + error.message);
                         }
-                    } catch (error) {
-                        alert('Failed to update setting: ' + error.message);
-                    }
+                    });
                 },
                 
                 async restoreBackup(filename, restoreAs) {
