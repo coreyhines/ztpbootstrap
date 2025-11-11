@@ -662,13 +662,13 @@ def parse_nginx_access_log():
             user_agent = match.group(9)
             
             # Skip health checks, UI requests, and API requests (WebUI's own requests)
-            # Note: We allow browser downloads of /bootstrap.py to be tracked (for testing purposes)
+            # Note: We allow browser downloads of /bootstrap.py and / (root, which serves bootstrap.py) to be tracked (for testing purposes)
             # but filter out other browser requests (UI, API, etc.)
             if (path in ['/health', '/ui', '/api'] or 
                 path.startswith('/ui/') or 
                 path.startswith('/api/') or
                 '/api/' in path or
-                (user_agent and ('Mozilla' in user_agent or 'Gecko' in user_agent or 'Chrome' in user_agent or 'Safari' in user_agent) and path != '/bootstrap.py')):
+                (user_agent and ('Mozilla' in user_agent or 'Gecko' in user_agent or 'Chrome' in user_agent or 'Safari' in user_agent) and path != '/bootstrap.py' and path != '/')):
                 # Mark as processed but don't count
                 new_processed_lines.add(line_stripped)
                 continue
@@ -699,8 +699,8 @@ def parse_nginx_access_log():
             device['last_seen'] = timestamp
             device['total_requests'] = device.get('total_requests', 0) + 1
             
-            # Track bootstrap.py downloads
-            if path == '/bootstrap.py' and status == 200:
+            # Track bootstrap.py downloads (both /bootstrap.py and / which serves bootstrap.py as index)
+            if (path == '/bootstrap.py' or (path == '/' and status == 200)) and status == 200:
                 device['bootstrap_downloaded'] = True
                 if not device['bootstrap_download_time'] or timestamp > device['bootstrap_download_time']:
                     device['bootstrap_download_time'] = timestamp
