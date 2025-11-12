@@ -17,12 +17,12 @@ echo "Password: $PASSWORD"
 echo ""
 
 # Generate hash using Python (same method as webui)
-PASSWORD_HASH=$(python3 <<PYTHON_GEN
+PASSWORD_HASH=$(echo -n "$PASSWORD" | python3 <<'PYTHON_GEN'
 import sys
 import hashlib
 import base64
 
-password = """$PASSWORD"""
+password = sys.stdin.read()
 if len(password) == 0:
     sys.stderr.write("ERROR: Empty password!\n")
     sys.exit(1)
