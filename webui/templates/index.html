@@ -695,11 +695,14 @@
                 },
                 
                 async requireAuth(action) {
+                    console.log('requireAuth called, current authenticated state:', this.authenticated);
                     // Always check auth status first to ensure it's current
                     await this.checkAuthStatus();
+                    console.log('After checkAuthStatus, authenticated:', this.authenticated);
                     
                     // Double-check authentication status
                     if (!this.authenticated) {
+                        console.log('User not authenticated, showing login modal');
                         // Only show modal if not already showing
                         if (!this.showLoginModal) {
                             this.pendingAction = action;
@@ -714,9 +717,11 @@
                             this.pendingAction = action;
                         }
                         // Return early to prevent action from executing
+                        console.log('requireAuth returning early (not authenticated)');
                         return;
                     }
                     // User is authenticated, execute the action
+                    console.log('User authenticated, executing action');
                     return await action();
                 },
                 
@@ -776,10 +781,16 @@
                 },
                 
                 async uploadScript(event) {
+                    console.log('uploadScript called, authenticated:', this.authenticated);
                     const file = event.target.files[0];
-                    if (!file) return;
+                    if (!file) {
+                        console.log('No file selected, returning');
+                        return;
+                    }
                     
-                    await this.requireAuth(async () => {
+                    console.log('Calling requireAuth for upload');
+                    const result = await this.requireAuth(async () => {
+                        console.log('Upload action executing (user is authenticated)');
                         const formData = new FormData();
                         formData.append('file', file);
                         
@@ -806,6 +817,12 @@
                             alert('Upload failed: ' + error.message);
                         }
                     });
+                    
+                    console.log('requireAuth returned, result:', result);
+                    if (result === undefined) {
+                        console.log('requireAuth returned undefined - auth required, upload prevented');
+                    }
+                    
                     event.target.value = ''; // Reset file input
                 },
                 
