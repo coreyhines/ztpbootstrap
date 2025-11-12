@@ -178,7 +178,6 @@ jobs:
         sudo cp integration-test.sh /opt/containerdata/ztpbootstrap/
         sudo cp ci-test.sh /opt/containerdata/ztpbootstrap/
         sudo cp README.md /opt/containerdata/ztpbootstrap/
-        sudo cp SETUP_INSTRUCTIONS.md /opt/containerdata/ztpbootstrap/
     
     - name: Run CI validation tests
       run: |
