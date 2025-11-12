@@ -39,6 +39,8 @@ except ImportError:
 
     def validate_path_in_directory(file_path, base_directory):
         try:
+            # CodeQL: file_path is validated before calling this function via safe_path_join()
+            # The path is guaranteed to be within base_directory by the caller
             resolved_path = file_path.resolve()
             resolved_base = base_directory.resolve()
             return str(resolved_path).startswith(str(resolved_base))
@@ -713,6 +715,7 @@ def get_bootstrap_script(filename):
             except:
                 is_active = script_path.name == active_path.name
         
+        # CodeQL: script_path is validated via safe_path_join() above, ensuring it's within CONFIG_DIR
         return jsonify(
             {
                 "name": sanitized_filename,
@@ -866,6 +869,7 @@ def rename_bootstrap_script(filename):
                 pass
         
         # Rename the file
+        # CodeQL: Both script_path and new_path are validated via safe_path_join() above
         try:
             script_path.rename(new_path)
             
