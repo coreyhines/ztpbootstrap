@@ -280,6 +280,9 @@ ssh -p 2222 user@localhost './restore-backup-from-fedora1.sh'
 # Run interactive setup (non-interactive mode)
 ./setup-interactive.sh --non-interactive
 
+# Run upgrade mode (requires existing installation, non-interactive)
+./setup-interactive.sh --upgrade
+
 # Check service status
 sudo systemctl status ztpbootstrap
 sudo systemctl status ztpbootstrap-nginx
@@ -366,11 +369,16 @@ cat /opt/containerdata/ztpbootstrap/ztpbootstrap.env
 cd ~/ztpbootstrap
 ./setup-interactive.sh
 
+# Or use upgrade mode (non-interactive, preserves all values)
+./setup-interactive.sh --upgrade
+
 # 5. Verify it detected existing values
-# Check that prompts show existing values as defaults
+# Check that prompts show existing values as defaults (interactive mode)
+# Or verify all values were preserved automatically (upgrade mode)
 
 # 6. Complete the upgrade
-# Accept defaults or modify as needed
+# Accept defaults or modify as needed (interactive mode)
+# Or verify automatic upgrade completed (upgrade mode)
 # Verify backup was created
 # Verify services were stopped and restarted
 

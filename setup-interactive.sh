@@ -442,7 +442,7 @@ restore_backup() {
     log ""
     log "Next steps:"
     log "  1. Reload systemd: sudo systemctl daemon-reload"
-    log "  2. Restart services if needed: sudo systemctl restart ztpbootstrap"
+    log "  2. Restart services if needed: sudo systemctl restart ztpbootstrap-pod"
     echo ""
     
     return 0
@@ -459,9 +459,9 @@ check_running_services() {
         service_type="single-container"
     fi
     
-    # Check for new pod-based services
-    if systemctl is-active --quiet ztpbootstrap.service 2>/dev/null; then
-        running_services+=("ztpbootstrap.service")
+    # Check for new pod-based services (quadlet generates ztpbootstrap-pod.service from ztpbootstrap.pod)
+    if systemctl is-active --quiet ztpbootstrap-pod.service 2>/dev/null; then
+        running_services+=("ztpbootstrap-pod.service")
         service_type="pod-based"
     fi
     if systemctl is-active --quiet ztpbootstrap-nginx.service 2>/dev/null; then
@@ -511,14 +511,15 @@ stop_services_gracefully() {
     elif [[ "$service_type" == "pod-based" ]]; then
         # New version: stop containers first, then pod
         log "Stopping pod-based services..."
+        local pod_service_name="ztpbootstrap-pod.service"
         if [[ $EUID -eq 0 ]]; then
             systemctl stop ztpbootstrap-nginx.service ztpbootstrap-webui.service 2>/dev/null || true
             sleep 1
-            systemctl stop ztpbootstrap.service 2>/dev/null || warn "Failed to stop ztpbootstrap.service"
+            systemctl stop "$pod_service_name" 2>/dev/null || warn "Failed to stop $pod_service_name"
         else
             sudo systemctl stop ztpbootstrap-nginx.service ztpbootstrap-webui.service 2>/dev/null || true
             sleep 1
-            sudo systemctl stop ztpbootstrap.service 2>/dev/null || warn "Failed to stop ztpbootstrap.service"
+            sudo systemctl stop "$pod_service_name" 2>/dev/null || warn "Failed to stop $pod_service_name"
         fi
         sleep 2
     fi
@@ -1098,6 +1099,19 @@ read_config_yaml() {
         values+=("DNS2=$dns2")
     fi
     
+    # Read auth settings
+    local admin_password_hash
+    admin_password_hash=$(yq eval '.auth.admin_password_hash // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$admin_password_hash" ]] && [[ "$admin_password_hash" != "null" ]] && [[ "$admin_password_hash" != "" ]]; then
+        values+=("ADMIN_PASSWORD_HASH=$admin_password_hash")
+    fi
+    
+    local session_timeout
+    session_timeout=$(yq eval '.auth.session_timeout // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$session_timeout" ]] && [[ "$session_timeout" != "null" ]]; then
+        values+=("SESSION_TIMEOUT=$session_timeout")
+    fi
+    
     # Output as key=value pairs (one per line)
     printf '%s\n' "${values[@]}"
     return 0
@@ -1123,6 +1137,8 @@ load_existing_installation_values() {
     EXISTING_NETWORK=""
     EXISTING_HTTP_ONLY=""
     EXISTING_HTTPS_PORT=""
+    EXISTING_ADMIN_PASSWORD_HASH=""
+    EXISTING_SESSION_TIMEOUT=""
     
     log "Reading existing installation values..."
     
@@ -1154,6 +1170,8 @@ load_existing_installation_values() {
                 TIMEZONE) EXISTING_TIMEZONE="$value" ;;
                 DNS1) EXISTING_DNS1="$value" ;;
                 DNS2) EXISTING_DNS2="$value" ;;
+                ADMIN_PASSWORD_HASH) EXISTING_ADMIN_PASSWORD_HASH="$value" ;;
+                SESSION_TIMEOUT) EXISTING_SESSION_TIMEOUT="$value" ;;
             esac
         done < <(read_config_yaml "config.yaml" "$(dirname "$config_file")")
         log "  Loaded values from config.yaml"
@@ -1913,15 +1931,16 @@ EOF
         fi
     fi
     
-    # Start pod service
+    # Start pod service (quadlet generates ztpbootstrap-pod.service from ztpbootstrap.pod)
+    local pod_service_name="ztpbootstrap-pod.service"
     if [[ $EUID -eq 0 ]]; then
-        if systemctl start ztpbootstrap.service 2>&1; then
-            log "✓ Started ztpbootstrap.service"
+        if systemctl start "$pod_service_name" 2>&1; then
+            log "✓ Started $pod_service_name"
             sleep 2
         else
             local pod_error
-            pod_error=$(systemctl status ztpbootstrap.service --no-pager -l 2>&1 | tail -10 || echo "Could not get status")
-            warn "Failed to start ztpbootstrap.service"
+            pod_error=$(systemctl status "$pod_service_name" --no-pager -l 2>&1 | tail -10 || echo "Could not get status")
+            warn "Failed to start $pod_service_name"
             warn "Error details: ${pod_error:0:300}"
         fi
         
@@ -1941,13 +1960,13 @@ EOF
             fi
         fi
     else
-        if sudo systemctl start ztpbootstrap.service 2>&1; then
-            log "✓ Started ztpbootstrap.service"
+        if sudo systemctl start "$pod_service_name" 2>&1; then
+            log "✓ Started $pod_service_name"
             sleep 2
         else
             local pod_error
-            pod_error=$(sudo systemctl status ztpbootstrap.service --no-pager -l 2>&1 | tail -10 || echo "Could not get status")
-            warn "Failed to start ztpbootstrap.service"
+            pod_error=$(sudo systemctl status "$pod_service_name" --no-pager -l 2>&1 | tail -10 || echo "Could not get status")
+            warn "Failed to start $pod_service_name"
             warn "Error details: ${pod_error:0:300}"
         fi
         
@@ -2185,10 +2204,112 @@ interactive_config() {
     log "modify scripts) require authentication. Set an admin password to enable this."
     echo ""
     
-    # Ask if user wants to set a password
-    prompt_yes_no "Set admin password for Web UI write operations?" "y" SET_ADMIN_PASSWORD
-    
-    if [[ "$SET_ADMIN_PASSWORD" == "true" ]]; then
+    # Check if --reset-pass was provided (takes precedence)
+    if [[ -n "${RESET_PASSWORD:-}" ]]; then
+        log "Password reset requested via --reset-pass flag."
+        # Debug: log password details (without exposing the actual password)
+        log "Password length: ${#RESET_PASSWORD} characters"
+        # Validate password length
+        if [[ ${#RESET_PASSWORD} -lt 8 ]]; then
+            error "Password must be at least 8 characters long."
+            exit 1
+        fi
+        # Hash the password using Python (use stdin to avoid shell escaping issues)
+        log "Hashing password..."
+        # Try werkzeug first (suppress stderr to avoid traceback)
+        ADMIN_PASSWORD_HASH=$(echo "$RESET_PASSWORD" | python3 2>/dev/null <<'PYTHON_SCRIPT'
+import sys
+password = sys.stdin.read().rstrip('\n')
+# Verify we got the password correctly
+if len(password) == 0:
+    sys.stderr.write("ERROR: Empty password received!\n")
+    sys.exit(1)
+try:
+    from werkzeug.security import generate_password_hash
+    hash_value = generate_password_hash(password)
+    print(hash_value)
+except ImportError:
+    # Werkzeug not available, fall back to hashlib
+    import hashlib
+    import base64
+    hash_value = 'pbkdf2:sha256:' + base64.b64encode(hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)).decode()
+    print(hash_value)
+PYTHON_SCRIPT
+)
+        
+        if [[ -z "$ADMIN_PASSWORD_HASH" ]]; then
+            # Fallback: use Python's built-in hashlib (should always be available)
+            ADMIN_PASSWORD_HASH=$(echo "$RESET_PASSWORD" | python3 <<'PYTHON_SCRIPT' 2>/dev/null
+import sys
+import hashlib
+import base64
+password = sys.stdin.read().rstrip('\n')
+hash_value = 'pbkdf2:sha256:' + base64.b64encode(hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)).decode()
+print(hash_value)
+PYTHON_SCRIPT
+)
+        fi
+        
+        if [[ -n "$ADMIN_PASSWORD_HASH" ]]; then
+            log "Password hash generated successfully."
+            log "Hash format: $(echo "$ADMIN_PASSWORD_HASH" | cut -d: -f1)"
+            log "Hash length: ${#ADMIN_PASSWORD_HASH} characters"
+            log "Hash preview: ${ADMIN_PASSWORD_HASH:0:30}..."
+            
+            # Verify the hash works with the password we just hashed
+            log "Verifying hash matches password..."
+            VERIFICATION_RESULT=$(echo "$RESET_PASSWORD" | python3 2>/dev/null <<PYTHON_VERIFY
+import sys
+import hashlib
+import base64
+password = sys.stdin.read().rstrip('\n')
+hash_value = "$ADMIN_PASSWORD_HASH"
+
+if hash_value.startswith('pbkdf2:sha256:') and '\$' not in hash_value:
+    hash_part = hash_value.split(':', 2)[2]
+    stored_hash = base64.b64decode(hash_part)
+    computed_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)
+    match = (stored_hash == computed_hash)
+    print("MATCH" if match else "MISMATCH")
+else:
+    try:
+        from werkzeug.security import check_password_hash
+        match = check_password_hash(hash_value, password)
+        print("MATCH" if match else "MISMATCH")
+    except:
+        print("ERROR")
+PYTHON_VERIFY
+)
+            
+            if [[ "$VERIFICATION_RESULT" == "MATCH" ]]; then
+                log "✓ Hash verification successful - password and hash match"
+            else
+                error "✗ Hash verification FAILED - password and hash do not match!"
+                error "This indicates a bug in password hashing. Please report this issue."
+                error "Password length was: ${#RESET_PASSWORD}"
+                exit 1
+            fi
+            
+            SET_ADMIN_PASSWORD="true"
+            # Clear password from memory
+            RESET_PASSWORD=""
+        else
+            error "Failed to hash password. Authentication will not be configured."
+            exit 1
+        fi
+    # In upgrade mode, use existing password hash if available (unless --reset-pass was used)
+    elif [[ "${UPGRADE_MODE:-false}" == "true" ]] && [[ -n "${EXISTING_ADMIN_PASSWORD_HASH:-}" ]]; then
+        log "Upgrade mode: Using existing admin password hash from previous installation."
+        ADMIN_PASSWORD_HASH="${EXISTING_ADMIN_PASSWORD_HASH}"
+        SET_ADMIN_PASSWORD="true"
+        if [[ -n "${EXISTING_SESSION_TIMEOUT:-}" ]]; then
+            SESSION_TIMEOUT="${EXISTING_SESSION_TIMEOUT}"
+        fi
+    else
+        # Ask if user wants to set a password
+        prompt_yes_no "Set admin password for Web UI write operations?" "y" SET_ADMIN_PASSWORD
+        
+        if [[ "$SET_ADMIN_PASSWORD" == "true" ]]; then
         # Prompt for password with confirmation
         local password_valid=false
         local attempts=0
@@ -2247,9 +2368,7 @@ interactive_config() {
             warn "Failed to set password after $attempts attempts. Skipping authentication setup."
             ADMIN_PASSWORD_HASH=""
         fi
-    else
-        log "Skipping authentication setup. Web UI will allow all operations without login."
-        ADMIN_PASSWORD_HASH=""
+        fi
     fi
     
     # Session timeout (optional, has reasonable default)
@@ -2708,7 +2827,7 @@ EOF
                     else
                         pod_output=$(sudo /usr/libexec/podman/quadlet "$pod_file" 2>&1) || pod_exit_code=$?
                     fi
-                    if [[ $pod_exit_code -eq 0 ]] && [[ -f "${generator_dir}/ztpbootstrap.service" ]]; then
+                    if [[ $pod_exit_code -eq 0 ]] && [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
                         log "Pod service file generated successfully"
                         pod_service_generated=true
                     else
@@ -2889,6 +3008,7 @@ parse_args() {
     RESTORE_MODE=false
     RESTORE_TIMESTAMP=""
     NON_INTERACTIVE=false
+    RESET_PASSWORD=""
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -2904,6 +3024,29 @@ parse_args() {
                 NON_INTERACTIVE=true
                 shift
                 ;;
+            --upgrade)
+                UPGRADE_MODE=true
+                NON_INTERACTIVE=true
+                shift
+                ;;
+            --reset-pass)
+                # If password argument is provided, use it; otherwise default to "ztpboot"
+                if [[ -n "${2:-}" ]] && [[ ! "$2" =~ ^- ]]; then
+                    # Remove quotes if present (handles both single and double quotes)
+                    RESET_PASSWORD="${2}"
+                    # Remove surrounding quotes if they match
+                    if [[ "${RESET_PASSWORD:0:1}" == "'" ]] && [[ "${RESET_PASSWORD: -1}" == "'" ]]; then
+                        RESET_PASSWORD="${RESET_PASSWORD:1:-1}"
+                    elif [[ "${RESET_PASSWORD:0:1}" == "\"" ]] && [[ "${RESET_PASSWORD: -1}" == "\"" ]]; then
+                        RESET_PASSWORD="${RESET_PASSWORD:1:-1}"
+                    fi
+                    shift 2
+                else
+                    # No password provided, use default
+                    RESET_PASSWORD="ztpboot123"
+                    shift
+                fi
+                ;;
             -h|--help)
                 cat << EOF
 Usage: $0 [OPTIONS]
@@ -2912,12 +3055,27 @@ Options:
     --restore [TIMESTAMP]    Restore from a previous backup
                             If TIMESTAMP is not provided, will list available backups
     --non-interactive        Run in non-interactive mode (use defaults, auto-answer prompts)
+                            Works for fresh installs or upgrades. If previous install exists,
+                            creates backup and uses previous values, but continues if backup fails.
     --auto                   Alias for --non-interactive
+    --upgrade                Upgrade existing installation (requires previous install)
+                            Strict upgrade mode: requires existing install, requires successful backup,
+                            uses all previous values, runs non-interactively. Use for upgrades only.
+    --reset-pass [PASSWORD] Set/reset admin password for Web UI (can be used with --upgrade)
+                            If PASSWORD is not provided, defaults to "ztpboot123"
+                            Password can be quoted: --reset-pass 'password' or --reset-pass "password"
+                            Overrides existing password hash in upgrade mode.
     -h, --help              Show this help message
 
 Examples:
     $0                      # Run interactive setup
-    $0 --non-interactive    # Run automated setup using defaults
+    $0 --non-interactive    # Run automated setup (works for fresh installs or upgrades)
+    $0 --auto               # Same as --non-interactive
+    $0 --upgrade            # Upgrade existing installation (non-interactive, preserves all values)
+    $0 --upgrade --reset-pass 'newpassword'  # Upgrade and reset password
+    $0 --upgrade --reset-pass  # Upgrade and reset to default password "ztpboot123"
+    $0 --reset-pass 'mypass123'  # Set password during setup
+    $0 --reset-pass  # Set default password "ztpboot123" during setup
     $0 --restore            # List and restore from available backups
     $0 --restore 20240101_120000  # Restore from specific backup
 
@@ -2958,6 +3116,18 @@ main() {
     local default_script_dir="/opt/containerdata/ztpbootstrap"
     local had_previous_install=false
     
+    # If --upgrade flag is used, require a previous installation
+    if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
+        log "Upgrade mode: Checking for existing installation..."
+        if ! detect_previous_install "$default_script_dir"; then
+            error "Upgrade mode requires an existing installation to be present."
+            error "No previous installation detected in: $default_script_dir"
+            error "Please run without --upgrade flag for a fresh installation."
+        fi
+        log "Upgrade mode: Previous installation detected. Proceeding with upgrade..."
+        echo ""
+    fi
+    
     # Always try to load existing values first (before any cleanup)
     # This allows us to use existing values even if detection fails
     log "Attempting to load existing installation values..."
@@ -2993,7 +3163,10 @@ main() {
             done
             echo ""
             warn "Services must be stopped before proceeding with installation/upgrade."
-            if [[ "$NON_INTERACTIVE" == "true" ]]; then
+            if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
+                STOP_SERVICES="true"
+                log "Upgrade mode: Auto-stopping services..."
+            elif [[ "$NON_INTERACTIVE" == "true" ]]; then
                 STOP_SERVICES="true"
                 log "Non-interactive mode: Auto-stopping services..."
             else
@@ -3013,7 +3186,10 @@ main() {
         fi
         
         # Create backup
-        if [[ "$NON_INTERACTIVE" == "true" ]]; then
+        if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
+            CREATE_BACKUP="true"
+            log "Upgrade mode: Auto-creating backup (required)..."
+        elif [[ "$NON_INTERACTIVE" == "true" ]]; then
             CREATE_BACKUP="true"
             log "Non-interactive mode: Auto-creating backup..."
         else
@@ -3022,6 +3198,10 @@ main() {
         
         if [[ "$CREATE_BACKUP" == "true" ]]; then
             if ! create_backup "$default_script_dir"; then
+                if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
+                    error "Upgrade mode requires a successful backup. Backup failed."
+                    error "Please resolve backup issues and try again."
+                fi
                 warn "Backup failed, but continuing with setup..."
                 if [[ "$NON_INTERACTIVE" == "true" ]]; then
                     CONTINUE_SETUP="true"
@@ -3061,7 +3241,14 @@ main() {
     load_existing_config || true
     
     # Run interactive configuration
-    if [[ "$NON_INTERACTIVE" == "true" ]]; then
+    if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
+        log "Upgrade mode: Using all previous installation values for configuration..."
+        log "All existing values will be preserved and applied automatically."
+        # Set APPLY_NOW to true automatically
+        APPLY_NOW="true"
+        # Use loaded existing values or defaults for all config
+        NON_INTERACTIVE_MODE=true interactive_config
+    elif [[ "$NON_INTERACTIVE" == "true" ]]; then
         log "Non-interactive mode: Using loaded defaults for all configuration..."
         # Set APPLY_NOW to true automatically
         APPLY_NOW="true"
@@ -3090,7 +3277,10 @@ main() {
         
         # Offer to start services
         echo ""
-        if [[ "$NON_INTERACTIVE" == "true" ]]; then
+        if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
+            START_SERVICES="true"
+            log "Upgrade mode: Auto-starting services..."
+        elif [[ "$NON_INTERACTIVE" == "true" ]]; then
             START_SERVICES="true"
             log "Non-interactive mode: Auto-starting services..."
         else
@@ -3101,8 +3291,32 @@ main() {
             start_services_after_install
             echo ""
             log "Services have been started. You can check status with:"
-            log "  systemctl status ztpbootstrap"
+            log "  systemctl status ztpbootstrap-pod"
             log "  systemctl status ztpbootstrap-nginx"
+            log "  systemctl status ztpbootstrap-webui"
+            # If password was reset, verify hash was written and remind about webui restart
+            if [[ -n "${ADMIN_PASSWORD_HASH:-}" ]]; then
+                echo ""
+                log "Password was reset. Verifying hash in config file..."
+                if command -v yq >/dev/null 2>&1 && [[ -f "$CONFIG_FILE" ]]; then
+                    local written_hash
+                    written_hash=$(yq eval '.auth.admin_password_hash // ""' "$CONFIG_FILE" 2>/dev/null || echo "")
+                    if [[ -n "$written_hash" ]]; then
+                        log "✓ Password hash found in config.yaml (length: ${#written_hash})"
+                        if [[ "$written_hash" == "$ADMIN_PASSWORD_HASH" ]]; then
+                            log "✓ Hash matches expected value"
+                        else
+                            warn "Hash mismatch! Expected: ${ADMIN_PASSWORD_HASH:0:30}..., Got: ${written_hash:0:30}..."
+                        fi
+                    else
+                        warn "Password hash not found in config.yaml!"
+                    fi
+                fi
+                log ""
+                log "Note: The webui service has been restarted to load the new password."
+                log "      If login still fails, verify the hash and restart webui:"
+                log "      sudo systemctl restart ztpbootstrap-webui"
+            fi
         else
             log "Next steps:"
             log "  1. Review the updated files if needed"

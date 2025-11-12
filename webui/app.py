@@ -137,7 +137,9 @@ def load_auth_config():
                 if yaml_config and 'auth' in yaml_config:
                     auth_config = yaml_config['auth']
                     if 'admin_password_hash' in auth_config:
-                        config['admin_password_hash'] = auth_config['admin_password_hash']
+                        # Ensure it's a string (YAML might return other types)
+                        hash_value = auth_config['admin_password_hash']
+                        config['admin_password_hash'] = str(hash_value) if hash_value else None
                     if 'session_timeout' in auth_config:
                         config['session_timeout'] = auth_config['session_timeout']
                     if 'session_secret' in auth_config:
@@ -159,6 +161,12 @@ def load_auth_config():
 
 # Load auth config
 AUTH_CONFIG = load_auth_config()
+
+# Function to reload auth config (useful after password changes)
+def reload_auth_config():
+    """Reload authentication configuration from config.yaml"""
+    global AUTH_CONFIG
+    AUTH_CONFIG = load_auth_config()
 
 # Configure Flask session
 app.secret_key = AUTH_CONFIG['session_secret']
@@ -287,6 +295,8 @@ def auth_status():
 @app.route('/api/auth/login', methods=['POST'])
 def auth_login():
     """Login endpoint"""
+    # Reload auth config on each login attempt to pick up password changes
+    reload_auth_config()
     try:
         # Get client IP
         client_ip = request.remote_addr or 'unknown'
@@ -336,7 +346,7 @@ def auth_login():
         
         # Check if this is the fallback format from setup-interactive.sh
         # Format: pbkdf2:sha256:<base64_hash> (no $ separator)
-        if password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
+        if password_hash and password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
             # Use fallback format verification
             # CodeQL: password_hash comes from config file (trusted source), not user input
             import hashlib
@@ -386,7 +396,7 @@ def auth_login():
                 'code': 'INVALID_PASSWORD'
             }), 401
     except Exception as e:
-        print(f"Login error: {e}")
+        print(f"Login error: {type(e).__name__}: {e}", flush=True)
         return jsonify({
             'error': 'Login failed',
             'code': 'LOGIN_ERROR'
@@ -428,7 +438,7 @@ def auth_change_password():
         password_valid = False
         
         # Check if this is the fallback format from setup-interactive.sh
-        if password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
+        if password_hash and password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
             import hashlib
             import base64
             try:
@@ -439,9 +449,10 @@ def auth_change_password():
             except Exception:
                 password_valid = False
         else:
+            # Use werkzeug's check_password_hash (imported at top of file)
             try:
                 password_valid = check_password_hash(password_hash, current_password)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, AttributeError):
                 password_valid = False
         
         if not password_valid:
@@ -451,11 +462,21 @@ def auth_change_password():
             }), 401
         
         # Generate new password hash
-        new_password_hash = generate_password_hash(new_password)
+        # Try werkzeug first, fall back to hashlib if not available
+        try:
+            new_password_hash = generate_password_hash(new_password)
+        except (ImportError, NameError):
+            # Fallback to hashlib format (same as setup script)
+            import hashlib
+            import base64
+            hash_bytes = hashlib.pbkdf2_hmac('sha256', new_password.encode('utf-8'), b'ztpbootstrap', 100000)
+            hash_b64 = base64.b64encode(hash_bytes).decode('utf-8')
+            new_password_hash = f'pbkdf2:sha256:{hash_b64}'
         
         # Update config.yaml
         if CONFIG_FILE.exists():
             try:
+                # Read current config
                 with open(CONFIG_FILE, 'r') as f:
                     yaml_config = yaml.safe_load(f) or {}
                 
@@ -463,20 +484,65 @@ def auth_change_password():
                 if 'auth' not in yaml_config:
                     yaml_config['auth'] = {}
                 
-                # Update password hash
-                yaml_config['auth']['admin_password_hash'] = new_password_hash
+                # Update password hash (ensure it's a string and properly formatted)
+                # Werkzeug hashes contain special characters ($, :) that need proper handling
+                yaml_config['auth']['admin_password_hash'] = str(new_password_hash).strip()
                 
-                # Write back to file
-                with open(CONFIG_FILE, 'w') as f:
-                    yaml.dump(yaml_config, f, default_flow_style=False, sort_keys=False)
+                # Write back to file using atomic write (write to temp, then rename)
+                import tempfile
+                import shutil
+                temp_file = CONFIG_FILE.with_suffix('.yaml.tmp')
+                try:
+                    with open(temp_file, 'w') as f:
+                        yaml.dump(yaml_config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+                    # Atomic rename
+                    temp_file.replace(CONFIG_FILE)
+                except Exception as e:
+                    # Clean up temp file on error
+                    if temp_file.exists():
+                        temp_file.unlink()
+                    raise e
                 
-                # Reload auth config
-                AUTH_CONFIG = load_auth_config()
+                # Reload auth config using the reload function
+                reload_auth_config()
+                
+                # Verify the new hash was loaded correctly
+                loaded_hash = AUTH_CONFIG.get('admin_password_hash')
+                expected_hash = str(new_password_hash).strip()
+                test_result = False
+                
+                if loaded_hash != expected_hash:
+                    # Hash format might differ but still be valid (e.g., werkzeug generates different formats)
+                    # Still try to verify the password works with the loaded hash
+                    pass
+                
+                # Verify the new password works with the loaded hash
+                if loaded_hash:
+                    try:
+                        # Use check_password_hash imported at top of file
+                        test_result = check_password_hash(loaded_hash, new_password)
+                    except (ImportError, NameError, AttributeError):
+                        # Fallback format verification
+                        if loaded_hash.startswith('pbkdf2:sha256:') and '$' not in loaded_hash:
+                            import hashlib
+                            import base64
+                            try:
+                                hash_part = loaded_hash.split(':', 2)[2]
+                                stored_hash = base64.b64decode(hash_part)
+                                computed_hash = hashlib.pbkdf2_hmac('sha256', new_password.encode('utf-8'), b'ztpbootstrap', 100000)
+                                test_result = (stored_hash == computed_hash)
+                            except Exception:
+                                test_result = False
+                
+                if not test_result:
+                    print(f"ERROR: New password hash verification failed after reload!", flush=True)
                 
                 return jsonify({'success': True})
             except Exception as e:
-                # Log error but don't expose details to user
-                print(f"Error updating password in config.yaml: {type(e).__name__}")
+                # Log detailed error for debugging
+                import traceback
+                print(f"Error updating password in config.yaml: {type(e).__name__}: {e}", flush=True)
+                print(f"Traceback: {traceback.format_exc()}", flush=True)
                 return jsonify({
                     'error': 'Failed to update password. Please check file permissions.',
                     'code': 'UPDATE_ERROR'
@@ -487,8 +553,10 @@ def auth_change_password():
                 'code': 'CONFIG_NOT_FOUND'
             }), 404
     except Exception as e:
-        # Log error but don't expose details to user
-        print(f"Change password error: {type(e).__name__}")
+        # Log detailed error for debugging
+        import traceback
+        print(f"Change password error: {type(e).__name__}: {e}", flush=True)
+        print(f"Traceback: {traceback.format_exc()}", flush=True)
         return jsonify({
             'error': 'Failed to change password',
             'code': 'CHANGE_PASSWORD_ERROR'

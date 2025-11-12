@@ -65,6 +65,39 @@ curl -k https://ztpboot.example.com/health
 # Note: Write operations require authentication (password set during setup)
 ```
 
+## Upgrading Existing Installation
+
+If you have an existing installation and want to upgrade to a newer version:
+
+```bash
+# Pull latest changes
+cd ztpbootstrap
+git pull origin main
+
+# Run upgrade (non-interactive, preserves all values)
+sudo ./setup-interactive.sh --upgrade
+```
+
+**What `--upgrade` does:**
+- ✅ **Requires existing installation** - Errors if no previous install detected
+- ✅ **Creates automatic backup** - Backs up before making changes (required)
+- ✅ **Preserves all values** - Uses all previous configuration (domain, IPs, tokens, etc.)
+- ✅ **Non-interactive** - No prompts, runs automatically
+- ✅ **Stops services** - Gracefully stops running services before upgrade
+- ✅ **Applies changes** - Updates all configuration files automatically
+- ✅ **Starts services** - Restarts services after upgrade completes
+
+**Upgrade process:**
+1. Detects existing installation
+2. Loads all previous values from `config.yaml`, `ztpbootstrap.env`, container files, and `nginx.conf`
+3. Creates backup in `.ztpbootstrap-backups/` directory
+4. Stops running services gracefully
+5. Cleans installation directories
+6. Applies configuration using previous values
+7. Starts services automatically
+
+**Note:** The admin password from your existing `config.yaml` will be preserved automatically.
+
 ## Common Scenarios
 
 ### HTTP-Only Mode (Testing)
