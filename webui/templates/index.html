@@ -709,7 +709,8 @@
                     await this.loadStatus();
                     await this.loadScripts();
                     await this.loadBackups();
-                    await this.loadConfig();
+                    // Don't load config on init - require auth first
+                    // Config will be loaded when user clicks Configuration tab
                     await this.loadLogs();
                     await this.loadDeviceConnections();
                     
