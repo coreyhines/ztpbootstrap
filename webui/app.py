@@ -460,7 +460,7 @@ def auth_change_password():
         password_valid = False
         
         # Check if this is the fallback format from setup-interactive.sh
-        if password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
+        if password_hash and password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
             import hashlib
             import base64
             try:
@@ -471,9 +471,10 @@ def auth_change_password():
             except Exception:
                 password_valid = False
         else:
+            # Use werkzeug's check_password_hash (imported at top of file)
             try:
                 password_valid = check_password_hash(password_hash, current_password)
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, AttributeError):
                 password_valid = False
         
         if not password_valid:
