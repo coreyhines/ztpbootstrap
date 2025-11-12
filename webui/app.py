@@ -55,6 +55,34 @@ except ImportError:
         sanitized = sanitize_filename(filename)
         return (sanitized is not None), sanitized
 
+def safe_path_join(base_dir, filename):
+    """
+    Safely join a base directory with a sanitized filename.
+    This function ensures the resulting path is within base_dir.
+    
+    Args:
+        base_dir: Base directory Path object
+        filename: Sanitized filename (must be validated first)
+        
+    Returns:
+        Path object if safe, None otherwise
+    """
+    if not filename or not isinstance(filename, str):
+        return None
+    
+    # Double-check filename is safe (no path components)
+    if '/' in filename or '\\' in filename or '..' in filename:
+        return None
+    
+    # Construct path
+    result_path = base_dir / filename
+    
+    # Validate the path is within base directory
+    if not validate_path_in_directory(result_path, base_dir):
+        return None
+    
+    return result_path
+
 
 app = Flask(__name__)
 # Enable template auto-reload in production for development/testing
@@ -434,9 +462,10 @@ def auth_change_password():
                 
                 return jsonify({'success': True})
             except Exception as e:
-                print(f"Error updating password in config.yaml: {e}")
+                # Log error but don't expose details to user
+                print(f"Error updating password in config.yaml: {type(e).__name__}")
                 return jsonify({
-                    'error': f'Failed to update password: {str(e)}',
+                    'error': 'Failed to update password. Please check file permissions.',
                     'code': 'UPDATE_ERROR'
                 }), 500
         else:
@@ -445,7 +474,8 @@ def auth_change_password():
                 'code': 'CONFIG_NOT_FOUND'
             }), 404
     except Exception as e:
-        print(f"Change password error: {e}")
+        # Log error but don't expose details to user
+        print(f"Change password error: {type(e).__name__}")
         return jsonify({
             'error': 'Failed to change password',
             'code': 'CHANGE_PASSWORD_ERROR'
@@ -473,7 +503,7 @@ def get_config():
                 return jsonify({'parsed': parsed_config, 'raw': raw_content})
             except yaml.YAMLError as e:
                 # YAML parsing failed, return raw content
-                return jsonify({'raw': raw_content, 'parsed': None, 'error': f'YAML parse error: {str(e)}'})
+                return jsonify({'raw': raw_content, 'parsed': None, 'error': 'YAML parse error: Invalid configuration file format'})
         else:
             return jsonify({'error': 'Config file not found'}), 404
     except Exception as e:
@@ -646,10 +676,9 @@ def get_bootstrap_script(filename):
         if not is_valid:
             return jsonify({"error": "Invalid filename"}), 400
 
-        script_path = CONFIG_DIR / sanitized_filename
-
-        # Additional path validation to prevent path traversal
-        if not validate_path_in_directory(script_path, CONFIG_DIR):
+        # Construct safe path (CodeQL: sanitized_filename is validated above)
+        script_path = safe_path_join(CONFIG_DIR, sanitized_filename)
+        if script_path is None:
             return jsonify({"error": "Invalid path"}), 400
 
         if not script_path.exists() or not script_path.suffix == '.py':
@@ -688,10 +717,9 @@ def set_active_script(filename):
         if not is_valid:
             return jsonify({"error": "Invalid filename"}), 400
 
-        script_path = CONFIG_DIR / sanitized_filename
-
-        # Additional path validation
-        if not validate_path_in_directory(script_path, CONFIG_DIR):
+        # Construct safe path
+        script_path = safe_path_join(CONFIG_DIR, sanitized_filename)
+        if script_path is None:
             return jsonify({"error": "Invalid path"}), 400
 
         if not script_path.exists() or not script_path.suffix == '.py':
@@ -772,10 +800,9 @@ def rename_bootstrap_script(filename):
         if not is_valid:
             return jsonify({"error": "Invalid filename"}), 400
 
-        script_path = CONFIG_DIR / sanitized_filename
-
-        # Additional path validation
-        if not validate_path_in_directory(script_path, CONFIG_DIR):
+        # Construct safe path
+        script_path = safe_path_join(CONFIG_DIR, sanitized_filename)
+        if script_path is None:
             return jsonify({"error": "Invalid path"}), 400
 
         if not script_path.exists() or not script_path.suffix == '.py':
@@ -802,7 +829,9 @@ def rename_bootstrap_script(filename):
         new_name = sanitized_new_name
         
         # Check if new name already exists
-        new_path = CONFIG_DIR / new_name
+        new_path = safe_path_join(CONFIG_DIR, new_name)
+        if new_path is None:
+            return jsonify({"error": "Invalid new filename"}), 400
         if new_path.exists() and new_path != script_path:
             return jsonify({'error': f'A script with the name {new_name} already exists'}), 400
         
@@ -852,10 +881,9 @@ def delete_bootstrap_script(filename):
         if not is_valid:
             return jsonify({"error": "Invalid filename"}), 400
 
-        script_path = CONFIG_DIR / sanitized_filename
-
-        # Additional path validation
-        if not validate_path_in_directory(script_path, CONFIG_DIR):
+        # Construct safe path
+        script_path = safe_path_join(CONFIG_DIR, sanitized_filename)
+        if script_path is None:
             return jsonify({"error": "Invalid path"}), 400
 
         if not script_path.exists() or not script_path.suffix == '.py':
@@ -946,10 +974,9 @@ def restore_backup_script(filename):
         if not sanitized_filename:
             return jsonify({"error": "Invalid backup filename"}), 400
 
-        backup_path = CONFIG_DIR / sanitized_filename
-
-        # Additional path validation
-        if not validate_path_in_directory(backup_path, CONFIG_DIR):
+        # Construct safe path
+        backup_path = safe_path_join(CONFIG_DIR, sanitized_filename)
+        if backup_path is None:
             return jsonify({"error": "Invalid path"}), 400
         if not backup_path.exists():
             return jsonify({'error': 'Backup not found'}), 404
@@ -980,7 +1007,9 @@ def restore_backup_script(filename):
             except:
                 new_name = f"bootstrap_restored_{int(time.time())}.py"
             
-            new_path = CONFIG_DIR / new_name
+            new_path = safe_path_join(CONFIG_DIR, new_name)
+            if new_path is None:
+                return jsonify({"error": "Invalid restored filename"}), 400
             import shutil
             shutil.copy2(backup_path, new_path)
             return jsonify({
@@ -1026,10 +1055,9 @@ def upload_bootstrap_script():
                     }
                 ), 400
         
-        file_path = CONFIG_DIR / filename
-
-        # Additional path validation
-        if not validate_path_in_directory(file_path, CONFIG_DIR):
+        # Construct safe path
+        file_path = safe_path_join(CONFIG_DIR, filename)
+        if file_path is None:
             return jsonify({"error": "Invalid file path"}), 400
 
         # Try to save with proper error handling

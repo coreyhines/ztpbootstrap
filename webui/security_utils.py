@@ -3,6 +3,7 @@
 Security utility functions for the ZTP Bootstrap Web UI
 """
 
+import os
 import re
 from pathlib import Path
 
@@ -44,6 +45,9 @@ def validate_path_in_directory(file_path, base_directory):
     """
     Validate that a file path is within the base directory (prevents path traversal).
     
+    This function ensures that the resolved absolute path of file_path is strictly
+    within the resolved absolute path of base_directory, preventing directory traversal attacks.
+    
     Args:
         file_path: The Path object to validate
         base_directory: The base directory Path
@@ -52,13 +56,26 @@ def validate_path_in_directory(file_path, base_directory):
         True if path is safe, False otherwise
     """
     try:
-        # Resolve both paths to absolute paths
-        resolved_path = file_path.resolve()
-        resolved_base = base_directory.resolve()
+        # Resolve both paths to absolute paths (this normalizes .. and . components)
+        resolved_path = file_path.resolve().absolute()
+        resolved_base = base_directory.resolve().absolute()
         
-        # Check if resolved path is within base directory
-        return str(resolved_path).startswith(str(resolved_base))
-    except (OSError, ValueError):
+        # Ensure resolved_base ends with separator for proper comparison
+        base_str = str(resolved_base)
+        if not base_str.endswith(os.sep):
+            base_str += os.sep
+        
+        path_str = str(resolved_path)
+        
+        # Check if resolved path is strictly within base directory
+        # Using os.path.commonpath for additional safety check
+        try:
+            common_path = os.path.commonpath([path_str, base_str])
+            return common_path == base_str.rstrip(os.sep)
+        except ValueError:
+            # Paths are on different drives (Windows) or invalid
+            return False
+    except (OSError, ValueError, RuntimeError):
         return False
 
 
