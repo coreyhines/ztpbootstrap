@@ -2244,6 +2244,7 @@ PYTHON_SCRIPT
         
         if [[ -n "$ADMIN_PASSWORD_HASH" ]]; then
             log "Password hash generated successfully."
+            log "Hash format: $(echo "$ADMIN_PASSWORD_HASH" | cut -d: -f1)"
             SET_ADMIN_PASSWORD="true"
             # Clear password from memory
             RESET_PASSWORD=""
