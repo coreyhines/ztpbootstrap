@@ -442,7 +442,7 @@ restore_backup() {
     log ""
     log "Next steps:"
     log "  1. Reload systemd: sudo systemctl daemon-reload"
-    log "  2. Restart services if needed: sudo systemctl restart ztpbootstrap"
+    log "  2. Restart services if needed: sudo systemctl restart ztpbootstrap-pod"
     echo ""
     
     return 0
@@ -459,9 +459,9 @@ check_running_services() {
         service_type="single-container"
     fi
     
-    # Check for new pod-based services
-    if systemctl is-active --quiet ztpbootstrap.service 2>/dev/null; then
-        running_services+=("ztpbootstrap.service")
+    # Check for new pod-based services (quadlet generates ztpbootstrap-pod.service from ztpbootstrap.pod)
+    if systemctl is-active --quiet ztpbootstrap-pod.service 2>/dev/null; then
+        running_services+=("ztpbootstrap-pod.service")
         service_type="pod-based"
     fi
     if systemctl is-active --quiet ztpbootstrap-nginx.service 2>/dev/null; then
@@ -1930,15 +1930,16 @@ EOF
         fi
     fi
     
-    # Start pod service
+    # Start pod service (quadlet generates ztpbootstrap-pod.service from ztpbootstrap.pod)
+    local pod_service_name="ztpbootstrap-pod.service"
     if [[ $EUID -eq 0 ]]; then
-        if systemctl start ztpbootstrap.service 2>&1; then
-            log "✓ Started ztpbootstrap.service"
+        if systemctl start "$pod_service_name" 2>&1; then
+            log "✓ Started $pod_service_name"
             sleep 2
         else
             local pod_error
-            pod_error=$(systemctl status ztpbootstrap.service --no-pager -l 2>&1 | tail -10 || echo "Could not get status")
-            warn "Failed to start ztpbootstrap.service"
+            pod_error=$(systemctl status "$pod_service_name" --no-pager -l 2>&1 | tail -10 || echo "Could not get status")
+            warn "Failed to start $pod_service_name"
             warn "Error details: ${pod_error:0:300}"
         fi
         
@@ -1958,13 +1959,13 @@ EOF
             fi
         fi
     else
-        if sudo systemctl start ztpbootstrap.service 2>&1; then
-            log "✓ Started ztpbootstrap.service"
+        if sudo systemctl start "$pod_service_name" 2>&1; then
+            log "✓ Started $pod_service_name"
             sleep 2
         else
             local pod_error
-            pod_error=$(sudo systemctl status ztpbootstrap.service --no-pager -l 2>&1 | tail -10 || echo "Could not get status")
-            warn "Failed to start ztpbootstrap.service"
+            pod_error=$(sudo systemctl status "$pod_service_name" --no-pager -l 2>&1 | tail -10 || echo "Could not get status")
+            warn "Failed to start $pod_service_name"
             warn "Error details: ${pod_error:0:300}"
         fi
         
@@ -2782,7 +2783,7 @@ EOF
                     else
                         pod_output=$(sudo /usr/libexec/podman/quadlet "$pod_file" 2>&1) || pod_exit_code=$?
                     fi
-                    if [[ $pod_exit_code -eq 0 ]] && [[ -f "${generator_dir}/ztpbootstrap.service" ]]; then
+                    if [[ $pod_exit_code -eq 0 ]] && [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
                         log "Pod service file generated successfully"
                         pod_service_generated=true
                     else
@@ -3246,8 +3247,9 @@ main() {
             start_services_after_install
             echo ""
             log "Services have been started. You can check status with:"
-            log "  systemctl status ztpbootstrap"
+            log "  systemctl status ztpbootstrap-pod"
             log "  systemctl status ztpbootstrap-nginx"
+            log "  systemctl status ztpbootstrap-webui"
         else
             log "Next steps:"
             log "  1. Review the updated files if needed"
