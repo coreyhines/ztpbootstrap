@@ -114,4 +114,3 @@ sudo podman logs ztpbootstrap-webui 2>&1 | tail -20 | grep -i "password\|auth\|e
 
 echo ""
 echo "=== Diagnostic Complete ==="
-

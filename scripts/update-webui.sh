@@ -76,4 +76,3 @@ fi
 echo "✓ Web UI service restarted"
 echo ""
 echo "Web UI has been updated and restarted successfully!"
-
