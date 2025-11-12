@@ -3253,6 +3253,29 @@ main() {
             log "  systemctl status ztpbootstrap-pod"
             log "  systemctl status ztpbootstrap-nginx"
             log "  systemctl status ztpbootstrap-webui"
+            # If password was reset, verify hash was written and remind about webui restart
+            if [[ -n "${ADMIN_PASSWORD_HASH:-}" ]]; then
+                echo ""
+                log "Password was reset. Verifying hash in config file..."
+                if command -v yq >/dev/null 2>&1 && [[ -f "$CONFIG_FILE" ]]; then
+                    local written_hash
+                    written_hash=$(yq eval '.auth.admin_password_hash // ""' "$CONFIG_FILE" 2>/dev/null || echo "")
+                    if [[ -n "$written_hash" ]]; then
+                        log "✓ Password hash found in config.yaml (length: ${#written_hash})"
+                        if [[ "$written_hash" == "$ADMIN_PASSWORD_HASH" ]]; then
+                            log "✓ Hash matches expected value"
+                        else
+                            warn "Hash mismatch! Expected: ${ADMIN_PASSWORD_HASH:0:30}..., Got: ${written_hash:0:30}..."
+                        fi
+                    else
+                        warn "Password hash not found in config.yaml!"
+                    fi
+                fi
+                log ""
+                log "Note: The webui service has been restarted to load the new password."
+                log "      If login still fails, verify the hash and restart webui:"
+                log "      sudo systemctl restart ztpbootstrap-webui"
+            fi
         else
             log "Next steps:"
             log "  1. Review the updated files if needed"
