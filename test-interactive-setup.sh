@@ -166,14 +166,14 @@ else
     elif [[ -f "ztpbootstrap-test-cloud.qcow2" ]] || [[ -f "ztpbootstrap-test.qcow2" ]]; then
         log_warn "VM disk exists but VM is not running."
         log_info "To use existing disk, start VM manually or delete it to create fresh"
-        log_info "Creating new VM..."
+        log_info "Creating new VM (will reuse existing cloud image if found)..."
         ./vm-create-native.sh --download "$DISTRO" --type cloud --arch aarch64 --version "$VERSION" --headless 2>&1 | tee /tmp/test-vm-create.log &
         VM_PID=$!
         log_info "VM creation started (PID: $VM_PID)"
         sleep 5
         VM_RUNNING=false
     else
-        log_info "Creating new VM..."
+        log_info "Creating new VM (will reuse existing cloud image if found in Downloads)..."
         ./vm-create-native.sh --download "$DISTRO" --type cloud --arch aarch64 --version "$VERSION" --headless 2>&1 | tee /tmp/test-vm-create.log &
         VM_PID=$!
         log_info "VM creation started (PID: $VM_PID)"

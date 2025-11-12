@@ -1497,6 +1497,78 @@ is_nfs_mount() {
     return 1
 }
 
+# Create a simple self-signed certificate for testing
+create_self_signed_cert() {
+    local cert_dir="${1:-${CERT_DIR:-/opt/containerdata/certs/wild}}"
+    local domain="${2:-${DOMAIN:-ztpboot.example.com}}"
+    local cert_file="${cert_dir}/${CERT_FILE:-fullchain.pem}"
+    local key_file="${cert_dir}/${KEY_FILE:-privkey.pem}"
+    
+    # Check if certificates already exist
+    if [[ -f "$cert_file" ]] && [[ -f "$key_file" ]]; then
+        log "SSL certificates already exist, skipping creation"
+        return 0
+    fi
+    
+    log "Creating self-signed certificate for testing..."
+    log "Domain: $domain"
+    log "Certificate directory: $cert_dir"
+    
+    # Create certificate directory if it doesn't exist
+    if [[ ! -d "$cert_dir" ]]; then
+        if [[ ("$cert_dir" =~ ^/etc/ || "$cert_dir" =~ ^/opt/) && $EUID -ne 0 ]]; then
+            sudo mkdir -p "$cert_dir" 2>/dev/null || error "Failed to create certificate directory: $cert_dir"
+        else
+            mkdir -p "$cert_dir" 2>/dev/null || error "Failed to create certificate directory: $cert_dir"
+        fi
+    fi
+    
+    # Check if openssl is available
+    if ! command -v openssl >/dev/null 2>&1; then
+        error "openssl is required to create self-signed certificates but is not installed"
+        return 1
+    fi
+    
+    # Generate self-signed certificate
+    log "Generating self-signed certificate..."
+    if [[ ("$cert_dir" =~ ^/etc/ || "$cert_dir" =~ ^/opt/) && $EUID -ne 0 ]]; then
+        sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout "$key_file" \
+            -out "$cert_file" \
+            -subj "/C=US/ST=State/L=City/O=Organization/CN=$domain" \
+            -addext "subjectAltName=DNS:$domain" 2>/dev/null || error "Failed to generate certificate"
+        sudo chmod 644 "$cert_file" 2>/dev/null || true
+        sudo chmod 644 "$key_file" 2>/dev/null || true
+    else
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout "$key_file" \
+            -out "$cert_file" \
+            -subj "/C=US/ST=State/L=City/O=Organization/CN=$domain" \
+            -addext "subjectAltName=DNS:$domain" 2>/dev/null || error "Failed to generate certificate"
+        chmod 644 "$cert_file" 2>/dev/null || true
+        chmod 644 "$key_file" 2>/dev/null || true
+    fi
+    
+    # Set SELinux context if SELinux is enabled and not on NFS
+    if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
+        if ! is_nfs_mount "$cert_dir"; then
+            if [[ ("$cert_dir" =~ ^/etc/ || "$cert_dir" =~ ^/opt/) && $EUID -ne 0 ]]; then
+                sudo chcon -R -t container_file_t "$cert_dir" 2>/dev/null || true
+            else
+                chcon -R -t container_file_t "$cert_dir" 2>/dev/null || true
+            fi
+            log "Set SELinux context for certificate directory (not NFS)"
+        else
+            log "Certificate directory is on NFS, skipping SELinux context"
+        fi
+    fi
+    
+    log "Self-signed certificate created successfully"
+    log "  Certificate: $cert_file"
+    log "  Private Key: $key_file"
+    warn "⚠️  This is a self-signed certificate and should not be used in production"
+}
+
 # Create pod and container systemd files from config.yaml
 # This replicates the setup_pod() function from setup.sh
 create_pod_files_from_config() {
@@ -2184,7 +2256,14 @@ interactive_config() {
             LETSENCRYPT_EMAIL="admin@example.com"
         fi
         
-        prompt_yes_no "Create self-signed certificate for testing (if no cert exists)?" "n" CREATE_SELF_SIGNED
+        # Default to creating self-signed certificate if HTTP_ONLY is false (HTTPS mode)
+        # This ensures nginx can start without manual certificate creation
+        local default_self_signed="n"
+        if [[ "${HTTP_ONLY:-false}" == "false" ]]; then
+            default_self_signed="y"
+        fi
+        
+        prompt_yes_no "Create self-signed certificate for testing (if no cert exists)?" "$default_self_signed" CREATE_SELF_SIGNED
     else
         # Certificates exist, skip these prompts
         USE_LETSENCRYPT="false"
@@ -2742,6 +2821,19 @@ EOF
     if [[ "$APPLY_NOW" == "true" ]]; then
         # Create directories before applying config
         create_directories
+        
+        # Create self-signed certificate if requested and certificates don't exist
+        if [[ "${CREATE_SELF_SIGNED:-false}" == "true" ]]; then
+            local cert_dir_for_check="${CERT_DIR:-/opt/containerdata/certs/wild}"
+            local cert_path="${cert_dir_for_check}/${CERT_FILE:-fullchain.pem}"
+            local key_path="${cert_dir_for_check}/${KEY_FILE:-privkey.pem}"
+            
+            if [[ ! -f "$cert_path" ]] || [[ ! -f "$key_path" ]]; then
+                create_self_signed_cert "${CERT_DIR:-/opt/containerdata/certs/wild}" "${DOMAIN:-ztpboot.example.com}"
+            else
+                log "SSL certificates already exist, skipping self-signed certificate creation"
+            fi
+        fi
         
         # Copy source files to target directory
         copy_source_files
