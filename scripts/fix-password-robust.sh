@@ -17,12 +17,12 @@ echo "Password: $PASSWORD"
 echo ""
 
 # Generate hash using Python (same method as webui)
-PASSWORD_HASH=$(python3 <<'PYTHON_GEN'
+PASSWORD_HASH=$(python3 <<PYTHON_GEN
 import sys
 import hashlib
 import base64
 
-password = sys.argv[1]
+password = """$PASSWORD"""
 if len(password) == 0:
     sys.stderr.write("ERROR: Empty password!\n")
     sys.exit(1)
@@ -49,7 +49,6 @@ except Exception as e:
 
 print(hash_value)
 PYTHON_GEN
-"$PASSWORD"
 )
 
 if [[ -z "$PASSWORD_HASH" ]]; then
@@ -186,4 +185,3 @@ echo "Next steps:"
 echo "1. Restart webui service: sudo systemctl restart ztpbootstrap-webui"
 echo "2. Try logging in with password: $PASSWORD"
 echo ""
-
