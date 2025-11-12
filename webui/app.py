@@ -543,9 +543,9 @@ def auth_change_password():
                 # Verify the new password works with the loaded hash
                 if loaded_hash:
                     try:
-                        from werkzeug.security import check_password_hash
+                        # Use check_password_hash imported at top of file
                         test_result = check_password_hash(loaded_hash, new_password)
-                    except (ImportError, NameError):
+                    except (ImportError, NameError, AttributeError):
                         # Fallback format verification
                         if loaded_hash.startswith('pbkdf2:sha256:') and '$' not in loaded_hash:
                             import hashlib
