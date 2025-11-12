@@ -2987,7 +2987,10 @@ Delegate=yes
 Type=notify
 NotifyAccess=all
 SyslogIdentifier=%N
-ExecStart=/usr/bin/podman pod create --infra --name ${pod_name} --network ${network_mode}
+ExecStart=/usr/bin/podman pod start ${pod_name}
+ExecStartPre=-/usr/bin/podman pod stop ${pod_name}
+ExecStartPre=-/usr/bin/podman pod rm -f ${pod_name}
+ExecStartPre=/usr/bin/podman pod create --infra --name ${pod_name} --network ${network_mode}
 EOFPOD
                             else
                                 sudo tee "${generator_dir}/ztpbootstrap-pod.service" > /dev/null << EOFPOD
@@ -3006,7 +3009,10 @@ Delegate=yes
 Type=notify
 NotifyAccess=all
 SyslogIdentifier=%N
-ExecStart=/usr/bin/podman pod create --infra --name ${pod_name} --network ${network_mode}
+ExecStart=/usr/bin/podman pod start ${pod_name}
+ExecStartPre=-/usr/bin/podman pod stop ${pod_name}
+ExecStartPre=-/usr/bin/podman pod rm -f ${pod_name}
+ExecStartPre=/usr/bin/podman pod create --infra --name ${pod_name} --network ${network_mode}
 EOFPOD
                             fi
                             if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
