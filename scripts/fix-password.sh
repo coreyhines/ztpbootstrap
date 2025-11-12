@@ -18,6 +18,9 @@ echo ""
 PASSWORD_HASH=$(echo "$PASSWORD" | python3 2>/dev/null <<'PYTHON_SCRIPT'
 import sys
 password = sys.stdin.read().rstrip('\n')
+if len(password) == 0:
+    sys.stderr.write("ERROR: Empty password received!\n")
+    sys.exit(1)
 try:
     from werkzeug.security import generate_password_hash
     hash_value = generate_password_hash(password)
@@ -27,6 +30,10 @@ except ImportError:
     import hashlib
     import base64
     hash_value = 'pbkdf2:sha256:' + base64.b64encode(hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)).decode()
+    # Verify hash is complete (should be 58 characters for pbkdf2 format)
+    if len(hash_value) < 58:
+        sys.stderr.write(f"ERROR: Generated hash is incomplete! Length: {len(hash_value)}, Expected: 58\n")
+        sys.exit(1)
     print(hash_value)
 PYTHON_SCRIPT
 )
