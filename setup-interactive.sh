@@ -3199,11 +3199,12 @@ EOFNGINX2
                                         log "Nginx service file created using sudo tee"
                                     fi
                                 fi
-                                
-                                # Verify file exists
-                                if [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]] || ([[ $EUID -ne 0 ]] && sudo test -f "${generator_dir}/ztpbootstrap-nginx.service" 2>/dev/null); then
-                                    log "✓ Nginx service file verified"
-                                fi
+                            fi
+                            
+                            # Verify file exists (outside if/else block)
+                            if [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]] || ([[ $EUID -ne 0 ]] && sudo test -f "${generator_dir}/ztpbootstrap-nginx.service" 2>/dev/null); then
+                                log "✓ Nginx service file verified"
+                            fi
                         fi
                     fi
                     
