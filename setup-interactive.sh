@@ -3034,10 +3034,16 @@ ExecStartPre=-/usr/bin/podman pod rm -f ${pod_name}
 ExecStartPre=/usr/bin/podman pod create --infra --name ${pod_name} --network ${network_mode}
 EOFPOD
                                 if sudo mv "$temp_file" "${generator_dir}/ztpbootstrap-pod.service" 2>&1; then
-                                    log "Pod service file created manually"
-                                    services_generated=true
+                                    log "Pod service file created manually at ${generator_dir}/ztpbootstrap-pod.service"
+                                    # Verify immediately
+                                    if sudo test -f "${generator_dir}/ztpbootstrap-pod.service" 2>/dev/null; then
+                                        log "✓ File verified immediately after creation"
+                                        services_generated=true
+                                    else
+                                        warn "File was moved but not found at destination"
+                                    fi
                                 else
-                                    warn "Failed to move temp file to generator directory"
+                                    warn "Failed to move temp file to generator directory (temp file: $temp_file)"
                                     rm -f "$temp_file"
                                     # Try alternative method: use sudo tee
                                     if sudo tee "${generator_dir}/ztpbootstrap-pod.service" > /dev/null << EOFPOD2
@@ -3159,9 +3165,15 @@ SyslogIdentifier=%N
 ExecStart=/usr/bin/podman run --name ztpbootstrap-nginx --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes}${env_vars} docker.io/nginx:alpine
 EOFNGINX
                                 if sudo mv "$temp_file" "${generator_dir}/ztpbootstrap-nginx.service" 2>&1; then
-                                    log "Nginx service file created manually"
+                                    log "Nginx service file created manually at ${generator_dir}/ztpbootstrap-nginx.service"
+                                    # Verify immediately
+                                    if sudo test -f "${generator_dir}/ztpbootstrap-nginx.service" 2>/dev/null; then
+                                        log "✓ Nginx file verified immediately after creation"
+                                    else
+                                        warn "Nginx file was moved but not found at destination"
+                                    fi
                                 else
-                                    warn "Failed to move temp file, trying sudo tee method..."
+                                    warn "Failed to move temp file (temp: $temp_file, dest: ${generator_dir}/ztpbootstrap-nginx.service), trying sudo tee method..."
                                     rm -f "$temp_file"
                                     # Extract volumes and env again for tee method
                                     local volumes_tee=""
