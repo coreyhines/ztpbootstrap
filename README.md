@@ -59,7 +59,7 @@ When an Arista switch boots, it requests network configuration from a DHCP serve
 
 The service includes a web-based management interface for monitoring and configuration with features for service status, device connection tracking, bootstrap script management, configuration viewing, and service logs.
 
-**Authentication:** Write operations (upload scripts, delete, rename, restore backups, mark logs, view configuration) require authentication. Read-only operations (viewing status, scripts, logs, device connections) are accessible without authentication. The admin password is set during initial setup via `setup-interactive.sh`.
+**Authentication:** Write operations (upload scripts, delete, rename, restore backups, mark logs, view configuration) require authentication. Read-only operations (viewing status, scripts, logs, device connections) are accessible without authentication. The admin password is required and must be set during initial setup via `setup-interactive.sh`, or will be loaded from an existing `config.yaml` when upgrading.
 
 Access the Web UI at: `https://ztpboot.example.com/ui/`
 

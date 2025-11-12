@@ -45,11 +45,11 @@ cd ztpbootstrap
 
 The interactive setup will:
 - Prompt for all configuration (paths, network, CVaaS, certificates)
-- **Prompt for Web UI admin password** (optional but recommended for write operations)
+- **Prompt for Web UI admin password** (required for write operations)
 - Generate `config.yaml` with your settings
 - Optionally apply configuration and start services
 
-**Note:** If you set an admin password during setup, you'll need it to perform write operations in the Web UI (upload scripts, delete, rename, restore backups, mark logs, view configuration). Read-only operations (viewing status, scripts, logs) don't require authentication.
+**Note:** The admin password is required for write operations in the Web UI (upload scripts, delete, rename, restore backups, mark logs, view configuration). If you're upgrading from a previous installation, the password will be loaded from your existing `config.yaml`. Read-only operations (viewing status, scripts, logs) don't require authentication.
 
 ### Step 4: Verify Installation
 
@@ -140,7 +140,8 @@ The Web UI uses password-based authentication for write operations:
 - **Write operations**: Authentication required (upload scripts, delete, rename, restore backups, mark logs, view configuration)
 
 **Setting the admin password:**
-- During `setup-interactive.sh`: You'll be prompted to set an admin password
+- During `setup-interactive.sh`: You'll be prompted to set an admin password (required)
+- Upgrading from existing installation: The password will be automatically loaded from your existing `config.yaml` or backup
 - After installation: Run `setup-interactive.sh` again and set the password, or manually edit `config.yaml` (see [SECURITY.md](SECURITY.md) for details)
 
 **Using the Web UI:**
@@ -158,9 +159,8 @@ For more security details, see [SECURITY.md](SECURITY.md).
 ## Next Steps
 
 1. **Configure DHCP server** to point devices to the bootstrap script
-2. **Set Web UI admin password** (if not done during setup)
-3. **Test with a device** - Boot an Arista switch and verify it enrolls
-4. **Monitor logs** - Watch for enrollment activity
+2. **Test with a device** - Boot an Arista switch and verify it enrolls
+3. **Monitor logs** - Watch for enrollment activity
 
 ## Getting Help
 
