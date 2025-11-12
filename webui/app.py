@@ -137,7 +137,9 @@ def load_auth_config():
                 if yaml_config and 'auth' in yaml_config:
                     auth_config = yaml_config['auth']
                     if 'admin_password_hash' in auth_config:
-                        config['admin_password_hash'] = auth_config['admin_password_hash']
+                        # Ensure it's a string (YAML might return other types)
+                        hash_value = auth_config['admin_password_hash']
+                        config['admin_password_hash'] = str(hash_value) if hash_value else None
                     if 'session_timeout' in auth_config:
                         config['session_timeout'] = auth_config['session_timeout']
                     if 'session_secret' in auth_config:
@@ -456,6 +458,7 @@ def auth_change_password():
         # Update config.yaml
         if CONFIG_FILE.exists():
             try:
+                # Read current config
                 with open(CONFIG_FILE, 'r') as f:
                     yaml_config = yaml.safe_load(f) or {}
                 
@@ -463,15 +466,45 @@ def auth_change_password():
                 if 'auth' not in yaml_config:
                     yaml_config['auth'] = {}
                 
-                # Update password hash
-                yaml_config['auth']['admin_password_hash'] = new_password_hash
+                # Update password hash (ensure it's a string and properly formatted)
+                # Werkzeug hashes contain special characters ($, :) that need proper handling
+                yaml_config['auth']['admin_password_hash'] = str(new_password_hash).strip()
                 
-                # Write back to file
-                with open(CONFIG_FILE, 'w') as f:
-                    yaml.dump(yaml_config, f, default_flow_style=False, sort_keys=False)
+                # Write back to file using atomic write (write to temp, then rename)
+                import tempfile
+                import shutil
+                temp_file = CONFIG_FILE.with_suffix('.yaml.tmp')
+                try:
+                    with open(temp_file, 'w') as f:
+                        yaml.dump(yaml_config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+                    # Atomic rename
+                    temp_file.replace(CONFIG_FILE)
+                except Exception as e:
+                    # Clean up temp file on error
+                    if temp_file.exists():
+                        temp_file.unlink()
+                    raise e
                 
                 # Reload auth config
                 AUTH_CONFIG = load_auth_config()
+                
+                # Verify the new hash was loaded correctly
+                loaded_hash = AUTH_CONFIG.get('admin_password_hash')
+                expected_hash = str(new_password_hash).strip()
+                if loaded_hash != expected_hash:
+                    print(f"Warning: Password hash mismatch after reload.")
+                    print(f"  Expected: {expected_hash[:50]}... (len={len(expected_hash)})")
+                    print(f"  Got: {loaded_hash[:50] if loaded_hash else 'None'}... (len={len(loaded_hash) if loaded_hash else 0})")
+                else:
+                    # Verify the new password works with the loaded hash
+                    from werkzeug.security import check_password_hash
+                    test_result = check_password_hash(loaded_hash, new_password)
+                    if not test_result:
+                        print(f"ERROR: New password hash verification failed after reload!")
+                        print(f"  Hash: {loaded_hash[:50]}...")
+                        print(f"  This indicates a serious issue with password storage.")
+                    else:
+                        print(f"Password change successful: New hash verified correctly.")
                 
                 return jsonify({'success': True})
             except Exception as e:
