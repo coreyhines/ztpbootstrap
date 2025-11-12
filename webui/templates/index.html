@@ -247,7 +247,7 @@
                             <p class="text-sm text-gray-600">Manage bootstrap scripts for device enrollment</p>
                         </div>
             <div class="flex items-center space-x-2">
-                <button @click="showRestoreDialog = !showRestoreDialog" 
+                <button @click="triggerRestoreBackup()" 
                         class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium transition-colors">
                     Restore Backup
                 </button>
@@ -1176,48 +1176,62 @@
                     });
                 },
                 
-                async restoreBackup(filename, restoreAs) {
+                async triggerRestoreBackup() {
+                    // Require authentication BEFORE opening restore dialog
                     await this.requireAuth(async () => {
-                        if (!filename) {
-                            alert('Please select a backup to restore');
-                            return;
-                        }
-                        
-                        const action = restoreAs === 'active' ? 'restore as active (bootstrap.py)' : 'restore as a new script';
-                        if (!confirm(`Are you sure you want to restore ${filename} and ${action}?`)) {
-                            return;
-                        }
-                        
-                        try {
-                            const response = await fetch(`/api/bootstrap-script/backup/${filename}/restore`, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                },
-                                body: JSON.stringify({
-                                    restore_as: restoreAs
-                                }),
-                                credentials: 'same-origin'
-                            });
-                            const data = await response.json();
-                            if (response.status === 401) {
-                                this.authenticated = false;
-                                this.pendingAction = () => this.restoreBackup(filename, restoreAs);
-                                this.showLoginModal = true;
-                                return;
-                            }
-                            if (data.success) {
-                                await this.loadScripts();
-                                await this.loadBackups();
-                                this.showRestoreDialog = false;
-                                this.selectedBackup = null;
-                            } else {
-                                alert('Failed to restore backup: ' + (data.error || 'Unknown error'));
-                            }
-                        } catch (error) {
-                            alert('Failed to restore backup: ' + error.message);
-                        }
+                        this.showRestoreDialog = true;
                     });
+                },
+                
+                async restoreBackup(filename, restoreAs) {
+                    // User should already be authenticated (dialog only opens after auth)
+                    // But double-check to be safe
+                    await this.checkAuthStatus();
+                    if (!this.authenticated) {
+                        this.showRestoreDialog = false;
+                        this.showLoginModal = true;
+                        return;
+                    }
+                    
+                    if (!filename) {
+                        alert('Please select a backup to restore');
+                        return;
+                    }
+                    
+                    const action = restoreAs === 'active' ? 'restore as active (bootstrap.py)' : 'restore as a new script';
+                    if (!confirm(`Are you sure you want to restore ${filename} and ${action}?`)) {
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch(`/api/bootstrap-script/backup/${filename}/restore`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                restore_as: restoreAs
+                            }),
+                            credentials: 'same-origin'
+                        });
+                        const data = await response.json();
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.showRestoreDialog = false;
+                            this.showLoginModal = true;
+                            return;
+                        }
+                        if (data.success) {
+                            await this.loadScripts();
+                            await this.loadBackups();
+                            this.showRestoreDialog = false;
+                            this.selectedBackup = null;
+                        } else {
+                            alert('Failed to restore backup: ' + (data.error || 'Unknown error'));
+                        }
+                    } catch (error) {
+                        alert('Failed to restore backup: ' + error.message);
+                    }
                 },
                 
                 async loadConfig() {
