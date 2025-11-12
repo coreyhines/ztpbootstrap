@@ -1841,12 +1841,34 @@ create_pod_files_from_config() {
             fi
             
             # Extract volumes and environment from container file
+            # Filter out Fedora-specific systemd library paths on non-Fedora systems
             local volumes=""
             local env_vars=""
+            local distro=""
+            # Detect distribution
+            if [[ -f /etc/os-release ]]; then
+                distro=$(grep "^ID=" /etc/os-release | cut -d'=' -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]')
+            fi
+            
             if [[ -f "$webui_container_file" ]]; then
                 while IFS= read -r line; do
                     if [[ "$line" =~ ^Volume= ]]; then
-                        volumes="${volumes} -v ${line#Volume=}"
+                        local volume_path="${line#Volume=}"
+                        local source_path="${volume_path%%:*}"
+                        
+                        # Skip Fedora-specific systemd library paths on non-Fedora systems
+                        if [[ "$distro" != "fedora" ]] && [[ "$distro" != "rhel" ]] && [[ "$distro" != "centos" ]]; then
+                            if [[ "$source_path" =~ ^/lib64/libsystemd ]] || [[ "$source_path" == "/usr/lib64/systemd" ]]; then
+                                continue
+                            fi
+                        fi
+                        
+                        # Only include volume if source path exists (or is a special path like /run)
+                        if [[ "$source_path" =~ ^/run ]] || [[ "$source_path" =~ ^/opt ]] || [[ -e "$source_path" ]] || ([[ $EUID -ne 0 ]] && sudo test -e "$source_path" 2>/dev/null); then
+                            volumes="${volumes} -v ${volume_path}"
+                        else
+                            warn "Skipping volume mount for non-existent path: $source_path"
+                        fi
                     elif [[ "$line" =~ ^Environment= ]]; then
                         env_vars="${env_vars} --env ${line#Environment=}"
                     fi
@@ -3196,12 +3218,34 @@ EOFPOD2
                                 pod_name=$(grep "^PodName=" "${systemd_dir}/ztpbootstrap.pod" | cut -d'=' -f2 | tr -d ' ')
                             fi
                             # Extract volumes and environment from container file
+                            # Filter out Fedora-specific systemd library paths on non-Fedora systems
                             local volumes=""
                             local env_vars=""
+                            local distro=""
+                            # Detect distribution
+                            if [[ -f /etc/os-release ]]; then
+                                distro=$(grep "^ID=" /etc/os-release | cut -d'=' -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]')
+                            fi
+                            
                             if [[ -f "$nginx_container_file" ]]; then
                                 while IFS= read -r line; do
                                     if [[ "$line" =~ ^Volume= ]]; then
-                                        volumes="${volumes} -v ${line#Volume=}"
+                                        local volume_path="${line#Volume=}"
+                                        local source_path="${volume_path%%:*}"
+                                        
+                                        # Skip Fedora-specific systemd library paths on non-Fedora systems
+                                        if [[ "$distro" != "fedora" ]] && [[ "$distro" != "rhel" ]] && [[ "$distro" != "centos" ]]; then
+                                            if [[ "$source_path" =~ ^/lib64/libsystemd ]] || [[ "$source_path" == "/usr/lib64/systemd" ]]; then
+                                                continue
+                                            fi
+                                        fi
+                                        
+                                        # Only include volume if source path exists (or is a special path like /run)
+                                        if [[ "$source_path" =~ ^/run ]] || [[ "$source_path" =~ ^/opt ]] || [[ -e "$source_path" ]] || ([[ $EUID -ne 0 ]] && sudo test -e "$source_path" 2>/dev/null); then
+                                            volumes="${volumes} -v ${volume_path}"
+                                        else
+                                            warn "Skipping volume mount for non-existent path: $source_path"
+                                        fi
                                     elif [[ "$line" =~ ^Environment= ]]; then
                                         env_vars="${env_vars} --env ${line#Environment=}"
                                     fi
@@ -3265,13 +3309,32 @@ EOFNGINX
                                 else
                                     warn "Failed to move temp file (temp: $temp_file, dest: ${systemd_system_dir}/ztpbootstrap-nginx.service), trying sudo tee method..."
                                     rm -f "$temp_file"
-                                    # Extract volumes and env again for tee method
+                                    # Extract volumes and env again for tee method (with same filtering)
                                     local volumes_tee=""
                                     local env_vars_tee=""
+                                    local distro_tee=""
+                                    # Detect distribution
+                                    if [[ -f /etc/os-release ]]; then
+                                        distro_tee=$(grep "^ID=" /etc/os-release | cut -d'=' -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]')
+                                    fi
+                                    
                                     if [[ -f "$nginx_container_file" ]]; then
                                         while IFS= read -r line; do
                                             if [[ "$line" =~ ^Volume= ]]; then
-                                                volumes_tee="${volumes_tee} -v ${line#Volume=}"
+                                                local volume_path_tee="${line#Volume=}"
+                                                local source_path_tee="${volume_path_tee%%:*}"
+                                                
+                                                # Skip Fedora-specific paths on non-Fedora systems
+                                                if [[ "$distro_tee" != "fedora" ]] && [[ "$distro_tee" != "rhel" ]] && [[ "$distro_tee" != "centos" ]]; then
+                                                    if [[ "$source_path_tee" =~ ^/lib64/libsystemd ]] || [[ "$source_path_tee" == "/usr/lib64/systemd" ]]; then
+                                                        continue
+                                                    fi
+                                                fi
+                                                
+                                                # Only include if path exists
+                                                if [[ "$source_path_tee" =~ ^/run ]] || [[ "$source_path_tee" =~ ^/opt ]] || [[ -e "$source_path_tee" ]] || ([[ $EUID -ne 0 ]] && sudo test -e "$source_path_tee" 2>/dev/null); then
+                                                    volumes_tee="${volumes_tee} -v ${volume_path_tee}"
+                                                fi
                                             elif [[ "$line" =~ ^Environment= ]]; then
                                                 env_vars_tee="${env_vars_tee} --env ${line#Environment=}"
                                             fi
