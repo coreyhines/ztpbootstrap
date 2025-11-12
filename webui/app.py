@@ -260,6 +260,98 @@ def auth_logout():
     session.clear()
     return jsonify({'success': True})
 
+@app.route('/api/auth/change-password', methods=['POST'])
+@require_auth
+def auth_change_password():
+    """Change admin password endpoint"""
+    try:
+        data = request.get_json()
+        if not data or 'current_password' not in data or 'new_password' not in data:
+            return jsonify({
+                'error': 'Current password and new password are required',
+                'code': 'MISSING_PASSWORD'
+            }), 400
+        
+        current_password = data['current_password']
+        new_password = data['new_password']
+        
+        # Validate new password
+        if len(new_password) < 8:
+            return jsonify({
+                'error': 'New password must be at least 8 characters long',
+                'code': 'PASSWORD_TOO_SHORT'
+            }), 400
+        
+        # Verify current password
+        password_hash = AUTH_CONFIG['admin_password_hash']
+        password_valid = False
+        
+        # Check if this is the fallback format from setup-interactive.sh
+        if password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
+            import hashlib
+            import base64
+            try:
+                hash_part = password_hash.split(':', 2)[2]
+                stored_hash = base64.b64decode(hash_part)
+                computed_hash = hashlib.pbkdf2_hmac('sha256', current_password.encode('utf-8'), b'ztpbootstrap', 100000)
+                password_valid = (stored_hash == computed_hash)
+            except Exception:
+                password_valid = False
+        else:
+            try:
+                password_valid = check_password_hash(password_hash, current_password)
+            except (ValueError, TypeError):
+                password_valid = False
+        
+        if not password_valid:
+            return jsonify({
+                'error': 'Current password is incorrect',
+                'code': 'INVALID_PASSWORD'
+            }), 401
+        
+        # Generate new password hash
+        new_password_hash = generate_password_hash(new_password)
+        
+        # Update config.yaml
+        if CONFIG_FILE.exists():
+            try:
+                with open(CONFIG_FILE, 'r') as f:
+                    yaml_config = yaml.safe_load(f) or {}
+                
+                # Ensure auth section exists
+                if 'auth' not in yaml_config:
+                    yaml_config['auth'] = {}
+                
+                # Update password hash
+                yaml_config['auth']['admin_password_hash'] = new_password_hash
+                
+                # Write back to file
+                with open(CONFIG_FILE, 'w') as f:
+                    yaml.dump(yaml_config, f, default_flow_style=False, sort_keys=False)
+                
+                # Reload auth config
+                global AUTH_CONFIG
+                AUTH_CONFIG = load_auth_config()
+                
+                return jsonify({'success': True})
+            except Exception as e:
+                print(f"Error updating password in config.yaml: {e}")
+                return jsonify({
+                    'error': f'Failed to update password: {str(e)}',
+                    'code': 'UPDATE_ERROR'
+                }), 500
+        else:
+            return jsonify({
+                'error': 'Config file not found',
+                'code': 'CONFIG_NOT_FOUND'
+            }), 404
+    except Exception as e:
+        print(f"Change password error: {e}")
+        return jsonify({
+            'error': 'Failed to change password',
+            'code': 'CHANGE_PASSWORD_ERROR'
+        }), 500
+
 # ============================================================================
 # Original Routes (Read-Only - No Auth Required)
 # ============================================================================

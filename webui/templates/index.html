@@ -35,9 +35,53 @@
     <div x-data="dashboard()" x-init="init()" x-cloak class="min-h-screen">
         <!-- Header -->
         <header class="bg-white shadow-sm">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
-                <h1 class="text-xl font-bold text-gray-900">ZTP Bootstrap Service</h1>
-                <p class="text-xs text-gray-500">Configuration and Monitoring Dashboard</p>
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex justify-between items-center">
+                <div>
+                    <h1 class="text-xl font-bold text-gray-900">ZTP Bootstrap Service</h1>
+                    <p class="text-xs text-gray-500">Configuration and Monitoring Dashboard</p>
+                </div>
+                <!-- Profile Dropdown -->
+                <div class="relative" x-data="{ showProfileMenu: false }" @click.away="showProfileMenu = false">
+                    <button @click="showProfileMenu = !showProfileMenu" 
+                            class="flex items-center space-x-2 p-2 rounded-full hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <svg class="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                        </svg>
+                    </button>
+                    <!-- Dropdown Menu -->
+                    <div x-show="showProfileMenu" 
+                         x-transition:enter="transition ease-out duration-100"
+                         x-transition:enter-start="transform opacity-0 scale-95"
+                         x-transition:enter-end="transform opacity-100 scale-100"
+                         x-transition:leave="transition ease-in duration-75"
+                         x-transition:leave-start="transform opacity-100 scale-100"
+                         x-transition:leave-end="transform opacity-0 scale-95"
+                         class="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg z-50 border border-gray-200">
+                        <div class="py-2">
+                            <!-- Session Info -->
+                            <div class="px-4 py-2 border-b border-gray-200">
+                                <p class="text-xs text-gray-500">Session expires:</p>
+                                <p class="text-sm font-medium text-gray-900" x-text="authExpiresAt ? new Date(authExpiresAt * 1000).toLocaleString() : 'Unknown'"></p>
+                            </div>
+                            <!-- Change Password -->
+                            <button @click="showChangePasswordModal = true; showProfileMenu = false" 
+                                    class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
+                                </svg>
+                                <span>Change Password</span>
+                            </button>
+                            <!-- Logout -->
+                            <button @click="logout(); showProfileMenu = false" 
+                                    class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100 flex items-center space-x-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+                                </svg>
+                                <span>Logout</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </header>
 
@@ -554,6 +598,12 @@
                 loginError: '',
                 loginLoading: false,
                 pendingAction: null,
+                showChangePasswordModal: false,
+                changePasswordCurrent: '',
+                changePasswordNew: '',
+                changePasswordConfirm: '',
+                changePasswordError: '',
+                changePasswordLoading: false,
                 
                 async init() {
                     // Ensure modal is hidden on initial load
@@ -695,6 +745,59 @@
                         this.authExpiresAt = null;
                     } catch (error) {
                         console.error('Logout error:', error);
+                    }
+                },
+                
+                async changePassword() {
+                    this.changePasswordLoading = true;
+                    this.changePasswordError = '';
+                    
+                    // Validate passwords match
+                    if (this.changePasswordNew !== this.changePasswordConfirm) {
+                        this.changePasswordError = 'New passwords do not match';
+                        this.changePasswordLoading = false;
+                        return;
+                    }
+                    
+                    // Validate password length
+                    if (this.changePasswordNew.length < 8) {
+                        this.changePasswordError = 'New password must be at least 8 characters long';
+                        this.changePasswordLoading = false;
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch('/api/auth/change-password', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                current_password: this.changePasswordCurrent,
+                                new_password: this.changePasswordNew
+                            }),
+                            credentials: 'same-origin'
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (response.ok && data.success) {
+                            // Success - close modal and clear form
+                            this.showChangePasswordModal = false;
+                            this.changePasswordCurrent = '';
+                            this.changePasswordNew = '';
+                            this.changePasswordConfirm = '';
+                            this.changePasswordError = '';
+                            alert('Password changed successfully');
+                        } else {
+                            this.changePasswordError = data.error || 'Failed to change password';
+                            this.changePasswordCurrent = '';
+                        }
+                    } catch (error) {
+                        this.changePasswordError = 'Failed to change password. Please try again.';
+                        this.changePasswordCurrent = '';
+                    } finally {
+                        this.changePasswordLoading = false;
                     }
                 },
                 
