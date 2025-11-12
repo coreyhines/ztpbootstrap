@@ -1098,6 +1098,19 @@ read_config_yaml() {
         values+=("DNS2=$dns2")
     fi
     
+    # Read auth settings
+    local admin_password_hash
+    admin_password_hash=$(yq eval '.auth.admin_password_hash // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$admin_password_hash" ]] && [[ "$admin_password_hash" != "null" ]] && [[ "$admin_password_hash" != "" ]]; then
+        values+=("ADMIN_PASSWORD_HASH=$admin_password_hash")
+    fi
+    
+    local session_timeout
+    session_timeout=$(yq eval '.auth.session_timeout // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$session_timeout" ]] && [[ "$session_timeout" != "null" ]]; then
+        values+=("SESSION_TIMEOUT=$session_timeout")
+    fi
+    
     # Output as key=value pairs (one per line)
     printf '%s\n' "${values[@]}"
     return 0
@@ -1123,6 +1136,8 @@ load_existing_installation_values() {
     EXISTING_NETWORK=""
     EXISTING_HTTP_ONLY=""
     EXISTING_HTTPS_PORT=""
+    EXISTING_ADMIN_PASSWORD_HASH=""
+    EXISTING_SESSION_TIMEOUT=""
     
     log "Reading existing installation values..."
     
@@ -1154,6 +1169,8 @@ load_existing_installation_values() {
                 TIMEZONE) EXISTING_TIMEZONE="$value" ;;
                 DNS1) EXISTING_DNS1="$value" ;;
                 DNS2) EXISTING_DNS2="$value" ;;
+                ADMIN_PASSWORD_HASH) EXISTING_ADMIN_PASSWORD_HASH="$value" ;;
+                SESSION_TIMEOUT) EXISTING_SESSION_TIMEOUT="$value" ;;
             esac
         done < <(read_config_yaml "config.yaml" "$(dirname "$config_file")")
         log "  Loaded values from config.yaml"
@@ -2185,10 +2202,19 @@ interactive_config() {
     log "modify scripts) require authentication. Set an admin password to enable this."
     echo ""
     
-    # Ask if user wants to set a password
-    prompt_yes_no "Set admin password for Web UI write operations?" "y" SET_ADMIN_PASSWORD
-    
-    if [[ "$SET_ADMIN_PASSWORD" == "true" ]]; then
+    # In upgrade mode, use existing password hash if available
+    if [[ "${UPGRADE_MODE:-false}" == "true" ]] && [[ -n "${EXISTING_ADMIN_PASSWORD_HASH:-}" ]]; then
+        log "Upgrade mode: Using existing admin password hash from previous installation."
+        ADMIN_PASSWORD_HASH="${EXISTING_ADMIN_PASSWORD_HASH}"
+        SET_ADMIN_PASSWORD="true"
+        if [[ -n "${EXISTING_SESSION_TIMEOUT:-}" ]]; then
+            SESSION_TIMEOUT="${EXISTING_SESSION_TIMEOUT}"
+        fi
+    else
+        # Ask if user wants to set a password
+        prompt_yes_no "Set admin password for Web UI write operations?" "y" SET_ADMIN_PASSWORD
+        
+        if [[ "$SET_ADMIN_PASSWORD" == "true" ]]; then
         # Prompt for password with confirmation
         local password_valid=false
         local attempts=0
@@ -2247,9 +2273,7 @@ interactive_config() {
             warn "Failed to set password after $attempts attempts. Skipping authentication setup."
             ADMIN_PASSWORD_HASH=""
         fi
-    else
-        log "Skipping authentication setup. Web UI will allow all operations without login."
-        ADMIN_PASSWORD_HASH=""
+        fi
     fi
     
     # Session timeout (optional, has reasonable default)
