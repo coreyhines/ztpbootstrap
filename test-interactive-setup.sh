@@ -109,7 +109,7 @@ echo "Interactive Setup Test"
 echo "=========================================="
 echo "Distribution: $DISTRO $VERSION"
 if [[ "$RESTORE_BACKUP" == "true" ]]; then
-    echo "Backup source: ${BACKUP_USER}@${BACKUP_HOST}"
+    echo "Backup source: ${BACKUP_USER:-unknown}@${BACKUP_HOST:-unknown}"
 else
     echo "Backup restoration: Skipped"
 fi
@@ -432,7 +432,7 @@ echo ""
 echo "Setup completed:"
 echo "  1. ✓ VM created and ready"
 if [[ "$RESTORE_BACKUP" == "true" ]]; then
-    echo "  2. ✓ Backup restored from ${BACKUP_HOST}"
+    echo "  2. ✓ Backup restored from ${BACKUP_HOST:-unknown}"
     echo "  3. ✓ Repository cloned and updated"
     echo ""
     echo "Next steps - Test interactive setup with restored backup:"
