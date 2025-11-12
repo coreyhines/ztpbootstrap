@@ -208,7 +208,7 @@
                     Restore Backup
                 </button>
                 <label class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm font-medium transition-colors cursor-pointer">
-                    <input type="file" @change="uploadScript($event)" accept=".py" class="hidden">
+                    <input type="file" x-on:change="uploadScript($event)" x-ref="fileInput" accept=".py" class="hidden">
                     Upload Script
                 </label>
             </div>
@@ -557,6 +557,18 @@
                 async init() {
                     // Ensure modal is hidden on initial load
                     this.showLoginModal = false;
+                    
+                    // Ensure file input change handler is bound
+                    await this.$nextTick();
+                    const fileInput = this.$refs.fileInput;
+                    if (fileInput) {
+                        console.log('File input found, ensuring change handler is bound');
+                        // The x-on:change directive should handle this, but let's verify
+                        fileInput.addEventListener('change', (e) => {
+                            console.log('Native change event fired on file input');
+                            this.uploadScript(e);
+                        });
+                    }
                     
                     // Load theme preference
                     const savedTheme = localStorage.getItem('ztpbootstrap-theme');
