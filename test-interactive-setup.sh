@@ -370,13 +370,61 @@ fi
 cd ~/ztpbootstrap
 git pull || true
 
-# Ensure yq is installed
+# Ensure correct yq is installed (mikefarah/yq, not Python wrapper)
 if ! command -v yq &> /dev/null; then
     echo "Installing yq..."
-    sudo dnf install -y yq 2>/dev/null || sudo apt-get install -y yq 2>/dev/null || {
-        echo "Failed to install yq automatically"
+    # Try dnf first (Fedora)
+    sudo dnf install -y yq 2>/dev/null || {
+        # For Ubuntu/Debian, install mikefarah/yq from GitHub (apt package is Python wrapper)
+        if command -v apt-get &>/dev/null; then
+            echo "Installing mikefarah/yq from GitHub (Ubuntu apt package is wrong version)..."
+            YQ_VERSION="v4.44.3"
+            ARCH=$(uname -m)
+            if [[ "$ARCH" == "aarch64" ]] || [[ "$ARCH" == "arm64" ]]; then
+                YQ_ARCH="arm64"
+            else
+                YQ_ARCH="amd64"
+            fi
+            sudo wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${YQ_ARCH}" 2>/dev/null || \
+            sudo curl -sL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${YQ_ARCH}" -o /usr/local/bin/yq 2>/dev/null || {
+                echo "Failed to download yq from GitHub"
+            }
+            if [[ -f /usr/local/bin/yq ]]; then
+                sudo chmod +x /usr/local/bin/yq
+                echo "✓ Installed mikefarah/yq"
+            fi
+        fi
     }
+else
+    # Check if it's the correct yq (mikefarah/yq) or Python wrapper
+    YQ_VERSION=$(yq --version 2>&1 || echo "")
+    if echo "$YQ_VERSION" | grep -q "yq version"; then
+        echo "✓ Correct yq version found: $YQ_VERSION"
+    elif echo "$YQ_VERSION" | grep -q "0.0.0\|usage:"; then
+        echo "WARNING: Python yq wrapper detected, installing correct yq..."
+        # Install mikefarah/yq
+        YQ_VERSION="v4.44.3"
+        ARCH=$(uname -m)
+        if [[ "$ARCH" == "aarch64" ]] || [[ "$ARCH" == "arm64" ]]; then
+            YQ_ARCH="arm64"
+        else
+            YQ_ARCH="amd64"
+        fi
+        sudo wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${YQ_ARCH}" 2>/dev/null || \
+        sudo curl -sL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${YQ_ARCH}" -o /usr/local/bin/yq 2>/dev/null || {
+            echo "Failed to download correct yq"
+        }
+        if [[ -f /usr/local/bin/yq ]]; then
+            sudo chmod +x /usr/local/bin/yq
+            # Ensure /usr/local/bin is in PATH before /usr/bin
+            export PATH="/usr/local/bin:$PATH"
+            echo "✓ Installed correct yq (mikefarah/yq)"
+        fi
+    fi
 fi
+
+# Ensure /usr/local/bin is in PATH (for correct yq to be found first)
+export PATH="/usr/local/bin:$PATH"
 
 echo "✓ Repository ready"
 PREP_EOF

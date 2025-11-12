@@ -3048,40 +3048,169 @@ EOF
     fi
 }
 
-# Check prerequisites
-check_prerequisites() {
+# Check and install dependencies
+check_and_install_dependencies() {
     local missing_deps=()
+    local auto_installable=()
+    local manual_install=()
+    local distro=""
+    
+    # Detect distribution
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        distro="${ID:-}"
+    fi
+    
+    log "Checking dependencies..."
     
     # Check for yq (required for YAML parsing)
     local yq_path
     yq_path=$(command -v yq 2>/dev/null || echo "")
+    local yq_ok=false
     
-    if [[ -z "$yq_path" ]]; then
-        missing_deps+=("yq")
-        error "yq is required but not installed."
-        echo ""
-        info "Install yq:"
-        echo "  macOS:    brew install yq"
-        echo "  Debian:   sudo apt-get install yq"
-        echo "  RHEL:     sudo dnf install yq"
-        echo "  Or visit: https://github.com/mikefarah/yq"
-        echo ""
-        return 1
-    else
-        # Verify yq actually works (not a broken Python wrapper)
-        if ! yq --version >/dev/null 2>&1; then
-            warn "yq found at $yq_path but it appears to be broken (Python version?)"
-            warn "Trying to use system yq at /usr/bin/yq..."
-            if [[ -x "/usr/bin/yq" ]] && /usr/bin/yq --version >/dev/null 2>&1; then
-                warn "Using /usr/bin/yq instead. Consider removing broken yq from PATH."
-                # Prepend /usr/bin to PATH for this session
-                export PATH="/usr/bin:$PATH"
+    if [[ -n "$yq_path" ]]; then
+        # Check if it's the correct yq (mikefarah/yq) or Python wrapper
+        local yq_version_output
+        yq_version_output=$(yq --version 2>&1 || echo "")
+        
+        if echo "$yq_version_output" | grep -q "yq version\|v[0-9]"; then
+            # Correct yq found
+            yq_ok=true
+            log "✓ yq found: $yq_path ($yq_version_output)"
+        elif echo "$yq_version_output" | grep -q "0.0.0\|usage:"; then
+            # Python wrapper detected - try to install correct version
+            warn "Python yq wrapper detected at $yq_path, installing correct version..."
+            if install_correct_yq; then
+                yq_ok=true
+                log "✓ Installed correct yq (mikefarah/yq)"
             else
-                error "yq is required but not working. Please install it with:"
-                error "  sudo dnf install yq  # Fedora/RHEL"
-                error "  sudo apt-get install yq  # Debian/Ubuntu"
                 missing_deps+=("yq")
-                return 1
+                manual_install+=("yq")
+            fi
+        fi
+    fi
+    
+    if [[ "$yq_ok" == "false" ]]; then
+        # Try to install yq
+        if install_correct_yq; then
+            yq_ok=true
+            log "✓ Installed yq"
+        else
+            missing_deps+=("yq")
+            if [[ "$distro" == "fedora" ]] || [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
+                auto_installable+=("yq (sudo dnf install -y yq)")
+            elif [[ "$distro" == "ubuntu" ]] || [[ "$distro" == "debian" ]]; then
+                manual_install+=("yq (must install mikefarah/yq from GitHub, apt package is wrong version)")
+            else
+                manual_install+=("yq (install from https://github.com/mikefarah/yq)")
+            fi
+        fi
+    fi
+    
+    # Check for podman
+    if ! command -v podman >/dev/null 2>&1; then
+        missing_deps+=("podman")
+        if [[ "$distro" == "fedora" ]] || [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
+            auto_installable+=("podman (sudo dnf install -y podman)")
+        elif [[ "$distro" == "ubuntu" ]] || [[ "$distro" == "debian" ]]; then
+            auto_installable+=("podman (sudo apt-get update && sudo apt-get install -y podman)")
+        else
+            manual_install+=("podman")
+        fi
+    else
+        log "✓ podman found: $(command -v podman)"
+    fi
+    
+    # Check for openssl (needed for certificate generation)
+    if ! command -v openssl >/dev/null 2>&1; then
+        missing_deps+=("openssl")
+        if [[ "$distro" == "fedora" ]] || [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
+            auto_installable+=("openssl (sudo dnf install -y openssl)")
+        elif [[ "$distro" == "ubuntu" ]] || [[ "$distro" == "debian" ]]; then
+            auto_installable+=("openssl (sudo apt-get install -y openssl)")
+        else
+            manual_install+=("openssl")
+        fi
+    else
+        log "✓ openssl found: $(command -v openssl)"
+    fi
+    
+    # Check for wget or curl (needed for downloads)
+    if ! command -v wget >/dev/null 2>&1 && ! command -v curl >/dev/null 2>&1; then
+        missing_deps+=("wget or curl")
+        if [[ "$distro" == "fedora" ]] || [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
+            auto_installable+=("wget (sudo dnf install -y wget)")
+        elif [[ "$distro" == "ubuntu" ]] || [[ "$distro" == "debian" ]]; then
+            auto_installable+=("wget (sudo apt-get install -y wget)")
+        else
+            manual_install+=("wget or curl")
+        fi
+    else
+        if command -v wget >/dev/null 2>&1; then
+            log "✓ wget found: $(command -v wget)"
+        else
+            log "✓ curl found: $(command -v curl)"
+        fi
+    fi
+    
+    # Check for git (optional but recommended)
+    if ! command -v git >/dev/null 2>&1; then
+        warn "git not found (optional, but recommended for repository management)"
+        if [[ "$distro" == "fedora" ]] || [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
+            auto_installable+=("git (sudo dnf install -y git)")
+        elif [[ "$distro" == "ubuntu" ]] || [[ "$distro" == "debian" ]]; then
+            auto_installable+=("git (sudo apt-get install -y git)")
+        fi
+    else
+        log "✓ git found: $(command -v git)"
+    fi
+    
+    # Check for sudo (needed for privileged operations)
+    if ! command -v sudo >/dev/null 2>&1; then
+        if [[ $EUID -eq 0 ]]; then
+            log "✓ Running as root (sudo not needed)"
+        else
+            warn "sudo not found and not running as root - some operations may fail"
+            manual_install+=("sudo or run script as root")
+        fi
+    else
+        log "✓ sudo found: $(command -v sudo)"
+    fi
+    
+    # Check for systemctl (needed for service management)
+    if ! command -v systemctl >/dev/null 2>&1; then
+        warn "systemctl not found - service management may not work"
+        manual_install+=("systemd (usually comes with systemd-based distributions)")
+    else
+        log "✓ systemctl found: $(command -v systemctl)"
+    fi
+    
+    # If there are auto-installable dependencies, offer to install them
+    if [[ ${#auto_installable[@]} -gt 0 ]]; then
+        echo ""
+        warn "The following dependencies can be installed automatically:"
+        for dep in "${auto_installable[@]}"; do
+            echo "  - $dep"
+        done
+        echo ""
+        if [[ "${NON_INTERACTIVE:-false}" != "true" ]]; then
+            echo -n -e "${CYAN}Would you like to install them now? [Y/n]: ${NC}"
+            read -r response
+            if [[ ! "$response" =~ ^[Nn]$ ]]; then
+                for dep_cmd in "${auto_installable[@]}"; do
+                    # Extract the command from the description
+                    local install_cmd
+                    install_cmd=$(echo "$dep_cmd" | sed -n 's/.*(\(.*\))/\1/p')
+                    if [[ -n "$install_cmd" ]]; then
+                        log "Running: $install_cmd"
+                        if eval "$install_cmd" 2>&1; then
+                            log "✓ Successfully installed dependency"
+                        else
+                            warn "Failed to install dependency: $dep_cmd"
+                            manual_install+=("$dep_cmd")
+                        fi
+                    fi
+                done
             fi
         fi
     fi
@@ -3092,7 +3221,91 @@ check_prerequisites() {
         return 1
     fi
     
+    # Report missing dependencies that require manual installation
+    if [[ ${#manual_install[@]} -gt 0 ]]; then
+        echo ""
+        error "The following dependencies require manual installation:"
+        for dep in "${manual_install[@]}"; do
+            echo "  - $dep"
+        done
+        echo ""
+        return 1
+    fi
+    
+    # Final check: verify all critical dependencies are available
+    local critical_missing=()
+    [[ -z "$(command -v yq 2>/dev/null)" ]] && critical_missing+=("yq")
+    [[ -z "$(command -v podman 2>/dev/null)" ]] && critical_missing+=("podman")
+    [[ -z "$(command -v openssl 2>/dev/null)" ]] && critical_missing+=("openssl")
+    
+    if [[ ${#critical_missing[@]} -gt 0 ]]; then
+        error "Critical dependencies still missing: ${critical_missing[*]}"
+        return 1
+    fi
+    
+    log "All dependencies satisfied"
     return 0
+}
+
+# Install correct yq (mikefarah/yq) from GitHub
+install_correct_yq() {
+    local arch
+    arch=$(uname -m)
+    local yq_arch=""
+    
+    # Determine architecture
+    if [[ "$arch" == "aarch64" ]] || [[ "$arch" == "arm64" ]]; then
+        yq_arch="arm64"
+    elif [[ "$arch" == "x86_64" ]] || [[ "$arch" == "amd64" ]]; then
+        yq_arch="amd64"
+    else
+        warn "Unsupported architecture for yq: $arch"
+        return 1
+    fi
+    
+    local yq_version="v4.44.3"
+    local yq_url="https://github.com/mikefarah/yq/releases/download/${yq_version}/yq_linux_${yq_arch}"
+    local yq_dest="/usr/local/bin/yq"
+    
+    # Try wget first, then curl
+    if command -v wget >/dev/null 2>&1; then
+        if [[ $EUID -eq 0 ]]; then
+            wget -qO "$yq_dest" "$yq_url" 2>/dev/null || return 1
+        else
+            sudo wget -qO "$yq_dest" "$yq_url" 2>/dev/null || return 1
+        fi
+    elif command -v curl >/dev/null 2>&1; then
+        if [[ $EUID -eq 0 ]]; then
+            curl -sL "$yq_url" -o "$yq_dest" 2>/dev/null || return 1
+        else
+            sudo curl -sL "$yq_url" -o "$yq_dest" 2>/dev/null || return 1
+        fi
+    else
+        warn "Neither wget nor curl available to download yq"
+        return 1
+    fi
+    
+    # Make executable
+    if [[ $EUID -eq 0 ]]; then
+        chmod +x "$yq_dest" 2>/dev/null || return 1
+    else
+        sudo chmod +x "$yq_dest" 2>/dev/null || return 1
+    fi
+    
+    # Ensure /usr/local/bin is in PATH
+    export PATH="/usr/local/bin:$PATH"
+    
+    # Verify it works
+    if "$yq_dest" --version >/dev/null 2>&1; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Check prerequisites (backward compatibility wrapper)
+check_prerequisites() {
+    check_and_install_dependencies
 }
 
 # Parse command line arguments

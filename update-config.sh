@@ -27,13 +27,102 @@ error() {
     exit 1
 }
 
-# Check if yq is available
+# Check if yq is available and install correct version if needed
 check_yq() {
-    if ! command -v yq >/dev/null 2>&1; then
-        error "yq is required to parse YAML configuration. Install it with:"
-        error "  brew install yq  # macOS"
-        error "  apt-get install yq  # Debian/Ubuntu"
-        error "  or download from: https://github.com/mikefarah/yq"
+    local yq_path
+    yq_path=$(command -v yq 2>/dev/null || echo "")
+    
+    if [[ -z "$yq_path" ]]; then
+        log "yq not found, attempting to install..."
+        if install_correct_yq; then
+            log "✓ Installed yq"
+            return 0
+        else
+            error "yq is required to parse YAML configuration. Install it with:"
+            error "  brew install yq  # macOS"
+            error "  sudo dnf install yq  # Fedora/RHEL"
+            error "  or download from: https://github.com/mikefarah/yq"
+            return 1
+        fi
+    fi
+    
+    # Check if it's the correct yq (mikefarah/yq) or Python wrapper
+    local yq_version_output
+    yq_version_output=$(yq --version 2>&1 || echo "")
+    
+    if echo "$yq_version_output" | grep -q "yq version\|v[0-9]"; then
+        # Correct yq found
+        log "✓ yq found: $yq_path ($yq_version_output)"
+        return 0
+    elif echo "$yq_version_output" | grep -q "0.0.0\|usage:"; then
+        # Python wrapper detected - try to install correct version
+        warn "Python yq wrapper detected at $yq_path, installing correct version..."
+        if install_correct_yq; then
+            log "✓ Installed correct yq (mikefarah/yq)"
+            return 0
+        else
+            error "yq is required but wrong version installed. Please install mikefarah/yq from:"
+            error "  https://github.com/mikefarah/yq"
+            return 1
+        fi
+    fi
+    
+    return 0
+}
+
+# Install correct yq (mikefarah/yq) from GitHub
+install_correct_yq() {
+    local arch
+    arch=$(uname -m)
+    local yq_arch=""
+    
+    # Determine architecture
+    if [[ "$arch" == "aarch64" ]] || [[ "$arch" == "arm64" ]]; then
+        yq_arch="arm64"
+    elif [[ "$arch" == "x86_64" ]] || [[ "$arch" == "amd64" ]]; then
+        yq_arch="amd64"
+    else
+        warn "Unsupported architecture for yq: $arch"
+        return 1
+    fi
+    
+    local yq_version="v4.44.3"
+    local yq_url="https://github.com/mikefarah/yq/releases/download/${yq_version}/yq_linux_${yq_arch}"
+    local yq_dest="/usr/local/bin/yq"
+    
+    # Try wget first, then curl
+    if command -v wget >/dev/null 2>&1; then
+        if [[ $EUID -eq 0 ]]; then
+            wget -qO "$yq_dest" "$yq_url" 2>/dev/null || return 1
+        else
+            sudo wget -qO "$yq_dest" "$yq_url" 2>/dev/null || return 1
+        fi
+    elif command -v curl >/dev/null 2>&1; then
+        if [[ $EUID -eq 0 ]]; then
+            curl -sL "$yq_url" -o "$yq_dest" 2>/dev/null || return 1
+        else
+            sudo curl -sL "$yq_url" -o "$yq_dest" 2>/dev/null || return 1
+        fi
+    else
+        warn "Neither wget nor curl available to download yq"
+        return 1
+    fi
+    
+    # Make executable
+    if [[ $EUID -eq 0 ]]; then
+        chmod +x "$yq_dest" 2>/dev/null || return 1
+    else
+        sudo chmod +x "$yq_dest" 2>/dev/null || return 1
+    fi
+    
+    # Ensure /usr/local/bin is in PATH
+    export PATH="/usr/local/bin:$PATH"
+    
+    # Verify it works
+    if "$yq_dest" --version >/dev/null 2>&1; then
+        return 0
+    else
+        return 1
     fi
 }
 

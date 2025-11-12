@@ -982,6 +982,17 @@ download_iso() {
     
     # Check for similar files (same distro, arch, type) - useful if version differs slightly
     if [[ "$DOWNLOAD_TYPE" == "cloud" ]]; then
+        # Detect architecture for pattern matching (same logic as download_iso function)
+        local arch="${DOWNLOAD_ARCH}"
+        if [[ -z "$arch" ]]; then
+            # Auto-detect: prefer native ARM64 on Apple Silicon, but allow x86_64
+            if [[ "$(uname -m)" == "arm64" ]] || [[ "$(uname -m)" == "aarch64" ]]; then
+                arch="aarch64"
+            else
+                arch="x86_64"
+            fi
+        fi
+        
         local patterns=()
         case "$distro" in
             fedora|Fedora)
