@@ -162,6 +162,13 @@ def load_auth_config():
 # Load auth config
 AUTH_CONFIG = load_auth_config()
 
+# Function to reload auth config (useful after password changes)
+def reload_auth_config():
+    """Reload authentication configuration from config.yaml"""
+    global AUTH_CONFIG
+    AUTH_CONFIG = load_auth_config()
+    print(f"Auth config reloaded - Hash present: {AUTH_CONFIG['admin_password_hash'] is not None}, Hash length: {len(AUTH_CONFIG['admin_password_hash']) if AUTH_CONFIG['admin_password_hash'] else 0}")
+
 # Configure Flask session
 app.secret_key = AUTH_CONFIG['session_secret']
 app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -289,6 +296,8 @@ def auth_status():
 @app.route('/api/auth/login', methods=['POST'])
 def auth_login():
     """Login endpoint"""
+    # Reload auth config on each login attempt to pick up password changes
+    reload_auth_config()
     try:
         # Get client IP
         client_ip = request.remote_addr or 'unknown'
