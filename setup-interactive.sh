@@ -2004,14 +2004,18 @@ EOF
     fi
     
     # Verify services exist before trying to start them
+    # Check both generator directory (temporary) and systemd system directory (permanent)
     local generator_dir="/run/systemd/generator"
+    local systemd_system_dir="/etc/systemd/system"
     local pod_service_exists=false
     
-    # Check if file exists (with sudo if needed)
-    if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
+    # Check if file exists in either location (with sudo if needed)
+    if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-pod.service" ]]; then
         pod_service_exists=true
-    elif [[ $EUID -ne 0 ]] && sudo test -f "${generator_dir}/ztpbootstrap-pod.service" 2>/dev/null; then
-        pod_service_exists=true
+    elif [[ $EUID -ne 0 ]]; then
+        if sudo test -f "${generator_dir}/ztpbootstrap-pod.service" 2>/dev/null || sudo test -f "${systemd_system_dir}/ztpbootstrap-pod.service" 2>/dev/null; then
+            pod_service_exists=true
+        fi
     fi
     
     if [[ "$pod_service_exists" == "false" ]]; then
@@ -2023,18 +2027,21 @@ EOF
         fi
         sleep 5  # Give more time for systemd generator to run
         
-        # Check again (with sudo if needed)
+        # Check again (both locations)
         pod_service_exists=false
-        if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
+        if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-pod.service" ]]; then
             pod_service_exists=true
-        elif [[ $EUID -ne 0 ]] && sudo test -f "${generator_dir}/ztpbootstrap-pod.service" 2>/dev/null; then
-            pod_service_exists=true
+        elif [[ $EUID -ne 0 ]]; then
+            if sudo test -f "${generator_dir}/ztpbootstrap-pod.service" 2>/dev/null || sudo test -f "${systemd_system_dir}/ztpbootstrap-pod.service" 2>/dev/null; then
+                pod_service_exists=true
+            fi
         fi
         
         if [[ "$pod_service_exists" == "false" ]]; then
             error "Pod service file still not found. Cannot start services."
             error "Please run: sudo systemctl daemon-reload"
             error "Then check: sudo ls -la /run/systemd/generator/ | grep ztpbootstrap"
+            error "Or check: sudo ls -la /etc/systemd/system/ | grep ztpbootstrap"
             return 1
         fi
     fi
@@ -2934,12 +2941,15 @@ EOF
             # This is needed because systemd's automatic generator may not always process all files
             local systemd_dir="/etc/containers/systemd/ztpbootstrap"
             local generator_dir="/run/systemd/generator"
+            local systemd_system_dir="/etc/systemd/system"
             
             # Ensure generator directory exists
             if [[ $EUID -eq 0 ]]; then
                 mkdir -p "$generator_dir" 2>/dev/null || true
+                mkdir -p "$systemd_system_dir" 2>/dev/null || true
             else
                 sudo mkdir -p "$generator_dir" 2>/dev/null || true
+                sudo mkdir -p "$systemd_system_dir" 2>/dev/null || true
             fi
             
             # Reload systemd first to trigger the quadlet generator
@@ -2951,9 +2961,18 @@ EOF
             fi
             sleep 3  # Give systemd time to generate service files via automatic generator
             
+            # Check both generator directory and systemd system directory
+            # Generator files are temporary, systemd system files are permanent
+            local pod_service_path=""
+            if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
+                pod_service_path="${generator_dir}/ztpbootstrap-pod.service"
+            elif [[ -f "${systemd_system_dir}/ztpbootstrap-pod.service" ]]; then
+                pod_service_path="${systemd_system_dir}/ztpbootstrap-pod.service"
+            fi
+            
             # Verify services were generated, if not try manual quadlet execution
             local services_generated=true
-            if [[ ! -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
+            if [[ -z "$pod_service_path" ]]; then
                 warn "Pod service not auto-generated, trying manual quadlet execution..."
                 services_generated=false
                 
@@ -2969,7 +2988,13 @@ EOF
                         else
                             pod_output=$(sudo /usr/libexec/podman/quadlet "$pod_file" 2>&1) || pod_exit_code=$?
                         fi
-                        if [[ $pod_exit_code -eq 0 ]] && [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
+                        # Check both locations after quadlet execution
+                        local pod_generated=false
+                        if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-pod.service" ]]; then
+                            pod_generated=true
+                        fi
+                        
+                        if [[ $pod_exit_code -eq 0 ]] && [[ "$pod_generated" == "true" ]]; then
                             log "Pod service file generated successfully"
                             services_generated=true
                         else
@@ -2978,6 +3003,7 @@ EOF
                             fi
                             warn "Failed to generate pod service file, creating manually..."
                             # Manually create pod service file as fallback
+                            # Create in /etc/systemd/system/ for permanence (not /run/systemd/generator which is tmpfs)
                             local pod_name="ztpbootstrap"
                             if grep -q "^PodName=" "$pod_file" 2>/dev/null; then
                                 pod_name=$(grep "^PodName=" "$pod_file" | cut -d'=' -f2 | tr -d ' ')
@@ -2987,7 +3013,7 @@ EOF
                                 network_mode="host"
                             fi
                             if [[ $EUID -eq 0 ]]; then
-                                cat > "${generator_dir}/ztpbootstrap-pod.service" << EOFPOD
+                                cat > "${systemd_system_dir}/ztpbootstrap-pod.service" << EOFPOD
 [Unit]
 Description=ZTP Bootstrap Service Pod
 SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod
@@ -3033,20 +3059,21 @@ ExecStartPre=-/usr/bin/podman pod stop ${pod_name}
 ExecStartPre=-/usr/bin/podman pod rm -f ${pod_name}
 ExecStartPre=/usr/bin/podman pod create --infra --name ${pod_name} --network ${network_mode}
 EOFPOD
-                                if sudo mv "$temp_file" "${generator_dir}/ztpbootstrap-pod.service" 2>&1; then
-                                    log "Pod service file created manually at ${generator_dir}/ztpbootstrap-pod.service"
+                                # Create in /etc/systemd/system/ for permanence
+                                if sudo mv "$temp_file" "${systemd_system_dir}/ztpbootstrap-pod.service" 2>&1; then
+                                    log "Pod service file created manually at ${systemd_system_dir}/ztpbootstrap-pod.service"
                                     # Verify immediately
-                                    if sudo test -f "${generator_dir}/ztpbootstrap-pod.service" 2>/dev/null; then
+                                    if sudo test -f "${systemd_system_dir}/ztpbootstrap-pod.service" 2>/dev/null; then
                                         log "✓ File verified immediately after creation"
                                         services_generated=true
                                     else
                                         warn "File was moved but not found at destination"
                                     fi
                                 else
-                                    warn "Failed to move temp file to generator directory (temp file: $temp_file)"
+                                    warn "Failed to move temp file to systemd directory (temp file: $temp_file)"
                                     rm -f "$temp_file"
                                     # Try alternative method: use sudo tee
-                                    if sudo tee "${generator_dir}/ztpbootstrap-pod.service" > /dev/null << EOFPOD2
+                                    if sudo tee "${systemd_system_dir}/ztpbootstrap-pod.service" > /dev/null << EOFPOD2
 [Unit]
 Description=ZTP Bootstrap Service Pod
 SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod
@@ -3074,12 +3101,21 @@ EOFPOD2
                                 fi
                             fi
                             
-                            # Verify file exists (with sudo check if needed) - outside if/else block
-                            if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]] || ([[ $EUID -ne 0 ]] && sudo test -f "${generator_dir}/ztpbootstrap-pod.service" 2>/dev/null); then
+                            # Verify file exists (check both locations) - outside if/else block
+                            local pod_verified=false
+                            if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-pod.service" ]]; then
+                                pod_verified=true
+                            elif [[ $EUID -ne 0 ]]; then
+                                if sudo test -f "${generator_dir}/ztpbootstrap-pod.service" 2>/dev/null || sudo test -f "${systemd_system_dir}/ztpbootstrap-pod.service" 2>/dev/null; then
+                                    pod_verified=true
+                                fi
+                            fi
+                            
+                            if [[ "$pod_verified" == "true" ]]; then
                                 log "✓ Pod service file verified"
                                 services_generated=true
                             else
-                                warn "Failed to verify pod service file was created at ${generator_dir}/ztpbootstrap-pod.service"
+                                warn "Failed to verify pod service file was created (checked ${generator_dir} and ${systemd_system_dir})"
                             fi
                         fi
                     fi
@@ -3095,7 +3131,13 @@ EOFPOD2
                         else
                             nginx_output=$(sudo /usr/libexec/podman/quadlet "$nginx_container_file" 2>&1) || nginx_exit_code=$?
                         fi
-                        if [[ $nginx_exit_code -eq 0 ]] && [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]]; then
+                        # Check both locations after quadlet execution
+                        local nginx_generated=false
+                        if [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-nginx.service" ]]; then
+                            nginx_generated=true
+                        fi
+                        
+                        if [[ $nginx_exit_code -eq 0 ]] && [[ "$nginx_generated" == "true" ]]; then
                             log "Nginx container service file generated successfully"
                         else
                             if [[ -n "$nginx_output" ]]; then
@@ -3119,8 +3161,9 @@ EOFPOD2
                                     fi
                                 done < "$nginx_container_file"
                             fi
+                            # Create in /etc/systemd/system/ for permanence
                             if [[ $EUID -eq 0 ]]; then
-                                cat > "${generator_dir}/ztpbootstrap-nginx.service" << EOFNGINX
+                                cat > "${systemd_system_dir}/ztpbootstrap-nginx.service" << EOFNGINX
 [Unit]
 Description=ZTP Bootstrap Nginx Container
 SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-nginx.container
@@ -3164,16 +3207,17 @@ NotifyAccess=all
 SyslogIdentifier=%N
 ExecStart=/usr/bin/podman run --name ztpbootstrap-nginx --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes}${env_vars} docker.io/nginx:alpine
 EOFNGINX
-                                if sudo mv "$temp_file" "${generator_dir}/ztpbootstrap-nginx.service" 2>&1; then
-                                    log "Nginx service file created manually at ${generator_dir}/ztpbootstrap-nginx.service"
+                                # Create in /etc/systemd/system/ for permanence
+                                if sudo mv "$temp_file" "${systemd_system_dir}/ztpbootstrap-nginx.service" 2>&1; then
+                                    log "Nginx service file created manually at ${systemd_system_dir}/ztpbootstrap-nginx.service"
                                     # Verify immediately
-                                    if sudo test -f "${generator_dir}/ztpbootstrap-nginx.service" 2>/dev/null; then
+                                    if sudo test -f "${systemd_system_dir}/ztpbootstrap-nginx.service" 2>/dev/null; then
                                         log "✓ Nginx file verified immediately after creation"
                                     else
                                         warn "Nginx file was moved but not found at destination"
                                     fi
                                 else
-                                    warn "Failed to move temp file (temp: $temp_file, dest: ${generator_dir}/ztpbootstrap-nginx.service), trying sudo tee method..."
+                                    warn "Failed to move temp file (temp: $temp_file, dest: ${systemd_system_dir}/ztpbootstrap-nginx.service), trying sudo tee method..."
                                     rm -f "$temp_file"
                                     # Extract volumes and env again for tee method
                                     local volumes_tee=""
@@ -3187,7 +3231,7 @@ EOFNGINX
                                             fi
                                         done < "$nginx_container_file"
                                     fi
-                                    if sudo tee "${generator_dir}/ztpbootstrap-nginx.service" > /dev/null << EOFNGINX2
+                                    if sudo tee "${systemd_system_dir}/ztpbootstrap-nginx.service" > /dev/null << EOFNGINX2
 [Unit]
 Description=ZTP Bootstrap Nginx Container
 SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-nginx.container
@@ -3213,9 +3257,20 @@ EOFNGINX2
                                 fi
                             fi
                             
-                            # Verify file exists (outside if/else block)
-                            if [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]] || ([[ $EUID -ne 0 ]] && sudo test -f "${generator_dir}/ztpbootstrap-nginx.service" 2>/dev/null); then
+                            # Verify file exists (check both locations) - outside if/else block
+                            local nginx_verified=false
+                            if [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-nginx.service" ]]; then
+                                nginx_verified=true
+                            elif [[ $EUID -ne 0 ]]; then
+                                if sudo test -f "${generator_dir}/ztpbootstrap-nginx.service" 2>/dev/null || sudo test -f "${systemd_system_dir}/ztpbootstrap-nginx.service" 2>/dev/null; then
+                                    nginx_verified=true
+                                fi
+                            fi
+                            
+                            if [[ "$nginx_verified" == "true" ]]; then
                                 log "✓ Nginx service file verified"
+                            else
+                                warn "Failed to verify nginx service file (checked ${generator_dir} and ${systemd_system_dir})"
                             fi
                         fi
                     fi
@@ -3237,21 +3292,25 @@ EOFNGINX2
                 log "✓ Pod service auto-generated by systemd"
             fi
             
-            # Final verification that services exist (check with sudo if needed)
+            # Final verification that services exist (check both locations)
             local pod_service_exists=false
-            if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
+            if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-pod.service" ]]; then
                 pod_service_exists=true
-            elif [[ $EUID -ne 0 ]] && sudo test -f "${generator_dir}/ztpbootstrap-pod.service" 2>/dev/null; then
-                pod_service_exists=true
+            elif [[ $EUID -ne 0 ]]; then
+                if sudo test -f "${generator_dir}/ztpbootstrap-pod.service" 2>/dev/null || sudo test -f "${systemd_system_dir}/ztpbootstrap-pod.service" 2>/dev/null; then
+                    pod_service_exists=true
+                fi
             fi
             
             if [[ "$pod_service_exists" == "false" ]]; then
                 warn "⚠️  Warning: Pod service file still not found after generation attempts"
-                warn "   Checking if files exist in generator directory..."
+                warn "   Checking if files exist in generator and systemd directories..."
                 if [[ $EUID -eq 0 ]]; then
-                    ls -la "${generator_dir}/" | grep ztpbootstrap || warn "   No ztpbootstrap files found"
+                    ls -la "${generator_dir}/" 2>/dev/null | grep ztpbootstrap || warn "   No ztpbootstrap files in ${generator_dir}"
+                    ls -la "${systemd_system_dir}/" 2>/dev/null | grep ztpbootstrap || warn "   No ztpbootstrap files in ${systemd_system_dir}"
                 else
-                    sudo ls -la "${generator_dir}/" | grep ztpbootstrap || warn "   No ztpbootstrap files found"
+                    sudo ls -la "${generator_dir}/" 2>/dev/null | grep ztpbootstrap || warn "   No ztpbootstrap files in ${generator_dir}"
+                    sudo ls -la "${systemd_system_dir}/" 2>/dev/null | grep ztpbootstrap || warn "   No ztpbootstrap files in ${systemd_system_dir}"
                 fi
                 warn "   Services may not start. You may need to run: sudo systemctl daemon-reload"
             else
