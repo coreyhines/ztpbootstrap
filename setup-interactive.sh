@@ -2960,7 +2960,59 @@ EOF
                             if [[ -n "$pod_output" ]]; then
                                 warn "Quadlet generator output for pod: ${pod_output:0:200}"
                             fi
-                            warn "Failed to generate pod service file"
+                            warn "Failed to generate pod service file, creating manually..."
+                            # Manually create pod service file as fallback
+                            local pod_name="ztpbootstrap"
+                            if grep -q "^PodName=" "$pod_file" 2>/dev/null; then
+                                pod_name=$(grep "^PodName=" "$pod_file" | cut -d'=' -f2 | tr -d ' ')
+                            fi
+                            local network_mode="bridge"
+                            if grep -q "^Network=host" "$pod_file" 2>/dev/null; then
+                                network_mode="host"
+                            fi
+                            if [[ $EUID -eq 0 ]]; then
+                                cat > "${generator_dir}/ztpbootstrap-pod.service" << EOFPOD
+[Unit]
+Description=ZTP Bootstrap Service Pod
+SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod
+RequiresMountsFor=%t/containers
+
+[Service]
+Restart=always
+Environment=PODMAN_SYSTEMD_UNIT=%n
+KillMode=mixed
+ExecStop=/usr/bin/podman pod stop -t 10 ${pod_name}
+ExecStopPost=/usr/bin/podman pod rm -t 10 -f ${pod_name}
+Delegate=yes
+Type=notify
+NotifyAccess=all
+SyslogIdentifier=%N
+ExecStart=/usr/bin/podman pod create --infra --name ${pod_name} --network ${network_mode}
+EOFPOD
+                            else
+                                sudo tee "${generator_dir}/ztpbootstrap-pod.service" > /dev/null << EOFPOD
+[Unit]
+Description=ZTP Bootstrap Service Pod
+SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod
+RequiresMountsFor=%t/containers
+
+[Service]
+Restart=always
+Environment=PODMAN_SYSTEMD_UNIT=%n
+KillMode=mixed
+ExecStop=/usr/bin/podman pod stop -t 10 ${pod_name}
+ExecStopPost=/usr/bin/podman pod rm -t 10 -f ${pod_name}
+Delegate=yes
+Type=notify
+NotifyAccess=all
+SyslogIdentifier=%N
+ExecStart=/usr/bin/podman pod create --infra --name ${pod_name} --network ${network_mode}
+EOFPOD
+                            fi
+                            if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
+                                log "Pod service file created manually"
+                                services_generated=true
+                            fi
                         fi
                     fi
                     
@@ -2981,7 +3033,70 @@ EOF
                             if [[ -n "$nginx_output" ]]; then
                                 warn "Quadlet generator output for nginx: ${nginx_output:0:200}"
                             fi
-                            warn "Failed to generate nginx service file"
+                            warn "Failed to generate nginx service file, creating manually..."
+                            # Manually create nginx service file as fallback
+                            local pod_name="ztpbootstrap"
+                            if [[ -f "${systemd_dir}/ztpbootstrap.pod" ]] && grep -q "^PodName=" "${systemd_dir}/ztpbootstrap.pod" 2>/dev/null; then
+                                pod_name=$(grep "^PodName=" "${systemd_dir}/ztpbootstrap.pod" | cut -d'=' -f2 | tr -d ' ')
+                            fi
+                            # Extract volumes and environment from container file
+                            local volumes=""
+                            local env_vars=""
+                            if [[ -f "$nginx_container_file" ]]; then
+                                while IFS= read -r line; do
+                                    if [[ "$line" =~ ^Volume= ]]; then
+                                        volumes="${volumes} -v ${line#Volume=}"
+                                    elif [[ "$line" =~ ^Environment= ]]; then
+                                        env_vars="${env_vars} --env ${line#Environment=}"
+                                    fi
+                                done < "$nginx_container_file"
+                            fi
+                            if [[ $EUID -eq 0 ]]; then
+                                cat > "${generator_dir}/ztpbootstrap-nginx.service" << EOFNGINX
+[Unit]
+Description=ZTP Bootstrap Nginx Container
+SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-nginx.container
+RequiresMountsFor=%t/containers
+BindsTo=${pod_name}.service
+After=${pod_name}.service
+
+[Service]
+Restart=always
+Environment=PODMAN_SYSTEMD_UNIT=%n
+KillMode=mixed
+ExecStop=/usr/bin/podman rm -v -f -i ztpbootstrap-nginx
+ExecStopPost=-/usr/bin/podman rm -v -f -i ztpbootstrap-nginx
+Delegate=yes
+Type=notify
+NotifyAccess=all
+SyslogIdentifier=%N
+ExecStart=/usr/bin/podman run --name ztpbootstrap-nginx --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes}${env_vars} docker.io/nginx:alpine
+EOFNGINX
+                            else
+                                sudo tee "${generator_dir}/ztpbootstrap-nginx.service" > /dev/null << EOFNGINX
+[Unit]
+Description=ZTP Bootstrap Nginx Container
+SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-nginx.container
+RequiresMountsFor=%t/containers
+BindsTo=${pod_name}.service
+After=${pod_name}.service
+
+[Service]
+Restart=always
+Environment=PODMAN_SYSTEMD_UNIT=%n
+KillMode=mixed
+ExecStop=/usr/bin/podman rm -v -f -i ztpbootstrap-nginx
+ExecStopPost=-/usr/bin/podman rm -v -f -i ztpbootstrap-nginx
+Delegate=yes
+Type=notify
+NotifyAccess=all
+SyslogIdentifier=%N
+ExecStart=/usr/bin/podman run --name ztpbootstrap-nginx --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes}${env_vars} docker.io/nginx:alpine
+EOFNGINX
+                            fi
+                            if [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]]; then
+                                log "Nginx service file created manually"
+                            fi
                         fi
                     fi
                     
