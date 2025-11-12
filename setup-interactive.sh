@@ -2976,20 +2976,22 @@ parse_args() {
                 shift
                 ;;
             --reset-pass)
-                if [[ -z "${2:-}" ]]; then
-                    error "--reset-pass requires a password argument"
-                    error "Usage: --reset-pass 'password' or --reset-pass \"password\""
-                    exit 1
+                # If password argument is provided, use it; otherwise default to "ztpboot"
+                if [[ -n "${2:-}" ]] && [[ ! "$2" =~ ^- ]]; then
+                    # Remove quotes if present (handles both single and double quotes)
+                    RESET_PASSWORD="${2}"
+                    # Remove surrounding quotes if they match
+                    if [[ "${RESET_PASSWORD:0:1}" == "'" ]] && [[ "${RESET_PASSWORD: -1}" == "'" ]]; then
+                        RESET_PASSWORD="${RESET_PASSWORD:1:-1}"
+                    elif [[ "${RESET_PASSWORD:0:1}" == "\"" ]] && [[ "${RESET_PASSWORD: -1}" == "\"" ]]; then
+                        RESET_PASSWORD="${RESET_PASSWORD:1:-1}"
+                    fi
+                    shift 2
+                else
+                    # No password provided, use default
+                    RESET_PASSWORD="ztpboot"
+                    shift
                 fi
-                # Remove quotes if present (handles both single and double quotes)
-                RESET_PASSWORD="${2}"
-                # Remove surrounding quotes if they match
-                if [[ "${RESET_PASSWORD:0:1}" == "'" ]] && [[ "${RESET_PASSWORD: -1}" == "'" ]]; then
-                    RESET_PASSWORD="${RESET_PASSWORD:1:-1}"
-                elif [[ "${RESET_PASSWORD:0:1}" == "\"" ]] && [[ "${RESET_PASSWORD: -1}" == "\"" ]]; then
-                    RESET_PASSWORD="${RESET_PASSWORD:1:-1}"
-                fi
-                shift 2
                 ;;
             -h|--help)
                 cat << EOF
@@ -3005,7 +3007,8 @@ Options:
     --upgrade                Upgrade existing installation (requires previous install)
                             Strict upgrade mode: requires existing install, requires successful backup,
                             uses all previous values, runs non-interactively. Use for upgrades only.
-    --reset-pass PASSWORD   Set/reset admin password for Web UI (can be used with --upgrade)
+    --reset-pass [PASSWORD] Set/reset admin password for Web UI (can be used with --upgrade)
+                            If PASSWORD is not provided, defaults to "ztpboot"
                             Password can be quoted: --reset-pass 'password' or --reset-pass "password"
                             Overrides existing password hash in upgrade mode.
     -h, --help              Show this help message
@@ -3016,7 +3019,9 @@ Examples:
     $0 --auto               # Same as --non-interactive
     $0 --upgrade            # Upgrade existing installation (non-interactive, preserves all values)
     $0 --upgrade --reset-pass 'newpassword'  # Upgrade and reset password
+    $0 --upgrade --reset-pass  # Upgrade and reset to default password "ztpboot"
     $0 --reset-pass 'mypass123'  # Set password during setup
+    $0 --reset-pass  # Set default password "ztpboot" during setup
     $0 --restore            # List and restore from available backups
     $0 --restore 20240101_120000  # Restore from specific backup
 
