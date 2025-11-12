@@ -142,6 +142,16 @@ The service runs as a **Podman pod** with multiple containers:
 ./setup-interactive.sh
 ```
 
+**Upgrade Existing Installation** (Non-interactive upgrade)
+- Automatically creates backup before upgrade
+- Preserves all previous configuration values
+- Requires existing installation to be present
+- Runs non-interactively (no prompts)
+
+```bash
+./setup-interactive.sh --upgrade
+```
+
 **Automated Setup** (Quick setup for repeat deployments)
 - Uses environment variables from `ztpbootstrap.env`
 - Good for automation and repeat deployments

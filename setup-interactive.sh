@@ -2904,6 +2904,11 @@ parse_args() {
                 NON_INTERACTIVE=true
                 shift
                 ;;
+            --upgrade)
+                UPGRADE_MODE=true
+                NON_INTERACTIVE=true
+                shift
+                ;;
             -h|--help)
                 cat << EOF
 Usage: $0 [OPTIONS]
@@ -2912,12 +2917,19 @@ Options:
     --restore [TIMESTAMP]    Restore from a previous backup
                             If TIMESTAMP is not provided, will list available backups
     --non-interactive        Run in non-interactive mode (use defaults, auto-answer prompts)
+                            Works for fresh installs or upgrades. If previous install exists,
+                            creates backup and uses previous values, but continues if backup fails.
     --auto                   Alias for --non-interactive
+    --upgrade                Upgrade existing installation (requires previous install)
+                            Strict upgrade mode: requires existing install, requires successful backup,
+                            uses all previous values, runs non-interactively. Use for upgrades only.
     -h, --help              Show this help message
 
 Examples:
     $0                      # Run interactive setup
-    $0 --non-interactive    # Run automated setup using defaults
+    $0 --non-interactive    # Run automated setup (works for fresh installs or upgrades)
+    $0 --auto               # Same as --non-interactive
+    $0 --upgrade            # Upgrade existing installation (non-interactive, preserves all values)
     $0 --restore            # List and restore from available backups
     $0 --restore 20240101_120000  # Restore from specific backup
 
@@ -2958,6 +2970,18 @@ main() {
     local default_script_dir="/opt/containerdata/ztpbootstrap"
     local had_previous_install=false
     
+    # If --upgrade flag is used, require a previous installation
+    if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
+        log "Upgrade mode: Checking for existing installation..."
+        if ! detect_previous_install "$default_script_dir"; then
+            error "Upgrade mode requires an existing installation to be present."
+            error "No previous installation detected in: $default_script_dir"
+            error "Please run without --upgrade flag for a fresh installation."
+        fi
+        log "Upgrade mode: Previous installation detected. Proceeding with upgrade..."
+        echo ""
+    fi
+    
     # Always try to load existing values first (before any cleanup)
     # This allows us to use existing values even if detection fails
     log "Attempting to load existing installation values..."
@@ -2993,7 +3017,10 @@ main() {
             done
             echo ""
             warn "Services must be stopped before proceeding with installation/upgrade."
-            if [[ "$NON_INTERACTIVE" == "true" ]]; then
+            if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
+                STOP_SERVICES="true"
+                log "Upgrade mode: Auto-stopping services..."
+            elif [[ "$NON_INTERACTIVE" == "true" ]]; then
                 STOP_SERVICES="true"
                 log "Non-interactive mode: Auto-stopping services..."
             else
@@ -3013,7 +3040,10 @@ main() {
         fi
         
         # Create backup
-        if [[ "$NON_INTERACTIVE" == "true" ]]; then
+        if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
+            CREATE_BACKUP="true"
+            log "Upgrade mode: Auto-creating backup (required)..."
+        elif [[ "$NON_INTERACTIVE" == "true" ]]; then
             CREATE_BACKUP="true"
             log "Non-interactive mode: Auto-creating backup..."
         else
@@ -3022,6 +3052,10 @@ main() {
         
         if [[ "$CREATE_BACKUP" == "true" ]]; then
             if ! create_backup "$default_script_dir"; then
+                if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
+                    error "Upgrade mode requires a successful backup. Backup failed."
+                    error "Please resolve backup issues and try again."
+                fi
                 warn "Backup failed, but continuing with setup..."
                 if [[ "$NON_INTERACTIVE" == "true" ]]; then
                     CONTINUE_SETUP="true"
@@ -3061,7 +3095,14 @@ main() {
     load_existing_config || true
     
     # Run interactive configuration
-    if [[ "$NON_INTERACTIVE" == "true" ]]; then
+    if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
+        log "Upgrade mode: Using all previous installation values for configuration..."
+        log "All existing values will be preserved and applied automatically."
+        # Set APPLY_NOW to true automatically
+        APPLY_NOW="true"
+        # Use loaded existing values or defaults for all config
+        NON_INTERACTIVE_MODE=true interactive_config
+    elif [[ "$NON_INTERACTIVE" == "true" ]]; then
         log "Non-interactive mode: Using loaded defaults for all configuration..."
         # Set APPLY_NOW to true automatically
         APPLY_NOW="true"
@@ -3090,7 +3131,10 @@ main() {
         
         # Offer to start services
         echo ""
-        if [[ "$NON_INTERACTIVE" == "true" ]]; then
+        if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
+            START_SERVICES="true"
+            log "Upgrade mode: Auto-starting services..."
+        elif [[ "$NON_INTERACTIVE" == "true" ]]; then
             START_SERVICES="true"
             log "Non-interactive mode: Auto-starting services..."
         else
