@@ -167,8 +167,6 @@ def reload_auth_config():
     """Reload authentication configuration from config.yaml"""
     global AUTH_CONFIG
     AUTH_CONFIG = load_auth_config()
-    hash_str = str(AUTH_CONFIG['admin_password_hash']) if AUTH_CONFIG['admin_password_hash'] else 'None'
-    print(f"[AUTH] Config reloaded - Hash present: {AUTH_CONFIG['admin_password_hash'] is not None}, Hash length: {len(hash_str)}, Hash preview: {hash_str[:50] if hash_str != 'None' else 'None'}", flush=True)
 
 # Configure Flask session
 app.secret_key = AUTH_CONFIG['session_secret']
@@ -346,14 +344,6 @@ def auth_login():
         password_hash = AUTH_CONFIG['admin_password_hash']
         password_valid = False
         
-        # Debug logging (remove in production if needed)
-        print(f"[AUTH] Login attempt - Password: '{password}' (length: {len(password)})", flush=True)
-        print(f"[AUTH] Hash from config: '{password_hash}' (length: {len(password_hash) if password_hash else 0}, type: {type(password_hash).__name__})", flush=True)
-        if password_hash:
-            print(f"[AUTH] Hash starts with 'pbkdf2:sha256:': {password_hash.startswith('pbkdf2:sha256:')}", flush=True)
-            print(f"[AUTH] Hash contains '$': {'$' in password_hash}", flush=True)
-            print(f"[AUTH] Hash full value: {repr(password_hash)}", flush=True)
-        
         # Check if this is the fallback format from setup-interactive.sh
         # Format: pbkdf2:sha256:<base64_hash> (no $ separator)
         if password_hash and password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
@@ -364,28 +354,18 @@ def auth_login():
             try:
                 # Extract the base64 hash
                 hash_part = password_hash.split(':', 2)[2]
-                print(f"[AUTH] Extracted hash part: '{hash_part}' (length: {len(hash_part)})", flush=True)
                 # Decode the base64 hash
                 stored_hash = base64.b64decode(hash_part)
-                print(f"[AUTH] Decoded stored hash: {len(stored_hash)} bytes, first 10 bytes: {stored_hash[:10].hex()}", flush=True)
                 # Generate hash with same parameters (salt='ztpbootstrap', iterations=100000)
                 computed_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)
-                print(f"[AUTH] Computed hash: {len(computed_hash)} bytes, first 10 bytes: {computed_hash[:10].hex()}", flush=True)
                 password_valid = (stored_hash == computed_hash)
-                print(f"[AUTH] Hash comparison: stored==computed = {stored_hash == computed_hash}", flush=True)
-                print(f"[AUTH] Fallback format verification result: {password_valid}", flush=True)
-            except Exception as e:
-                import traceback
-                print(f"[AUTH] Fallback format verification error: {type(e).__name__}: {e}", flush=True)
-                print(f"[AUTH] Traceback: {traceback.format_exc()}", flush=True)
+            except Exception:
                 password_valid = False
         else:
             # Use Werkzeug's standard format
             try:
                 password_valid = check_password_hash(password_hash, password)
-                print(f"[AUTH] Werkzeug format verification: {password_valid}", flush=True)
-            except (ValueError, TypeError) as e:
-                print(f"[AUTH] Werkzeug format verification error: {type(e).__name__}: {e}", flush=True)
+            except (ValueError, TypeError):
                 password_valid = False
         
         if password_valid:
@@ -534,11 +514,9 @@ def auth_change_password():
                 test_result = False
                 
                 if loaded_hash != expected_hash:
-                    print(f"Warning: Password hash mismatch after reload.")
-                    print(f"  Expected: {expected_hash[:50]}... (len={len(expected_hash)})")
-                    print(f"  Got: {loaded_hash[:50] if loaded_hash else 'None'}... (len={len(loaded_hash) if loaded_hash else 0})")
+                    # Hash format might differ but still be valid (e.g., werkzeug generates different formats)
                     # Still try to verify the password works with the loaded hash
-                    # (hash format might differ but still be valid)
+                    pass
                 
                 # Verify the new password works with the loaded hash
                 if loaded_hash:
@@ -559,11 +537,7 @@ def auth_change_password():
                                 test_result = False
                 
                 if not test_result:
-                    print(f"ERROR: New password hash verification failed after reload!")
-                    print(f"  Hash: {loaded_hash[:50] if loaded_hash else 'None'}...")
-                    print(f"  This indicates a serious issue with password storage.")
-                else:
-                    print(f"Password change successful: New hash verified correctly.")
+                    print(f"ERROR: New password hash verification failed after reload!", flush=True)
                 
                 return jsonify({'success': True})
             except Exception as e:
