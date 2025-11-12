@@ -2202,8 +2202,49 @@ interactive_config() {
     log "modify scripts) require authentication. Set an admin password to enable this."
     echo ""
     
-    # In upgrade mode, use existing password hash if available
-    if [[ "${UPGRADE_MODE:-false}" == "true" ]] && [[ -n "${EXISTING_ADMIN_PASSWORD_HASH:-}" ]]; then
+    # Check if --reset-pass was provided (takes precedence)
+    if [[ -n "${RESET_PASSWORD:-}" ]]; then
+        log "Password reset requested via --reset-pass flag."
+        # Validate password length
+        if [[ ${#RESET_PASSWORD} -lt 8 ]]; then
+            error "Password must be at least 8 characters long."
+            exit 1
+        fi
+        # Hash the password using Python (use stdin to avoid shell escaping issues)
+        log "Hashing password..."
+        ADMIN_PASSWORD_HASH=$(echo "$RESET_PASSWORD" | python3 <<'PYTHON_SCRIPT'
+import sys
+from werkzeug.security import generate_password_hash
+password = sys.stdin.read().rstrip('\n')
+hash_value = generate_password_hash(password)
+print(hash_value)
+PYTHON_SCRIPT
+2>/dev/null || true)
+        
+        if [[ -z "$ADMIN_PASSWORD_HASH" ]]; then
+            # Fallback: use Python's built-in hashlib (should always be available)
+            ADMIN_PASSWORD_HASH=$(echo "$RESET_PASSWORD" | python3 <<'PYTHON_SCRIPT'
+import sys
+import hashlib
+import base64
+password = sys.stdin.read().rstrip('\n')
+hash_value = 'pbkdf2:sha256:' + base64.b64encode(hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)).decode()
+print(hash_value)
+PYTHON_SCRIPT
+2>/dev/null || true)
+        fi
+        
+        if [[ -n "$ADMIN_PASSWORD_HASH" ]]; then
+            log "Password hash generated successfully."
+            SET_ADMIN_PASSWORD="true"
+            # Clear password from memory
+            RESET_PASSWORD=""
+        else
+            error "Failed to hash password. Authentication will not be configured."
+            exit 1
+        fi
+    # In upgrade mode, use existing password hash if available (unless --reset-pass was used)
+    elif [[ "${UPGRADE_MODE:-false}" == "true" ]] && [[ -n "${EXISTING_ADMIN_PASSWORD_HASH:-}" ]]; then
         log "Upgrade mode: Using existing admin password hash from previous installation."
         ADMIN_PASSWORD_HASH="${EXISTING_ADMIN_PASSWORD_HASH}"
         SET_ADMIN_PASSWORD="true"
@@ -2913,6 +2954,7 @@ parse_args() {
     RESTORE_MODE=false
     RESTORE_TIMESTAMP=""
     NON_INTERACTIVE=false
+    RESET_PASSWORD=""
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -2933,6 +2975,22 @@ parse_args() {
                 NON_INTERACTIVE=true
                 shift
                 ;;
+            --reset-pass)
+                if [[ -z "${2:-}" ]]; then
+                    error "--reset-pass requires a password argument"
+                    error "Usage: --reset-pass 'password' or --reset-pass \"password\""
+                    exit 1
+                fi
+                # Remove quotes if present (handles both single and double quotes)
+                RESET_PASSWORD="${2}"
+                # Remove surrounding quotes if they match
+                if [[ "${RESET_PASSWORD:0:1}" == "'" ]] && [[ "${RESET_PASSWORD: -1}" == "'" ]]; then
+                    RESET_PASSWORD="${RESET_PASSWORD:1:-1}"
+                elif [[ "${RESET_PASSWORD:0:1}" == "\"" ]] && [[ "${RESET_PASSWORD: -1}" == "\"" ]]; then
+                    RESET_PASSWORD="${RESET_PASSWORD:1:-1}"
+                fi
+                shift 2
+                ;;
             -h|--help)
                 cat << EOF
 Usage: $0 [OPTIONS]
@@ -2947,6 +3005,9 @@ Options:
     --upgrade                Upgrade existing installation (requires previous install)
                             Strict upgrade mode: requires existing install, requires successful backup,
                             uses all previous values, runs non-interactively. Use for upgrades only.
+    --reset-pass PASSWORD   Set/reset admin password for Web UI (can be used with --upgrade)
+                            Password can be quoted: --reset-pass 'password' or --reset-pass "password"
+                            Overrides existing password hash in upgrade mode.
     -h, --help              Show this help message
 
 Examples:
@@ -2954,6 +3015,8 @@ Examples:
     $0 --non-interactive    # Run automated setup (works for fresh installs or upgrades)
     $0 --auto               # Same as --non-interactive
     $0 --upgrade            # Upgrade existing installation (non-interactive, preserves all values)
+    $0 --upgrade --reset-pass 'newpassword'  # Upgrade and reset password
+    $0 --reset-pass 'mypass123'  # Set password during setup
     $0 --restore            # List and restore from available backups
     $0 --restore 20240101_120000  # Restore from specific backup
 
