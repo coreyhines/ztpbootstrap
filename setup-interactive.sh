@@ -3339,7 +3339,7 @@ main() {
         # Set APPLY_NOW to true automatically
         APPLY_NOW="true"
         # Use loaded existing values or defaults for all config
-        NON_INTERACTIVE_MODE=true interactive_config
+        NON_INTERACTIVE=true interactive_config
     elif [[ "$NON_INTERACTIVE" == "true" ]]; then
         log "Non-interactive mode: Using loaded defaults for all configuration..."
         # Set APPLY_NOW to true automatically
@@ -3347,7 +3347,7 @@ main() {
         # Use loaded existing values or defaults for all config
         # The interactive_config function will be skipped, we'll set variables directly
         # But we still need to call it to set all variables - modify it to skip prompts in non-interactive mode
-        NON_INTERACTIVE_MODE=true interactive_config
+        NON_INTERACTIVE=true interactive_config
     else
         interactive_config
     fi
