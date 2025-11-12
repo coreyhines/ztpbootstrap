@@ -3009,7 +3009,8 @@ ExecStartPre=-/usr/bin/podman pod rm -f ${pod_name}
 ExecStartPre=/usr/bin/podman pod create --infra --name ${pod_name} --network ${network_mode}
 EOFPOD
                             else
-                                sudo tee "${generator_dir}/ztpbootstrap-pod.service" > /dev/null << EOFPOD
+                                # Create file using sudo with proper method
+                                sudo bash -c "cat > '${generator_dir}/ztpbootstrap-pod.service' << 'EOFPOD'
 [Unit]
 Description=ZTP Bootstrap Service Pod
 SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod
@@ -3030,6 +3031,7 @@ ExecStartPre=-/usr/bin/podman pod stop ${pod_name}
 ExecStartPre=-/usr/bin/podman pod rm -f ${pod_name}
 ExecStartPre=/usr/bin/podman pod create --infra --name ${pod_name} --network ${network_mode}
 EOFPOD
+"
                             fi
                             if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
                                 log "Pod service file created manually"
@@ -3102,7 +3104,8 @@ SyslogIdentifier=%N
 ExecStart=/usr/bin/podman run --name ztpbootstrap-nginx --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes}${env_vars} docker.io/nginx:alpine
 EOFNGINX
                             else
-                                sudo tee "${generator_dir}/ztpbootstrap-nginx.service" > /dev/null << EOFNGINX
+                                # Create file using sudo with proper method
+                                sudo bash -c "cat > '${generator_dir}/ztpbootstrap-nginx.service' << 'EOFNGINX'
 [Unit]
 Description=ZTP Bootstrap Nginx Container
 SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-nginx.container
@@ -3122,6 +3125,7 @@ NotifyAccess=all
 SyslogIdentifier=%N
 ExecStart=/usr/bin/podman run --name ztpbootstrap-nginx --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes}${env_vars} docker.io/nginx:alpine
 EOFNGINX
+"
                             fi
                             if [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]]; then
                                 log "Nginx service file created manually"
