@@ -130,23 +130,24 @@ echo ""
 # Step 1: Get backup from backup host (only if restoring)
 if [[ "$RESTORE_BACKUP" == "true" ]]; then
     log_step "Step 1: Retrieving backup from ${BACKUP_HOST}"
-BACKUP_FILE=$(ssh "${BACKUP_USER}@${BACKUP_HOST}" "ls -t ~${BACKUP_USER}/ztpbootstrap-backup-*.tar.gz 2>/dev/null | head -1" 2>/dev/null || echo "")
+    BACKUP_FILE=$(ssh "${BACKUP_USER}@${BACKUP_HOST}" "ls -t ~${BACKUP_USER}/ztpbootstrap-backup-*.tar.gz 2>/dev/null | head -1" 2>/dev/null || echo "")
 
-if [[ -z "$BACKUP_FILE" ]]; then
-    log_error "No backup found on ${BACKUP_HOST}"
-    log_info "Please create a backup first:"
-    echo "  ssh ${BACKUP_USER}@${BACKUP_HOST} 'sudo bash -c \"BACKUP_DIR=\"/tmp/ztpbootstrap-backup-\$(date +%Y%m%d_%H%M%S)\"; mkdir -p \"\$BACKUP_DIR\"; cp -r /opt/containerdata/ztpbootstrap \"\$BACKUP_DIR/containerdata_ztpbootstrap\" && cp -r /etc/containers/systemd/ztpbootstrap \"\$BACKUP_DIR/etc_containers_systemd_ztpbootstrap\" && cp -r /opt/containerdata/certs/wild \"\$BACKUP_DIR/certs_wild\" && cd /tmp && tar -czf ~${BACKUP_USER}/ztpbootstrap-backup-\$(date +%Y%m%d_%H%M%S).tar.gz -C \"\$BACKUP_DIR\" . && rm -rf \"\$BACKUP_DIR\" && echo \"Backup: ~${BACKUP_USER}/ztpbootstrap-backup-\$(date +%Y%m%d_%H%M%S).tar.gz\"'"
-    exit 1
+    if [[ -z "$BACKUP_FILE" ]]; then
+        log_error "No backup found on ${BACKUP_HOST}"
+        log_info "Please create a backup first:"
+        echo "  ssh ${BACKUP_USER}@${BACKUP_HOST} 'sudo bash -c \"BACKUP_DIR=\"/tmp/ztpbootstrap-backup-\$(date +%Y%m%d_%H%M%S)\"; mkdir -p \"\$BACKUP_DIR\"; cp -r /opt/containerdata/ztpbootstrap \"\$BACKUP_DIR/containerdata_ztpbootstrap\" && cp -r /etc/containers/systemd/ztpbootstrap \"\$BACKUP_DIR/etc_containers_systemd_ztpbootstrap\" && cp -r /opt/containerdata/certs/wild \"\$BACKUP_DIR/certs_wild\" && cd /tmp && tar -czf ~${BACKUP_USER}/ztpbootstrap-backup-\$(date +%Y%m%d_%H%M%S).tar.gz -C \"\$BACKUP_DIR\" . && rm -rf \"\$BACKUP_DIR\" && echo \"Backup: ~${BACKUP_USER}/ztpbootstrap-backup-\$(date +%Y%m%d_%H%M%S).tar.gz\"'"
+        exit 1
+    fi
+
+    log_info "Found backup: $BACKUP_FILE"
+    LOCAL_BACKUP="/tmp/$(basename "$BACKUP_FILE")"
+    log_info "Copying backup to local machine..."
+    scp "${BACKUP_USER}@${BACKUP_HOST}:${BACKUP_FILE}" "$LOCAL_BACKUP" 2>/dev/null || {
+        log_error "Failed to copy backup"
+        exit 1
+    }
+    log_info "✓ Backup copied to: $LOCAL_BACKUP"
 fi
-
-log_info "Found backup: $BACKUP_FILE"
-LOCAL_BACKUP="/tmp/$(basename "$BACKUP_FILE")"
-log_info "Copying backup to local machine..."
-scp "${BACKUP_USER}@${BACKUP_HOST}:${BACKUP_FILE}" "$LOCAL_BACKUP" 2>/dev/null || {
-    log_error "Failed to copy backup"
-    exit 1
-}
-log_info "✓ Backup copied to: $LOCAL_BACKUP"
 
 # Step 2: Create or use existing VM
 log_step "Step 2: Setting up test VM"
@@ -276,14 +277,14 @@ log_info "✓ Ready to proceed"
 # Step 4: Copy backup to VM and restore (only if restoring backup)
 if [[ "$RESTORE_BACKUP" == "true" ]]; then
     log_step "Step 4: Restoring backup in VM"
-log_info "Copying backup to VM..."
-scp -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 "$LOCAL_BACKUP" "${DEFAULT_USER}@localhost:~/backup.tar.gz" 2>&1 || {
-    log_error "Failed to copy backup to VM"
-    exit 1
-}
+    log_info "Copying backup to VM..."
+    scp -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 "$LOCAL_BACKUP" "${DEFAULT_USER}@localhost:~/backup.tar.gz" 2>&1 || {
+        log_error "Failed to copy backup to VM"
+        exit 1
+    }
 
-log_info "Extracting and restoring backup in VM..."
-ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 "${DEFAULT_USER}@localhost" << 'RESTORE_EOF'
+    log_info "Extracting and restoring backup in VM..."
+    ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 "${DEFAULT_USER}@localhost" << 'RESTORE_EOF'
 set -e
 cd ~
 mkdir -p restore-tmp
