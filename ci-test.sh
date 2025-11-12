@@ -1,6 +1,7 @@
 #!/bin/bash
 # CI End-to-End Test Script
-# This script runs a complete end-to-end test suitable for CI pipelines
+# This script runs quick validation checks suitable for CI/CD pipelines
+# It does NOT create containers or VMs - use integration-test.sh for that
 
 set -euo pipefail
 
@@ -13,117 +14,164 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+PASSED=0
+FAILED=0
+
 log() {
     echo -e "${GREEN}[$(date +'%H:%M:%S')]${NC} $1"
 }
 
 error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-    exit 1
+    echo -e "${RED}[FAIL]${NC} $1"
+    FAILED=$((FAILED + 1))
 }
 
 warn() {
     echo -e "${YELLOW}[WARN]${NC} $1"
 }
 
-# Cleanup function
-cleanup() {
-    log "Cleaning up..."
-    pkill -f qemu-system-aarch64 2>/dev/null || true
-    rm -f ztpbootstrap-test*.qcow2 2>/dev/null || true
+pass() {
+    echo -e "${GREEN}[PASS]${NC} $1"
+    PASSED=$((PASSED + 1))
 }
 
-trap cleanup EXIT
+# Test 1: Required files exist
+log "Test 1: Checking required files..."
+REQUIRED_FILES=(
+    "bootstrap.py"
+    "nginx.conf"
+    "setup.sh"
+    "setup-interactive.sh"
+    "update-config.sh"
+    "README.md"
+)
 
-# Step 1: Create VM
-log "Step 1: Creating VM..."
-./vm-create-native.sh --download fedora --type cloud --arch aarch64 --version 43 --headless > /tmp/ci-vm-create.log 2>&1 &
-VM_PID=$!
-
-# Wait for VM to start
-log "Waiting for VM to boot..."
-sleep 90
-
-# Check if VM is running
-if ! ps -p $VM_PID > /dev/null 2>&1; then
-    error "VM creation process exited unexpectedly"
-fi
-
-if ! ps aux | grep -i "qemu-system-aarch64" | grep -v grep > /dev/null; then
-    error "VM is not running"
-fi
-
-log "✓ VM is running"
-
-# Step 2: Wait for cloud-init and test SSH
-log "Step 2: Waiting for cloud-init and testing SSH..."
-SSH_SUCCESS=false
-for i in {1..30}; do
-    if ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 fedora@localhost "echo test" > /dev/null 2>&1; then
-        SSH_SUCCESS=true
-        break
+for file in "${REQUIRED_FILES[@]}"; do
+    if [ -f "$file" ]; then
+        pass "Required file exists: $file"
+    else
+        error "Required file missing: $file"
     fi
-    sleep 10
 done
 
-if [ "$SSH_SUCCESS" != "true" ]; then
-    error "SSH connection failed after 5 minutes"
-fi
+# Test 2: File permissions (scripts should be executable)
+log "Test 2: Checking file permissions..."
+EXECUTABLE_SCRIPTS=(
+    "setup.sh"
+    "setup-interactive.sh"
+    "update-config.sh"
+    "integration-test.sh"
+    "test-service.sh"
+)
 
-log "✓ SSH connection successful"
-
-# Step 3: Verify repository
-log "Step 3: Verifying repository clone..."
-if ! ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 fedora@localhost "test -f ~/ztpbootstrap/setup.sh" 2>/dev/null; then
-    error "Repository not cloned or setup.sh not found"
-fi
-
-log "✓ Repository cloned successfully"
-
-# Step 4: Run service setup
-log "Step 4: Running service setup..."
-if ! ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 fedora@localhost "cd ~/ztpbootstrap && sudo ./setup.sh --http-only" > /tmp/ci-setup.log 2>&1; then
-    error "Service setup failed"
-fi
-
-log "✓ Service setup completed"
-
-# Step 5: Verify services
-log "Step 5: Verifying services..."
-sleep 30
-
-# Check systemd services
-if ! ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 fedora@localhost "sudo systemctl is-active ztpbootstrap > /dev/null 2>&1" 2>/dev/null; then
-    warn "Pod service not active, checking status..."
-    ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 fedora@localhost "sudo systemctl status ztpbootstrap --no-pager | head -20" 2>&1 || true
-fi
-
-# Step 6: Test health endpoint
-log "Step 6: Testing health endpoint..."
-HEALTH_SUCCESS=false
-for i in {1..10}; do
-    if curl -s http://localhost:8080/health > /dev/null 2>&1; then
-        HEALTH_SUCCESS=true
-        break
+for script in "${EXECUTABLE_SCRIPTS[@]}"; do
+    if [ -f "$script" ]; then
+        if [ -x "$script" ]; then
+            pass "Script is executable: $script"
+        else
+            warn "Script is not executable: $script (will attempt to fix)"
+            chmod +x "$script" || error "Failed to make $script executable"
+        fi
     fi
-    sleep 5
 done
 
-if [ "$HEALTH_SUCCESS" != "true" ]; then
-    warn "Health endpoint not accessible (may need more time)"
+# Test 3: Nginx configuration syntax (if nginx is available)
+log "Test 3: Checking nginx configuration syntax..."
+if command -v nginx >/dev/null 2>&1; then
+    if nginx -t -c "$SCRIPT_DIR/nginx.conf" >/dev/null 2>&1; then
+        pass "Nginx configuration syntax is valid"
+    else
+        error "Nginx configuration syntax is invalid"
+        nginx -t -c "$SCRIPT_DIR/nginx.conf" || true
+    fi
 else
-    log "✓ Health endpoint accessible"
+    warn "nginx not available, skipping nginx config syntax check"
 fi
 
-log ""
-log "=== CI Test Complete ==="
-log "All automated steps completed successfully!"
-log ""
-log "Summary:"
-log "  ✅ VM Creation"
-log "  ✅ SSH Access"
-log "  ✅ Repository Clone"
-log "  ✅ Service Setup"
-log "  ✅ Health Endpoint"
+# Test 4: Bootstrap.py Python syntax
+log "Test 4: Checking bootstrap.py Python syntax..."
+if python3 -m py_compile bootstrap.py 2>/dev/null; then
+    pass "bootstrap.py Python syntax is valid"
+else
+    error "bootstrap.py Python syntax is invalid"
+    python3 -m py_compile bootstrap.py || true
+fi
 
-exit 0
+# Test 5: Shell script syntax validation
+log "Test 5: Checking shell script syntax..."
+SHELL_SCRIPTS=(
+    "setup.sh"
+    "setup-interactive.sh"
+    "update-config.sh"
+    "integration-test.sh"
+    "test-service.sh"
+)
+
+for script in "${SHELL_SCRIPTS[@]}"; do
+    if [ -f "$script" ]; then
+        if bash -n "$script" 2>/dev/null; then
+            pass "Shell script syntax is valid: $script"
+        else
+            error "Shell script syntax is invalid: $script"
+            bash -n "$script" || true
+        fi
+    fi
+done
+
+# Test 6: Setup script help works
+log "Test 6: Checking setup script help..."
+if [ -f "setup.sh" ]; then
+    if bash setup.sh --help >/dev/null 2>&1 || bash setup.sh -h >/dev/null 2>&1; then
+        pass "setup.sh help works"
+    else
+        warn "setup.sh help check skipped (may not have --help flag)"
+    fi
+fi
+
+# Test 7: Documentation files exist and are not empty
+log "Test 7: Checking documentation files..."
+DOC_FILES=(
+    "README.md"
+)
+
+for doc in "${DOC_FILES[@]}"; do
+    if [ -f "$doc" ]; then
+        if [ -s "$doc" ]; then
+            pass "Documentation file exists and is not empty: $doc"
+        else
+            error "Documentation file is empty: $doc"
+        fi
+    else
+        error "Documentation file missing: $doc"
+    fi
+done
+
+# Test 8: Check for critical configuration files
+log "Test 8: Checking configuration files..."
+CONFIG_FILES=(
+    "config.yaml.template"
+    "systemd/ztpbootstrap.pod"
+    "systemd/ztpbootstrap-nginx.container"
+    "systemd/ztpbootstrap-webui.container"
+)
+
+for config in "${CONFIG_FILES[@]}"; do
+    if [ -f "$config" ]; then
+        pass "Configuration file exists: $config"
+    else
+        error "Configuration file missing: $config"
+    fi
+done
+
+# Summary
+echo ""
+log "=== CI Test Summary ==="
+echo -e "${GREEN}Tests Passed: ${PASSED}${NC}"
+if [ $FAILED -gt 0 ]; then
+    echo -e "${RED}Tests Failed: ${FAILED}${NC}"
+    exit 1
+else
+    echo -e "${GREEN}Tests Failed: ${FAILED}${NC}"
+    log "All CI validation checks passed!"
+    exit 0
+fi
