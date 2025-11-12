@@ -784,47 +784,64 @@
                     }
                 },
                 
+                async triggerFileUpload() {
+                    console.log('triggerFileUpload called, authenticated:', this.authenticated);
+                    // Require authentication BEFORE opening file picker
+                    await this.requireAuth(async () => {
+                        console.log('User authenticated, opening file picker');
+                        // User is authenticated, now open the file picker
+                        const fileInput = this.$refs.fileInput;
+                        if (fileInput) {
+                            fileInput.click();
+                        } else {
+                            console.error('File input not found');
+                        }
+                    });
+                },
+                
                 async uploadScript(event) {
-                    console.log('uploadScript called, authenticated:', this.authenticated);
+                    console.log('uploadScript called (file selected)');
                     const file = event.target.files[0];
                     if (!file) {
                         console.log('No file selected, returning');
                         return;
                     }
                     
-                    console.log('Calling requireAuth for upload');
-                    const result = await this.requireAuth(async () => {
-                        console.log('Upload action executing (user is authenticated)');
-                        const formData = new FormData();
-                        formData.append('file', file);
-                        
-                        try {
-                            const response = await fetch('/api/bootstrap-script/upload', {
-                                method: 'POST',
-                                body: formData,
-                                credentials: 'same-origin'
-                            });
-                            const data = await response.json();
-                            if (response.status === 401) {
-                                this.authenticated = false;
-                                this.pendingAction = () => this.uploadScript(event);
-                                this.showLoginModal = true;
-                                return;
-                            }
-                            if (data.success) {
-                                await this.loadScripts();
-                                await this.loadBackups();
-                            } else {
-                                alert('Upload failed: ' + (data.error || 'Unknown error'));
-                            }
-                        } catch (error) {
-                            alert('Upload failed: ' + error.message);
-                        }
-                    });
+                    // At this point, user should already be authenticated (file picker only opens after auth)
+                    // But double-check to be safe
+                    await this.checkAuthStatus();
+                    if (!this.authenticated) {
+                        console.error('User not authenticated when file was selected - this should not happen');
+                        event.target.value = ''; // Reset file input
+                        this.showLoginModal = true;
+                        return;
+                    }
                     
-                    console.log('requireAuth returned, result:', result);
-                    if (result === undefined) {
-                        console.log('requireAuth returned undefined - auth required, upload prevented');
+                    console.log('Uploading file:', file.name);
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    
+                    try {
+                        const response = await fetch('/api/bootstrap-script/upload', {
+                            method: 'POST',
+                            body: formData,
+                            credentials: 'same-origin'
+                        });
+                        const data = await response.json();
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.showLoginModal = true;
+                            event.target.value = ''; // Reset file input
+                            return;
+                        }
+                        if (data.success) {
+                            await this.loadScripts();
+                            await this.loadBackups();
+                        } else {
+                            alert('Upload failed: ' + (data.error || 'Unknown error'));
+                        }
+                    } catch (error) {
+                        alert('Upload failed: ' + error.message);
                     }
                     
                     event.target.value = ''; // Reset file input
