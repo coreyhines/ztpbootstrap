@@ -2003,6 +2003,26 @@ EOF
         fi
     fi
     
+    # Verify services exist before trying to start them
+    local generator_dir="/run/systemd/generator"
+    if [[ ! -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
+        warn "⚠️  Pod service file not found. Reloading systemd and waiting for generation..."
+        if [[ $EUID -eq 0 ]]; then
+            systemctl daemon-reload
+        else
+            sudo systemctl daemon-reload
+        fi
+        sleep 5  # Give more time for systemd generator to run
+        
+        # Check again
+        if [[ ! -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
+            error "Pod service file still not found. Cannot start services."
+            error "Please run: sudo systemctl daemon-reload"
+            error "Then check: ls -la /run/systemd/generator/ | grep ztpbootstrap"
+            return 1
+        fi
+    fi
+    
     # Start pod service (quadlet generates ztpbootstrap-pod.service from ztpbootstrap.pod)
     local pod_service_name="ztpbootstrap-pod.service"
     if [[ $EUID -eq 0 ]]; then
@@ -2906,63 +2926,87 @@ EOF
                 sudo mkdir -p "$generator_dir" 2>/dev/null || true
             fi
             
-            if command -v /usr/libexec/podman/quadlet >/dev/null 2>&1; then
-                # Generate pod service
-                local pod_file="${systemd_dir}/ztpbootstrap.pod"
-                local pod_service_generated=false
-                if [[ -f "$pod_file" ]]; then
-                    log "Generating pod service file..."
-                    local pod_output
-                    local pod_exit_code=0
-                    if [[ $EUID -eq 0 ]]; then
-                        pod_output=$(/usr/libexec/podman/quadlet "$pod_file" 2>&1) || pod_exit_code=$?
-                    else
-                        pod_output=$(sudo /usr/libexec/podman/quadlet "$pod_file" 2>&1) || pod_exit_code=$?
-                    fi
-                    if [[ $pod_exit_code -eq 0 ]] && [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
-                        log "Pod service file generated successfully"
-                        pod_service_generated=true
-                    else
-                        if [[ -n "$pod_output" ]]; then
-                            warn "Quadlet generator output for pod: ${pod_output:0:200}"
-                        fi
-                    fi
-                fi
-                
-                # Generate nginx container service
-                local nginx_container_file="${systemd_dir}/ztpbootstrap-nginx.container"
-                local nginx_service_generated=false
-                if [[ -f "$nginx_container_file" ]]; then
-                    log "Generating nginx container service file..."
-                    local nginx_output
-                    local nginx_exit_code=0
-                    if [[ $EUID -eq 0 ]]; then
-                        nginx_output=$(/usr/libexec/podman/quadlet "$nginx_container_file" 2>&1) || nginx_exit_code=$?
-                    else
-                        nginx_output=$(sudo /usr/libexec/podman/quadlet "$nginx_container_file" 2>&1) || nginx_exit_code=$?
-                    fi
-                    if [[ $nginx_exit_code -eq 0 ]] && [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]]; then
-                        log "Nginx container service file generated successfully"
-                        nginx_service_generated=true
-                    else
-                        if [[ -n "$nginx_output" ]]; then
-                            warn "Quadlet generator output for nginx: ${nginx_output:0:200}"
-                        fi
-                    fi
-                fi
-            fi
-            
-            # Note: We rely on systemd's automatic generator to create service files after daemon-reload
-            # If quadlet fails, systemd should still process the files automatically
-            
-            # Reload systemd to process the new quadlet files
-            log "Reloading systemd to process new service files..."
+            # Reload systemd first to trigger the quadlet generator
+            log "Reloading systemd to trigger quadlet generator..."
             if [[ $EUID -eq 0 ]]; then
                 systemctl daemon-reload
             else
                 sudo systemctl daemon-reload
             fi
-            sleep 2  # Give systemd time to generate service files
+            sleep 3  # Give systemd time to generate service files via automatic generator
+            
+            # Verify services were generated, if not try manual quadlet execution
+            local services_generated=true
+            if [[ ! -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
+                warn "Pod service not auto-generated, trying manual quadlet execution..."
+                services_generated=false
+                
+                if command -v /usr/libexec/podman/quadlet >/dev/null 2>&1; then
+                    # Generate pod service manually
+                    local pod_file="${systemd_dir}/ztpbootstrap.pod"
+                    if [[ -f "$pod_file" ]]; then
+                        log "Manually generating pod service file..."
+                        local pod_output
+                        local pod_exit_code=0
+                        if [[ $EUID -eq 0 ]]; then
+                            pod_output=$(/usr/libexec/podman/quadlet "$pod_file" 2>&1) || pod_exit_code=$?
+                        else
+                            pod_output=$(sudo /usr/libexec/podman/quadlet "$pod_file" 2>&1) || pod_exit_code=$?
+                        fi
+                        if [[ $pod_exit_code -eq 0 ]] && [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
+                            log "Pod service file generated successfully"
+                            services_generated=true
+                        else
+                            if [[ -n "$pod_output" ]]; then
+                                warn "Quadlet generator output for pod: ${pod_output:0:200}"
+                            fi
+                            warn "Failed to generate pod service file"
+                        fi
+                    fi
+                    
+                    # Generate nginx container service manually
+                    local nginx_container_file="${systemd_dir}/ztpbootstrap-nginx.container"
+                    if [[ -f "$nginx_container_file" ]]; then
+                        log "Manually generating nginx container service file..."
+                        local nginx_output
+                        local nginx_exit_code=0
+                        if [[ $EUID -eq 0 ]]; then
+                            nginx_output=$(/usr/libexec/podman/quadlet "$nginx_container_file" 2>&1) || nginx_exit_code=$?
+                        else
+                            nginx_output=$(sudo /usr/libexec/podman/quadlet "$nginx_container_file" 2>&1) || nginx_exit_code=$?
+                        fi
+                        if [[ $nginx_exit_code -eq 0 ]] && [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]]; then
+                            log "Nginx container service file generated successfully"
+                        else
+                            if [[ -n "$nginx_output" ]]; then
+                                warn "Quadlet generator output for nginx: ${nginx_output:0:200}"
+                            fi
+                            warn "Failed to generate nginx service file"
+                        fi
+                    fi
+                    
+                    # Reload systemd again after manual generation
+                    if [[ "$services_generated" == "true" ]]; then
+                        log "Reloading systemd after manual service generation..."
+                        if [[ $EUID -eq 0 ]]; then
+                            systemctl daemon-reload
+                        else
+                            sudo systemctl daemon-reload
+                        fi
+                        sleep 2
+                    fi
+                else
+                    warn "quadlet command not found, cannot generate service files manually"
+                fi
+            else
+                log "✓ Pod service auto-generated by systemd"
+            fi
+            
+            # Final verification that services exist
+            if [[ ! -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
+                warn "⚠️  Warning: Pod service file still not found after generation attempts"
+                warn "   Services may not start. You may need to run: sudo systemctl daemon-reload"
+            fi
         else
             warn "setup.sh not found. Pod files will not be created automatically."
             warn "You will need to run: sudo ./setup.sh"
