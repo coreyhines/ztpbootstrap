@@ -3033,21 +3033,47 @@ ExecStartPre=-/usr/bin/podman pod stop ${pod_name}
 ExecStartPre=-/usr/bin/podman pod rm -f ${pod_name}
 ExecStartPre=/usr/bin/podman pod create --infra --name ${pod_name} --network ${network_mode}
 EOFPOD
-                                sudo mv "$temp_file" "${generator_dir}/ztpbootstrap-pod.service" 2>/dev/null || {
+                                if sudo mv "$temp_file" "${generator_dir}/ztpbootstrap-pod.service" 2>&1; then
+                                    log "Pod service file created manually"
+                                    services_generated=true
+                                else
                                     warn "Failed to move temp file to generator directory"
                                     rm -f "$temp_file"
-                                }
+                                    # Try alternative method: use sudo tee
+                                    if sudo tee "${generator_dir}/ztpbootstrap-pod.service" > /dev/null << EOFPOD2
+[Unit]
+Description=ZTP Bootstrap Service Pod
+SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod
+RequiresMountsFor=%t/containers
+
+[Service]
+Restart=always
+Environment=PODMAN_SYSTEMD_UNIT=%n
+KillMode=mixed
+ExecStop=/usr/bin/podman pod stop -t 10 ${pod_name}
+ExecStopPost=/usr/bin/podman pod rm -t 10 -f ${pod_name}
+Delegate=yes
+Type=notify
+NotifyAccess=all
+SyslogIdentifier=%N
+ExecStart=/usr/bin/podman pod start ${pod_name}
+ExecStartPre=-/usr/bin/podman pod stop ${pod_name}
+ExecStartPre=-/usr/bin/podman pod rm -f ${pod_name}
+ExecStartPre=/usr/bin/podman pod create --infra --name ${pod_name} --network ${network_mode}
+EOFPOD2
+                                    then
+                                        log "Pod service file created using sudo tee"
+                                        services_generated=true
+                                    fi
+                                fi
                             fi
-                            if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]]; then
-                                log "Pod service file created manually"
+                            
+                            # Verify file exists (with sudo check if needed) - outside if/else block
+                            if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]] || ([[ $EUID -ne 0 ]] && sudo test -f "${generator_dir}/ztpbootstrap-pod.service" 2>/dev/null); then
+                                log "✓ Pod service file verified"
                                 services_generated=true
                             else
                                 warn "Failed to verify pod service file was created at ${generator_dir}/ztpbootstrap-pod.service"
-                                # Try to check if file exists with sudo
-                                if [[ $EUID -ne 0 ]] && sudo test -f "${generator_dir}/ztpbootstrap-pod.service" 2>/dev/null; then
-                                    log "Pod service file exists but requires sudo to access"
-                                    services_generated=true
-                                fi
                             fi
                         fi
                     fi
@@ -3132,14 +3158,52 @@ NotifyAccess=all
 SyslogIdentifier=%N
 ExecStart=/usr/bin/podman run --name ztpbootstrap-nginx --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes}${env_vars} docker.io/nginx:alpine
 EOFNGINX
-                                sudo mv "$temp_file" "${generator_dir}/ztpbootstrap-nginx.service" 2>/dev/null || {
-                                    warn "Failed to move temp file to generator directory"
+                                if sudo mv "$temp_file" "${generator_dir}/ztpbootstrap-nginx.service" 2>&1; then
+                                    log "Nginx service file created manually"
+                                else
+                                    warn "Failed to move temp file, trying sudo tee method..."
                                     rm -f "$temp_file"
-                                }
-                            fi
-                            if [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]]; then
-                                log "Nginx service file created manually"
-                            fi
+                                    # Extract volumes and env again for tee method
+                                    local volumes_tee=""
+                                    local env_vars_tee=""
+                                    if [[ -f "$nginx_container_file" ]]; then
+                                        while IFS= read -r line; do
+                                            if [[ "$line" =~ ^Volume= ]]; then
+                                                volumes_tee="${volumes_tee} -v ${line#Volume=}"
+                                            elif [[ "$line" =~ ^Environment= ]]; then
+                                                env_vars_tee="${env_vars_tee} --env ${line#Environment=}"
+                                            fi
+                                        done < "$nginx_container_file"
+                                    fi
+                                    if sudo tee "${generator_dir}/ztpbootstrap-nginx.service" > /dev/null << EOFNGINX2
+[Unit]
+Description=ZTP Bootstrap Nginx Container
+SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-nginx.container
+RequiresMountsFor=%t/containers
+BindsTo=${pod_name}.service
+After=${pod_name}.service
+
+[Service]
+Restart=always
+Environment=PODMAN_SYSTEMD_UNIT=%n
+KillMode=mixed
+ExecStop=/usr/bin/podman rm -v -f -i ztpbootstrap-nginx
+ExecStopPost=-/usr/bin/podman rm -v -f -i ztpbootstrap-nginx
+Delegate=yes
+Type=notify
+NotifyAccess=all
+SyslogIdentifier=%N
+ExecStart=/usr/bin/podman run --name ztpbootstrap-nginx --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes_tee}${env_vars_tee} docker.io/nginx:alpine
+EOFNGINX2
+                                    then
+                                        log "Nginx service file created using sudo tee"
+                                    fi
+                                fi
+                                
+                                # Verify file exists
+                                if [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]] || ([[ $EUID -ne 0 ]] && sudo test -f "${generator_dir}/ztpbootstrap-nginx.service" 2>/dev/null); then
+                                    log "✓ Nginx service file verified"
+                                fi
                         fi
                     fi
                     
