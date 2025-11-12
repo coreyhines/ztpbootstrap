@@ -2212,18 +2212,26 @@ interactive_config() {
         fi
         # Hash the password using Python (use stdin to avoid shell escaping issues)
         log "Hashing password..."
-        ADMIN_PASSWORD_HASH=$(echo "$RESET_PASSWORD" | python3 <<'PYTHON_SCRIPT'
+        # Try werkzeug first (suppress stderr to avoid traceback)
+        ADMIN_PASSWORD_HASH=$(echo "$RESET_PASSWORD" | python3 2>/dev/null <<'PYTHON_SCRIPT'
 import sys
-from werkzeug.security import generate_password_hash
 password = sys.stdin.read().rstrip('\n')
-hash_value = generate_password_hash(password)
-print(hash_value)
+try:
+    from werkzeug.security import generate_password_hash
+    hash_value = generate_password_hash(password)
+    print(hash_value)
+except ImportError:
+    # Werkzeug not available, fall back to hashlib
+    import hashlib
+    import base64
+    hash_value = 'pbkdf2:sha256:' + base64.b64encode(hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)).decode()
+    print(hash_value)
 PYTHON_SCRIPT
-2>/dev/null || true)
+)
         
         if [[ -z "$ADMIN_PASSWORD_HASH" ]]; then
             # Fallback: use Python's built-in hashlib (should always be available)
-            ADMIN_PASSWORD_HASH=$(echo "$RESET_PASSWORD" | python3 <<'PYTHON_SCRIPT'
+            ADMIN_PASSWORD_HASH=$(echo "$RESET_PASSWORD" | python3 <<'PYTHON_SCRIPT' 2>/dev/null
 import sys
 import hashlib
 import base64
@@ -2231,7 +2239,7 @@ password = sys.stdin.read().rstrip('\n')
 hash_value = 'pbkdf2:sha256:' + base64.b64encode(hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)).decode()
 print(hash_value)
 PYTHON_SCRIPT
-2>/dev/null || true)
+)
         fi
         
         if [[ -n "$ADMIN_PASSWORD_HASH" ]]; then
