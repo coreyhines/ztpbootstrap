@@ -530,19 +530,23 @@ def auth_change_password():
                 # Verify the new hash was loaded correctly
                 loaded_hash = AUTH_CONFIG.get('admin_password_hash')
                 expected_hash = str(new_password_hash).strip()
+                test_result = False
+                
                 if loaded_hash != expected_hash:
                     print(f"Warning: Password hash mismatch after reload.")
                     print(f"  Expected: {expected_hash[:50]}... (len={len(expected_hash)})")
                     print(f"  Got: {loaded_hash[:50] if loaded_hash else 'None'}... (len={len(loaded_hash) if loaded_hash else 0})")
-                else:
-                    # Verify the new password works with the loaded hash
-                    test_result = False
+                    # Still try to verify the password works with the loaded hash
+                    # (hash format might differ but still be valid)
+                
+                # Verify the new password works with the loaded hash
+                if loaded_hash:
                     try:
                         from werkzeug.security import check_password_hash
                         test_result = check_password_hash(loaded_hash, new_password)
                     except (ImportError, NameError):
                         # Fallback format verification
-                        if loaded_hash and loaded_hash.startswith('pbkdf2:sha256:') and '$' not in loaded_hash:
+                        if loaded_hash.startswith('pbkdf2:sha256:') and '$' not in loaded_hash:
                             import hashlib
                             import base64
                             try:
@@ -552,13 +556,13 @@ def auth_change_password():
                                 test_result = (stored_hash == computed_hash)
                             except Exception:
                                 test_result = False
-                    
-                    if not test_result:
-                        print(f"ERROR: New password hash verification failed after reload!")
-                        print(f"  Hash: {loaded_hash[:50]}...")
-                        print(f"  This indicates a serious issue with password storage.")
-                    else:
-                        print(f"Password change successful: New hash verified correctly.")
+                
+                if not test_result:
+                    print(f"ERROR: New password hash verification failed after reload!")
+                    print(f"  Hash: {loaded_hash[:50] if loaded_hash else 'None'}...")
+                    print(f"  This indicates a serious issue with password storage.")
+                else:
+                    print(f"Password change successful: New hash verified correctly.")
                 
                 return jsonify({'success': True})
             except Exception as e:
