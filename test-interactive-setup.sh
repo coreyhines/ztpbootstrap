@@ -27,7 +27,9 @@ if [[ -z "$RESTORE_BACKUP" ]]; then
 fi
 
 # Only prompt for backup host/user if restoring backup
-if [[ "${RESTORE_BACKUP,,}" == "y" ]] || [[ "${RESTORE_BACKUP,,}" == "yes" ]]; then
+# Convert to lowercase for comparison (portable across bash/zsh)
+RESTORE_BACKUP_LOWER=$(echo "$RESTORE_BACKUP" | tr '[:upper:]' '[:lower:]')
+if [[ "$RESTORE_BACKUP_LOWER" == "y" ]] || [[ "$RESTORE_BACKUP_LOWER" == "yes" ]]; then
     RESTORE_BACKUP="true"
     # Prompt for backup host if not set
     if [[ -z "${BACKUP_HOST:-}" ]]; then
