@@ -1839,6 +1839,8 @@ create_pod_files_from_config() {
                     pod_name="$pod_name_from_file"
                 fi
             fi
+            # The pod service name is always ztpbootstrap-pod.service (not ${pod_name}.service)
+            local pod_service_name="ztpbootstrap-pod.service"
             
             # Extract volumes and environment from container file
             # Filter out Fedora-specific systemd library paths on non-Fedora systems
@@ -1881,8 +1883,8 @@ create_pod_files_from_config() {
 Description=ZTP Bootstrap Web UI Container
 SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container
 RequiresMountsFor=%t/containers
-BindsTo=${pod_name}.service
-After=${pod_name}.service
+BindsTo=${pod_service_name}
+After=${pod_service_name}
 
 [Service]
 Restart=always
@@ -1905,8 +1907,8 @@ EOFWEBUI
 Description=ZTP Bootstrap Web UI Container
 SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container
 RequiresMountsFor=%t/containers
-BindsTo=${pod_name}.service
-After=${pod_name}.service
+BindsTo=${pod_service_name}
+After=${pod_service_name}
 
 [Service]
 Restart=always
@@ -1931,8 +1933,8 @@ EOFWEBUI
 Description=ZTP Bootstrap Web UI Container
 SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container
 RequiresMountsFor=%t/containers
-BindsTo=${pod_name}.service
-After=${pod_name}.service
+BindsTo=${pod_service_name}
+After=${pod_service_name}
 
 [Service]
 Restart=always
@@ -3217,6 +3219,8 @@ EOFPOD2
                             if [[ -f "${systemd_dir}/ztpbootstrap.pod" ]] && grep -q "^PodName=" "${systemd_dir}/ztpbootstrap.pod" 2>/dev/null; then
                                 pod_name=$(grep "^PodName=" "${systemd_dir}/ztpbootstrap.pod" | cut -d'=' -f2 | tr -d ' ')
                             fi
+                            # The pod service name is always ztpbootstrap-pod.service (not ${pod_name}.service)
+                            local pod_service_name="ztpbootstrap-pod.service"
                             # Extract volumes and environment from container file
                             # Filter out Fedora-specific systemd library paths on non-Fedora systems
                             local volumes=""
@@ -3258,8 +3262,8 @@ EOFPOD2
 Description=ZTP Bootstrap Nginx Container
 SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-nginx.container
 RequiresMountsFor=%t/containers
-BindsTo=${pod_name}.service
-After=${pod_name}.service
+BindsTo=${pod_service_name}
+After=${pod_service_name}
 
 [Service]
 Restart=always
@@ -3282,8 +3286,8 @@ EOFNGINX
 Description=ZTP Bootstrap Nginx Container
 SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-nginx.container
 RequiresMountsFor=%t/containers
-BindsTo=${pod_name}.service
-After=${pod_name}.service
+BindsTo=${pod_service_name}
+After=${pod_service_name}
 
 [Service]
 Restart=always
@@ -3345,8 +3349,8 @@ EOFNGINX
 Description=ZTP Bootstrap Nginx Container
 SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-nginx.container
 RequiresMountsFor=%t/containers
-BindsTo=${pod_name}.service
-After=${pod_name}.service
+BindsTo=${pod_service_name}
+After=${pod_service_name}
 
 [Service]
 Restart=always
