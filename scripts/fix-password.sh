@@ -86,33 +86,44 @@ fi
 
 echo ""
 echo "Testing password verification..."
-python3 <<EOF
+# Use stdin to pass password (same as webui does)
+echo "$PASSWORD" | python3 <<PYTHON_VERIFY
 import sys
 import hashlib
 import base64
 
-password = "$PASSWORD"
+password = sys.stdin.read().rstrip('\n')
 hash_value = "$PASSWORD_HASH"
+
+print(f"Password received: '{password}' (length: {len(password)})")
+print(f"Hash: {hash_value[:50]}...")
 
 if hash_value.startswith('pbkdf2:sha256:') and '\$' not in hash_value:
     hash_part = hash_value.split(':', 2)[2]
     stored_hash = base64.b64decode(hash_part)
     computed_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)
     match = (stored_hash == computed_hash)
+    print(f"Stored hash length: {len(stored_hash)}")
+    print(f"Computed hash length: {len(computed_hash)}")
     print(f"Verification test: {match}")
     if not match:
         print("ERROR: Password verification failed!")
+        print("This means the hash was generated with a different password.")
         sys.exit(1)
 else:
-    from werkzeug.security import check_password_hash
-    match = check_password_hash(hash_value, password)
-    print(f"Verification test: {match}")
-    if not match:
-        print("ERROR: Password verification failed!")
+    try:
+        from werkzeug.security import check_password_hash
+        match = check_password_hash(hash_value, password)
+        print(f"Verification test: {match}")
+        if not match:
+            print("ERROR: Password verification failed!")
+            sys.exit(1)
+    except ImportError:
+        print("ERROR: werkzeug not available for verification")
         sys.exit(1)
 
 print("✓ Password verification successful!")
-EOF
+PYTHON_VERIFY
 
 echo ""
 echo "Password hash updated successfully!"
@@ -120,4 +131,3 @@ echo ""
 echo "Next steps:"
 echo "1. Restart webui service: sudo systemctl restart ztpbootstrap-webui"
 echo "2. Try logging in with password: $PASSWORD"
-
