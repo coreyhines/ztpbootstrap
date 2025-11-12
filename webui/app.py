@@ -396,9 +396,7 @@ def auth_login():
                 'code': 'INVALID_PASSWORD'
             }), 401
     except Exception as e:
-        import traceback
-        print(f"[AUTH] Login error: {e}", flush=True)
-        print(f"[AUTH] Traceback: {traceback.format_exc()}", flush=True)
+        print(f"Login error: {type(e).__name__}: {e}", flush=True)
         return jsonify({
             'error': 'Login failed',
             'code': 'LOGIN_ERROR'
