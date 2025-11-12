@@ -10,6 +10,7 @@ A containerized service that provides a secure HTTPS endpoint for serving Arista
 - **[docs/QUICK_START.md](docs/QUICK_START.md)** - Complete step-by-step installation guide (start here!)
 - **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 - **[docs/TESTING.md](docs/TESTING.md)** - Testing procedures and validation scripts
+- **[docs/SECURITY.md](docs/SECURITY.md)** - Security features, authentication, and security testing
 
 **For Developers:**
 - **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - Development workflow, VM testing, and upgrade scenarios
@@ -51,12 +52,14 @@ When an Arista switch boots, it requests network configuration from a DHCP serve
 - ✅ Containerized with Podman for easy deployment
 - ✅ Systemd integration for automatic startup
 - ✅ Health check endpoint for monitoring
-- ✅ Web UI for management and monitoring
+- ✅ Web UI for management and monitoring with authentication
 - ✅ Support for HTTP-only mode (lab/testing only)
 
 ### Web UI Dashboard
 
 The service includes a web-based management interface for monitoring and configuration with features for service status, device connection tracking, bootstrap script management, configuration viewing, and service logs.
+
+**Authentication:** Write operations (upload scripts, delete, rename, restore backups, mark logs, view configuration) require authentication. Read-only operations (viewing status, scripts, logs, device connections) are accessible without authentication. The admin password is required and must be set during initial setup via `setup-interactive.sh`, or will be loaded from an existing `config.yaml` when upgrading.
 
 Access the Web UI at: `https://ztpboot.example.com/ui/`
 

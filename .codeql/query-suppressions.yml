@@ -1,0 +1,21 @@
+# CodeQL Query Suppressions
+# These suppressions document false positives where paths are validated before use
+
+- id: py/path-injection
+  reason: "Paths are validated via safe_path_join() and validate_path_in_directory() before use. All filename parameters are sanitized and validated to prevent path traversal attacks."
+  paths:
+    - webui/app.py:42  # Fallback validate_path_in_directory - paths validated by caller
+    - webui/app.py:719  # script_path.read_text() - path validated via safe_path_join() above
+    - webui/app.py:870  # script_path.rename() - both paths validated via safe_path_join() above
+    - webui/security_utils.py:63  # validate_path_in_directory - paths validated by caller via safe_path_join()
+
+- id: py/path-injection  
+  reason: "SCRIPTS_METADATA is a trusted path from environment variable CONFIG_DIR, not user input."
+  paths:
+    - webui/app.py:533  # SCRIPTS_METADATA is from environment, not user-controlled
+
+- id: py/path-injection
+  reason: "password_hash comes from config file (trusted source), not user input. This is password verification, not path manipulation."
+  paths:
+    - webui/app.py:341  # Password hash decoding - data from config file, not user input
+

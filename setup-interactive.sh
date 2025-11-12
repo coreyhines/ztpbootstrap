@@ -2175,7 +2175,104 @@ interactive_config() {
     
     echo ""
     
-    # Section 5: Container Configuration
+    # Section 5: Authentication Configuration
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  Authentication Configuration (Web UI)${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    
+    log "The Web UI allows read-only access by default. Write operations (upload, delete,"
+    log "modify scripts) require authentication. Set an admin password to enable this."
+    echo ""
+    
+    # Ask if user wants to set a password
+    prompt_yes_no "Set admin password for Web UI write operations?" "y" SET_ADMIN_PASSWORD
+    
+    if [[ "$SET_ADMIN_PASSWORD" == "true" ]]; then
+        # Prompt for password with confirmation
+        local password_valid=false
+        local attempts=0
+        while [[ "$password_valid" == "false" ]] && [[ $attempts -lt 3 ]]; do
+            attempts=$((attempts + 1))
+            
+            # Prompt for password (hidden input)
+            echo -n "Enter admin password (min 8 characters): "
+            read -s ADMIN_PASSWORD
+            echo ""
+            
+            # Validate password length
+            if [[ ${#ADMIN_PASSWORD} -lt 8 ]]; then
+                warn "Password must be at least 8 characters long."
+                continue
+            fi
+            
+            # Prompt for confirmation
+            echo -n "Confirm admin password: "
+            read -s ADMIN_PASSWORD_CONFIRM
+            echo ""
+            
+            # Check if passwords match
+            if [[ "$ADMIN_PASSWORD" != "$ADMIN_PASSWORD_CONFIRM" ]]; then
+                warn "Passwords do not match. Please try again."
+                continue
+            fi
+            
+            # Password is valid
+            password_valid=true
+            
+            # Hash the password using Python
+            log "Hashing password..."
+            # Try werkzeug first (if available in webui container), but fall back to hashlib
+            # Use || true to prevent script exit due to set -e
+            ADMIN_PASSWORD_HASH=$(python3 -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('$ADMIN_PASSWORD'))" 2>/dev/null || true)
+            
+            if [[ -z "$ADMIN_PASSWORD_HASH" ]]; then
+                # Fallback: use Python's built-in hashlib (should always be available)
+                ADMIN_PASSWORD_HASH=$(python3 -c "import hashlib, base64; print('pbkdf2:sha256:' + base64.b64encode(hashlib.pbkdf2_hmac('sha256', b'$ADMIN_PASSWORD', b'ztpbootstrap', 100000)).decode())" 2>/dev/null || true)
+            fi
+            
+            if [[ -n "$ADMIN_PASSWORD_HASH" ]]; then
+                log "Password set successfully (hashed)"
+            else
+                error "Failed to hash password. Authentication will not be configured."
+                ADMIN_PASSWORD_HASH=""
+            fi
+            
+            # Clear plain text password from memory
+            ADMIN_PASSWORD=""
+            ADMIN_PASSWORD_CONFIRM=""
+        done
+        
+        if [[ "$password_valid" == "false" ]]; then
+            warn "Failed to set password after $attempts attempts. Skipping authentication setup."
+            ADMIN_PASSWORD_HASH=""
+        fi
+    else
+        log "Skipping authentication setup. Web UI will allow all operations without login."
+        ADMIN_PASSWORD_HASH=""
+    fi
+    
+    # Session timeout (optional, has reasonable default)
+    prompt_with_default "Session timeout in seconds" "3600" SESSION_TIMEOUT
+    
+    # Generate session secret
+    if command -v python3 >/dev/null 2>&1; then
+        SESSION_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || true)
+    fi
+    
+    # Fallback to openssl if python3 method failed or is not available
+    if [[ -z "$SESSION_SECRET" ]] && command -v openssl >/dev/null 2>&1; then
+        SESSION_SECRET=$(openssl rand -hex 32 2>/dev/null || true)
+    fi
+    
+    if [[ -z "$SESSION_SECRET" ]]; then
+        warn "Failed to generate session secret. A default will be used (less secure)."
+        SESSION_SECRET=""
+    fi
+    
+    echo ""
+    
+    # Section 6: Container Configuration
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}  Container Configuration${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -2191,7 +2288,7 @@ interactive_config() {
     
     echo ""
     
-    # Section 6: Service Configuration
+    # Section 7: Service Configuration
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}  Service Configuration${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -2417,6 +2514,9 @@ generate_yaml_config() {
     HEALTH_RETRIES="${HEALTH_RETRIES:-3}"
     HEALTH_START_PERIOD="${HEALTH_START_PERIOD:-60s}"
     RESTART_POLICY="${RESTART_POLICY:-on-failure}"
+    ADMIN_PASSWORD_HASH="${ADMIN_PASSWORD_HASH:-}"
+    SESSION_TIMEOUT="${SESSION_TIMEOUT:-3600}"
+    SESSION_SECRET="${SESSION_SECRET:-}"
     
     cat > "$CONFIG_FILE" << EOF
 # Arista ZTP Bootstrap Service Configuration
@@ -2485,6 +2585,21 @@ service:
   health_retries: $HEALTH_RETRIES
   health_start_period: "$HEALTH_START_PERIOD"
   restart_policy: "$RESTART_POLICY"
+
+# ============================================================================
+# Authentication Configuration
+# ============================================================================
+auth:
+  # Admin password hash (never store plain text passwords)
+  # Set during setup or via ZTP_ADMIN_PASSWORD environment variable
+  admin_password_hash: "${ADMIN_PASSWORD_HASH:-}"
+  
+  # Session timeout in seconds (default: 3600 = 1 hour)
+  session_timeout: ${SESSION_TIMEOUT:-3600}
+  
+  # Session secret key for signing session tokens
+  # Auto-generated during setup
+  session_secret: "${SESSION_SECRET:-}"
 EOF
     
     log "Configuration saved to: $CONFIG_FILE"

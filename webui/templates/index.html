@@ -35,9 +35,53 @@
     <div x-data="dashboard()" x-init="init()" x-cloak class="min-h-screen">
         <!-- Header -->
         <header class="bg-white shadow-sm">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2">
-                <h1 class="text-xl font-bold text-gray-900">ZTP Bootstrap Service</h1>
-                <p class="text-xs text-gray-500">Configuration and Monitoring Dashboard</p>
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex justify-between items-center">
+                <div>
+                    <h1 class="text-xl font-bold text-gray-900">ZTP Bootstrap Service</h1>
+                    <p class="text-xs text-gray-500">Configuration and Monitoring Dashboard</p>
+                </div>
+                <!-- Profile Dropdown -->
+                <div class="relative" x-data="{ showProfileMenu: false }" @click.away="showProfileMenu = false">
+                    <button @click="showProfileMenu = !showProfileMenu" 
+                            class="flex items-center space-x-2 p-2 rounded-full hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <svg class="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path>
+                        </svg>
+                    </button>
+                    <!-- Dropdown Menu -->
+                    <div x-show="showProfileMenu" 
+                         x-transition:enter="transition ease-out duration-100"
+                         x-transition:enter-start="transform opacity-0 scale-95"
+                         x-transition:enter-end="transform opacity-100 scale-100"
+                         x-transition:leave="transition ease-in duration-75"
+                         x-transition:leave-start="transform opacity-100 scale-100"
+                         x-transition:leave-end="transform opacity-0 scale-95"
+                         class="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg z-50 border border-gray-200">
+                        <div class="py-2">
+                            <!-- Session Info -->
+                            <div class="px-4 py-2 border-b border-gray-200">
+                                <p class="text-xs text-gray-500">Session expires:</p>
+                                <p class="text-sm font-medium text-gray-900" x-text="authExpiresAt ? new Date(authExpiresAt * 1000).toLocaleString() : 'Unknown'"></p>
+                            </div>
+                            <!-- Change Password -->
+                            <button @click="showChangePasswordModal = true; showProfileMenu = false" 
+                                    class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
+                                </svg>
+                                <span>Change Password</span>
+                            </button>
+                            <!-- Logout -->
+                            <button @click="logout(); showProfileMenu = false" 
+                                    class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100 flex items-center space-x-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+                                </svg>
+                                <span>Logout</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </header>
 
@@ -182,7 +226,7 @@
                                 class="px-6 py-4 border-b-2 font-medium text-sm">
                             Bootstrap Scripts
                         </button>
-                        <button @click="activeTab = 'config'" 
+                        <button @click="triggerConfigTab()" 
                                 :class="activeTab === 'config' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                                 class="px-6 py-4 border-b-2 font-medium text-sm">
                             Configuration
@@ -203,14 +247,15 @@
                             <p class="text-sm text-gray-600">Manage bootstrap scripts for device enrollment</p>
                         </div>
             <div class="flex items-center space-x-2">
-                <button @click="showRestoreDialog = !showRestoreDialog" 
+                <button @click="triggerRestoreBackup()" 
                         class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium transition-colors">
                     Restore Backup
                 </button>
-                <label class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm font-medium transition-colors cursor-pointer">
-                    <input type="file" @change="uploadScript($event)" accept=".py" class="hidden">
+                <button @click="triggerFileUpload()" 
+                        class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm font-medium transition-colors cursor-pointer">
                     Upload Script
-                </label>
+                </button>
+                <input type="file" x-on:change="uploadScript($event)" x-ref="fileInput" accept=".py" class="hidden">
             </div>
                     </div>
                     
@@ -437,6 +482,177 @@
                 </div>
             </div>
         </div>
+        
+        <!-- Change Password Modal -->
+        <template x-if="showChangePasswordModal">
+            <div x-show="showChangePasswordModal"
+                 x-transition:enter="ease-out duration-300"
+                 x-transition:enter-start="opacity-0"
+                 x-transition:enter-end="opacity-100"
+                 x-transition:leave="ease-in duration-200"
+                 x-transition:leave-start="opacity-100"
+                 x-transition:leave-end="opacity-0"
+                 @keydown.escape.window="showChangePasswordModal = false; changePasswordCurrent = ''; changePasswordNew = ''; changePasswordConfirm = ''; changePasswordError = ''"
+                 class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
+                 @click.self="showChangePasswordModal = false; changePasswordCurrent = ''; changePasswordNew = ''; changePasswordConfirm = ''; changePasswordError = ''">
+                <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
+                     @click.stop>
+                    <div class="mt-3">
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 class="text-lg font-medium text-gray-900">Change Password</h3>
+                            <button @click="showChangePasswordModal = false; changePasswordCurrent = ''; changePasswordNew = ''; changePasswordConfirm = ''; changePasswordError = ''" 
+                                    class="text-gray-400 hover:text-gray-500">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
+                        </div>
+                        <form @submit.prevent="changePassword()">
+                            <div class="mb-4">
+                                <label for="changePasswordCurrent" class="block text-sm font-medium text-gray-700 mb-2">
+                                    Current Password
+                                </label>
+                                <input type="password"
+                                    id="changePasswordCurrent"
+                                    x-model="changePasswordCurrent"
+                                    autocomplete="current-password"
+                                    @keyup.escape="showChangePasswordModal = false; changePasswordCurrent = ''; changePasswordNew = ''; changePasswordConfirm = ''; changePasswordError = ''"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="Enter current password"
+                                    :disabled="changePasswordLoading"
+                                    required>
+                            </div>
+                            <div class="mb-4">
+                                <label for="changePasswordNew" class="block text-sm font-medium text-gray-700 mb-2">
+                                    New Password
+                                </label>
+                                <input type="password"
+                                    id="changePasswordNew"
+                                    x-model="changePasswordNew"
+                                    autocomplete="new-password"
+                                    @keyup.escape="showChangePasswordModal = false; changePasswordCurrent = ''; changePasswordNew = ''; changePasswordConfirm = ''; changePasswordError = ''"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="Enter new password (min 8 characters)"
+                                    :disabled="changePasswordLoading"
+                                    required>
+                            </div>
+                            <div class="mb-4">
+                                <label for="changePasswordConfirm" class="block text-sm font-medium text-gray-700 mb-2">
+                                    Confirm New Password
+                                </label>
+                                <input type="password"
+                                    id="changePasswordConfirm"
+                                    x-model="changePasswordConfirm"
+                                    autocomplete="new-password"
+                                    @keyup.escape="showChangePasswordModal = false; changePasswordCurrent = ''; changePasswordNew = ''; changePasswordConfirm = ''; changePasswordError = ''"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="Confirm new password"
+                                    :disabled="changePasswordLoading"
+                                    required>
+                            </div>
+                            <div x-show="changePasswordError" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                                <p class="text-sm text-red-800" x-text="changePasswordError"></p>
+                            </div>
+                            <div class="flex justify-end space-x-3">
+                                <button type="button"
+                                    @click="showChangePasswordModal = false; changePasswordCurrent = ''; changePasswordNew = ''; changePasswordConfirm = ''; changePasswordError = ''"
+                                    :disabled="changePasswordLoading"
+                                    class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium">
+                                    Cancel
+                                </button>
+                                <button type="submit"
+                                    :disabled="changePasswordLoading || !changePasswordCurrent || !changePasswordNew || !changePasswordConfirm || changePasswordNew !== changePasswordConfirm"
+                                    class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                                    <span x-text="changePasswordLoading ? 'Changing...' : 'Change Password'"></span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </template>
+        
+        <!-- Login Modal -->
+        <template x-if="showLoginModal">
+        <div x-transition:enter="transition ease-out duration-300"
+             x-transition:enter-start="opacity-0"
+             x-transition:enter-end="opacity-100"
+             x-transition:leave="transition ease-in duration-200"
+             x-transition:leave-start="opacity-100"
+             x-transition:leave-end="opacity-0"
+             x-init="$watch('showLoginModal', value => { 
+                 console.log('showLoginModal changed to:', value);
+                 if(value) { 
+                     $nextTick(() => $refs.passwordInput && $refs.passwordInput.focus()); 
+                 }
+             })"
+             @keydown.escape.window="showLoginModal = false; loginPassword = ''; loginError = ''"
+             class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
+             @click.self="showLoginModal = false; loginPassword = ''; loginError = ''">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
+             @click.stop>
+            <div class="mt-3">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-medium text-gray-900">Authentication Required</h3>
+                    <button @click="showLoginModal = false; loginPassword = ''; loginError = ''" 
+                            class="text-gray-400 hover:text-gray-600">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                
+                <p class="text-sm text-gray-600 mb-4">
+                    Please enter the admin password to perform this action.
+                </p>
+                
+                <form @submit.prevent="login()">
+                    <div class="mb-4">
+                        <label for="loginPassword" class="block text-sm font-medium text-gray-700 mb-2">
+                            Password
+                        </label>
+                        <input 
+                            type="password" 
+                            id="loginPassword"
+                            x-model="loginPassword"
+                            x-ref="passwordInput"
+                            autocomplete="current-password"
+                            @keyup.escape="showLoginModal = false; loginPassword = ''; loginError = ''"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="Enter admin password"
+                            :disabled="loginLoading"
+                            required
+                        />
+                    </div>
+                    
+                    <!-- Error message -->
+                    <div x-show="loginError" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                        <p class="text-sm text-red-800" x-text="loginError"></p>
+                    </div>
+                    
+                    <div class="flex items-center justify-end gap-3">
+                        <button 
+                            type="button"
+                            @click="showLoginModal = false; loginPassword = ''; loginError = ''"
+                            :disabled="loginLoading"
+                            class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50">
+                            Cancel
+                        </button>
+                        <button 
+                            type="submit"
+                            :disabled="loginLoading || !loginPassword"
+                            class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 flex items-center gap-2">
+                            <svg x-show="loginLoading" class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span x-text="loginLoading ? 'Logging in...' : 'Login'"></span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        </template>
     </div>
 
     <script>
@@ -465,8 +681,38 @@
                 selectedBackup: null,
                 viewingScript: null,
                 theme: 'tomorrow',
+                // Authentication state
+                authenticated: false,
+                authExpiresAt: null,
+                csrfToken: null,
+                showLoginModal: false,
+                loginPassword: '',
+                loginError: '',
+                loginLoading: false,
+                pendingAction: null,
+                showChangePasswordModal: false,
+                changePasswordCurrent: '',
+                changePasswordNew: '',
+                changePasswordConfirm: '',
+                changePasswordError: '',
+                changePasswordLoading: false,
+                // Loading states for async operations
+                loadingStates: {
+                    scripts: false,
+                    backups: false,
+                    config: false,
+                    logs: false,
+                    deviceConnections: false,
+                    status: false
+                },
                 
                 async init() {
+                    // Ensure modal is hidden on initial load
+                    this.showLoginModal = false;
+                    
+                    // File input change handler is bound via x-on:change directive
+                    // No need for explicit addEventListener since we authenticate before opening file picker
+                    
                     // Load theme preference
                     const savedTheme = localStorage.getItem('ztpbootstrap-theme');
                     if (savedTheme) {
@@ -474,12 +720,16 @@
                     }
                     this.applyTheme();
                     
+                    // Check authentication status
+                    await this.checkAuthStatus();
+                    
                     // Small delay to ensure Alpine.js is fully initialized
                     await new Promise(resolve => setTimeout(resolve, 100));
                     await this.loadStatus();
                     await this.loadScripts();
                     await this.loadBackups();
-                    await this.loadConfig();
+                    // Don't load config on init - require auth first
+                    // Config will be loaded when user clicks Configuration tab
                     await this.loadLogs();
                     await this.loadDeviceConnections();
                     
@@ -497,9 +747,197 @@
                             this.loadLogs();
                         }
                     }, 5000);
+                    
+                    // Check auth status every 5 minutes
+                    setInterval(() => {
+                        this.checkAuthStatus();
+                    }, 300000);
+                },
+                
+                // Authentication methods
+                async checkAuthStatus() {
+                    try {
+                        const response = await fetch('/api/auth/status', {
+                            credentials: 'same-origin'
+                        });
+                        const data = await response.json();
+                        this.authenticated = data.authenticated || false;
+                        this.authExpiresAt = data.expires_at || null;
+                        this.csrfToken = data.csrf_token || null;
+                    } catch (error) {
+                        console.error('Failed to check auth status:', error);
+                        this.authenticated = false;
+                        this.csrfToken = null;
+                    }
+                },
+                
+                async login() {
+                    this.loginLoading = true;
+                    this.loginError = '';
+                    
+                    try {
+                        const response = await fetch('/api/auth/login', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({ password: this.loginPassword }),
+                            credentials: 'same-origin'
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (response.ok && data.success) {
+                            // Update authentication state first
+                            this.authenticated = true;
+                            this.authExpiresAt = data.expires_at;
+                            this.csrfToken = data.csrf_token || null;
+                            console.log('Login successful, authenticated:', this.authenticated);
+                            
+                            // Store pending action before clearing modal
+                            const pendingAction = this.pendingAction;
+                            this.pendingAction = null;
+                            
+                            // Hide modal and clear form immediately - do this FIRST
+                            this.showLoginModal = false;
+                            this.loginPassword = '';
+                            this.loginError = '';
+                            
+                            // Force Alpine.js to process the modal hide
+                            await this.$nextTick();
+                            
+                            // Verify modal is actually hidden
+                            if (this.showLoginModal) {
+                                console.warn('Modal still showing after hide attempt, forcing again');
+                                this.showLoginModal = false;
+                                await this.$nextTick();
+                            }
+                            
+                            console.log('Modal should be hidden now, showLoginModal:', this.showLoginModal);
+                            
+                            // Execute pending action if any (now that we're authenticated)
+                            if (pendingAction) {
+                                try {
+                                    console.log('Executing pending action after login');
+                                    await pendingAction();
+                                    console.log('Pending action completed');
+                                } catch (error) {
+                                    console.error('Error executing pending action:', error);
+                                    alert('Action failed: ' + error.message);
+                                    // Don't re-show modal if action fails
+                                }
+                            }
+                        } else {
+                            this.loginError = data.error || 'Login failed';
+                            this.loginPassword = '';
+                        }
+                    } catch (error) {
+                        console.error('Login error:', error);
+                        this.loginError = 'Login failed. Please try again.';
+                        this.loginPassword = '';
+                    } finally {
+                        this.loginLoading = false;
+                    }
+                },
+                
+                async logout() {
+                    try {
+                        await fetch('/api/auth/logout', {
+                            method: 'POST',
+                            credentials: 'same-origin'
+                        });
+                        this.authenticated = false;
+                        this.authExpiresAt = null;
+                    } catch (error) {
+                        console.error('Logout error:', error);
+                    }
+                },
+                
+                async changePassword() {
+                    this.changePasswordLoading = true;
+                    this.changePasswordError = '';
+                    
+                    // Validate passwords match
+                    if (this.changePasswordNew !== this.changePasswordConfirm) {
+                        this.changePasswordError = 'New passwords do not match';
+                        this.changePasswordLoading = false;
+                        return;
+                    }
+                    
+                    // Validate password length
+                    if (this.changePasswordNew.length < 8) {
+                        this.changePasswordError = 'New password must be at least 8 characters long';
+                        this.changePasswordLoading = false;
+                        return;
+                    }
+                    
+                    try {
+                        const response = await fetch('/api/auth/change-password', {
+                            method: 'POST',
+                            headers: this.getCsrfHeaders(),
+                            body: JSON.stringify({
+                                current_password: this.changePasswordCurrent,
+                                new_password: this.changePasswordNew,
+                                csrf_token: this.csrfToken
+                            }),
+                            credentials: 'same-origin'
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (response.ok && data.success) {
+                            // Success - close modal and clear form
+                            this.showChangePasswordModal = false;
+                            this.changePasswordCurrent = '';
+                            this.changePasswordNew = '';
+                            this.changePasswordConfirm = '';
+                            this.changePasswordError = '';
+                            alert('Password changed successfully');
+                        } else {
+                            this.changePasswordError = data.error || 'Failed to change password';
+                            this.changePasswordCurrent = '';
+                        }
+                    } catch (error) {
+                        this.changePasswordError = 'Failed to change password. Please try again.';
+                        this.changePasswordCurrent = '';
+                    } finally {
+                        this.changePasswordLoading = false;
+                    }
+                },
+                
+                async requireAuth(action) {
+                    console.log('requireAuth called, current authenticated state:', this.authenticated);
+                    // Always check auth status first to ensure it's current
+                    await this.checkAuthStatus();
+                    console.log('After checkAuthStatus, authenticated:', this.authenticated);
+                    
+                    // Double-check authentication status
+                    if (!this.authenticated) {
+                        console.log('User not authenticated, showing login modal');
+                        // Only show modal if not already showing
+                        if (!this.showLoginModal) {
+                            this.pendingAction = action;
+                            // Set showLoginModal to true and force Alpine.js reactivity
+                            this.showLoginModal = true;
+                            // Use $dispatch to ensure Alpine.js processes the change
+                            this.$dispatch('login-modal-show');
+                            await this.$nextTick();
+                            console.log('Login modal should be visible:', this.showLoginModal);
+                        } else {
+                            // Modal already showing, just store the action
+                            this.pendingAction = action;
+                        }
+                        // Return early to prevent action from executing
+                        console.log('requireAuth returning early (not authenticated)');
+                        return;
+                    }
+                    // User is authenticated, execute the action
+                    console.log('User authenticated, executing action');
+                    return await action();
                 },
                 
                 async loadStatus() {
+                    this.loadingStates.status = true;
                     try {
                         const response = await fetch('/api/status');
                         if (!response.ok) {
@@ -516,10 +954,13 @@
                         console.log('Status object after update:', this.status);
                     } catch (error) {
                         console.error('Failed to load status:', error);
+                    } finally {
+                        this.loadingStates.status = false;
                     }
                 },
                 
                 async loadScripts() {
+                    this.loadingStates.scripts = true;
                     try {
                         const response = await fetch('/api/bootstrap-scripts');
                         if (!response.ok) {
@@ -535,10 +976,13 @@
                     } catch (error) {
                         console.error('Failed to load scripts:', error);
                         this.scripts = [];
+                    } finally {
+                        this.loadingStates.scripts = false;
                     }
                 },
                 
                 async loadBackups() {
+                    this.loadingStates.backups = true;
                     try {
                         const response = await fetch('/api/bootstrap-scripts/backups');
                         if (!response.ok) {
@@ -551,22 +995,66 @@
                     } catch (error) {
                         console.error('Failed to load backups:', error);
                         this.backups = [];
+                    } finally {
+                        this.loadingStates.backups = false;
                     }
                 },
                 
+                async triggerFileUpload() {
+                    console.log('triggerFileUpload called, authenticated:', this.authenticated);
+                    // Require authentication BEFORE opening file picker
+                    await this.requireAuth(async () => {
+                        console.log('User authenticated, opening file picker');
+                        // User is authenticated, now open the file picker
+                        const fileInput = this.$refs.fileInput;
+                        if (fileInput) {
+                            fileInput.click();
+                        } else {
+                            console.error('File input not found');
+                        }
+                    });
+                },
+                
                 async uploadScript(event) {
+                    console.log('uploadScript called (file selected)');
                     const file = event.target.files[0];
-                    if (!file) return;
+                    if (!file) {
+                        console.log('No file selected, returning');
+                        return;
+                    }
                     
+                    // At this point, user should already be authenticated (file picker only opens after auth)
+                    // But double-check to be safe
+                    await this.checkAuthStatus();
+                    if (!this.authenticated) {
+                        console.error('User not authenticated when file was selected - this should not happen');
+                        event.target.value = ''; // Reset file input
+                        this.showLoginModal = true;
+                        return;
+                    }
+                    
+                    console.log('Uploading file:', file.name);
                     const formData = new FormData();
                     formData.append('file', file);
                     
                     try {
+                        const headers = {};
+                        if (this.csrfToken) {
+                            headers['X-CSRF-Token'] = this.csrfToken;
+                        }
                         const response = await fetch('/api/bootstrap-script/upload', {
                             method: 'POST',
-                            body: formData
+                            headers: headers,
+                            body: formData,
+                            credentials: 'same-origin'
                         });
                         const data = await response.json();
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.showLoginModal = true;
+                            event.target.value = ''; // Reset file input
+                            return;
+                        }
                         if (data.success) {
                             await this.loadScripts();
                             await this.loadBackups();
@@ -576,118 +1064,175 @@
                     } catch (error) {
                         alert('Upload failed: ' + error.message);
                     }
+                    
                     event.target.value = ''; // Reset file input
                 },
                 
                 async setActiveScript(filename) {
-                    try {
-                        const response = await fetch(`/api/bootstrap-script/${filename}/set-active`, {
-                            method: 'POST'
-                        });
-                        const data = await response.json();
-                        if (data.success) {
-                            // Refresh scripts list immediately to show updated active status
-                            await this.loadScripts();
-                            // Close modal if open
-                            this.showScriptModal = false;
-                            this.viewingScript = null;
-                        } else {
-                            alert('Failed to set active: ' + (data.error || 'Unknown error'));
+                    await this.requireAuth(async () => {
+                        try {
+                            const response = await fetch(`/api/bootstrap-script/${filename}/set-active`, {
+                                method: 'POST',
+                                headers: this.getCsrfHeaders(),
+                                credentials: 'same-origin'
+                            });
+                            const data = await response.json();
+                            if (response.status === 401) {
+                                this.authenticated = false;
+                                this.pendingAction = () => this.setActiveScript(filename);
+                                this.showLoginModal = true;
+                                return;
+                            }
+                            if (data.success) {
+                                // Refresh scripts list immediately to show updated active status
+                                await this.loadScripts();
+                                // Close modal if open
+                                this.showScriptModal = false;
+                                this.viewingScript = null;
+                            } else {
+                                alert('Failed to set active: ' + (data.error || 'Unknown error'));
+                            }
+                        } catch (error) {
+                            alert('Failed to set active: ' + error.message);
                         }
-                    } catch (error) {
-                        alert('Failed to set active: ' + error.message);
-                    }
+                    });
                 },
                 
                 async renameScript(filename) {
-                    const newName = prompt(`Enter new name for ${filename}:`, filename);
-                    if (!newName || newName === filename) {
-                        return;
-                    }
-                    
-                    // Validate name
-                    if (!newName.endsWith('.py')) {
-                        alert('Script name must end with .py');
-                        return;
-                    }
-                    
-                    try {
-                        const response = await fetch(`/api/bootstrap-script/${filename}/rename`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                new_name: newName
-                            })
-                        });
-                        const data = await response.json();
-                        if (data.success) {
-                            // Refresh scripts list immediately
-                            await this.loadScripts();
-                            // Close modal if viewing the renamed script
-                            if (this.viewingScript && this.viewingScript.name === filename) {
-                                this.showScriptModal = false;
-                                this.viewingScript = null;
-                            }
-                        } else {
-                            alert('Failed to rename: ' + (data.error || 'Unknown error'));
+                    await this.requireAuth(async () => {
+                        const newName = prompt(`Enter new name for ${filename}:`, filename);
+                        if (!newName || newName === filename) {
+                            return;
                         }
-                    } catch (error) {
-                        alert('Failed to rename: ' + error.message);
-                    }
+                        
+                        // Validate name
+                        if (!newName.endsWith('.py')) {
+                            alert('Script name must end with .py');
+                            return;
+                        }
+                        
+                        try {
+                            const response = await fetch(`/api/bootstrap-script/${filename}/rename`, {
+                                method: 'POST',
+                                headers: this.getCsrfHeaders(),
+                                body: JSON.stringify({
+                                    new_name: newName,
+                                    csrf_token: this.csrfToken
+                                }),
+                                credentials: 'same-origin'
+                            });
+                            const data = await response.json();
+                            if (response.status === 401) {
+                                this.authenticated = false;
+                                this.pendingAction = () => this.renameScript(filename);
+                                this.showLoginModal = true;
+                                return;
+                            }
+                            if (data.success) {
+                                // Refresh scripts list immediately
+                                await this.loadScripts();
+                                // Close modal if viewing the renamed script
+                                if (this.viewingScript && this.viewingScript.name === filename) {
+                                    this.showScriptModal = false;
+                                    this.viewingScript = null;
+                                }
+                            } else {
+                                alert('Failed to rename: ' + (data.error || 'Unknown error'));
+                            }
+                        } catch (error) {
+                            alert('Failed to rename: ' + error.message);
+                        }
+                    });
                 },
                 
                 async deleteScript(filename) {
-                    if (!confirm(`Are you sure you want to delete ${filename}? This action cannot be undone.`)) {
-                        return;
-                    }
-                    
-                    try {
-                        const response = await fetch(`/api/bootstrap-script/${filename}`, {
-                            method: 'DELETE'
-                        });
-                        const data = await response.json();
-                        if (data.success) {
-                            // Refresh scripts list immediately
-                            await this.loadScripts();
-                            // Close modal if viewing the deleted script
-                            if (this.viewingScript && this.viewingScript.name === filename) {
-                                this.showScriptModal = false;
-                                this.viewingScript = null;
-                            }
-                        } else {
-                            alert('Failed to delete: ' + (data.error || 'Unknown error'));
+                    await this.requireAuth(async () => {
+                        if (!confirm(`Are you sure you want to delete ${filename}? This action cannot be undone.`)) {
+                            return;
                         }
-                    } catch (error) {
-                        alert('Failed to delete: ' + error.message);
-                    }
+                        
+                        try {
+                            const headers = {};
+                            if (this.csrfToken) {
+                                headers['X-CSRF-Token'] = this.csrfToken;
+                            }
+                            const response = await fetch(`/api/bootstrap-script/${filename}`, {
+                                method: 'DELETE',
+                                headers: headers,
+                                credentials: 'same-origin'
+                            });
+                            const data = await response.json();
+                            if (response.status === 401) {
+                                this.authenticated = false;
+                                this.pendingAction = () => this.deleteScript(filename);
+                                this.showLoginModal = true;
+                                return;
+                            }
+                            if (data.success) {
+                                // Refresh scripts list immediately
+                                await this.loadScripts();
+                                // Close modal if viewing the deleted script
+                                if (this.viewingScript && this.viewingScript.name === filename) {
+                                    this.showScriptModal = false;
+                                    this.viewingScript = null;
+                                }
+                            } else {
+                                alert('Failed to delete: ' + (data.error || 'Unknown error'));
+                            }
+                        } catch (error) {
+                            alert('Failed to delete: ' + error.message);
+                        }
+                    });
                 },
                 
                 async toggleServeAsFilename(filename, serveAsFilename) {
-                    try {
-                        const response = await fetch(`/api/bootstrap-script/${filename}/serve-as-filename`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                serve_as_filename: serveAsFilename
-                            })
-                        });
-                        const data = await response.json();
-                        if (data.success) {
-                            // Refresh scripts list to show updated status
-                            await this.loadScripts();
-                        } else {
-                            alert('Failed to update setting: ' + (data.error || 'Unknown error'));
+                    await this.requireAuth(async () => {
+                        try {
+                            const response = await fetch(`/api/bootstrap-script/${filename}/serve-as-filename`, {
+                                method: 'POST',
+                                headers: this.getCsrfHeaders(),
+                                body: JSON.stringify({
+                                    serve_as_filename: serveAsFilename,
+                                    csrf_token: this.csrfToken
+                                }),
+                                credentials: 'same-origin'
+                            });
+                            const data = await response.json();
+                            if (response.status === 401) {
+                                this.authenticated = false;
+                                this.pendingAction = () => this.toggleServeAsFilename(filename, serveAsFilename);
+                                this.showLoginModal = true;
+                                return;
+                            }
+                            if (data.success) {
+                                // Refresh scripts list to show updated status
+                                await this.loadScripts();
+                            } else {
+                                alert('Failed to update setting: ' + (data.error || 'Unknown error'));
+                            }
+                        } catch (error) {
+                            alert('Failed to update setting: ' + error.message);
                         }
-                    } catch (error) {
-                        alert('Failed to update setting: ' + error.message);
-                    }
+                    });
+                },
+                
+                async triggerRestoreBackup() {
+                    // Require authentication BEFORE opening restore dialog
+                    await this.requireAuth(async () => {
+                        this.showRestoreDialog = true;
+                    });
                 },
                 
                 async restoreBackup(filename, restoreAs) {
+                    // User should already be authenticated (dialog only opens after auth)
+                    // But double-check to be safe
+                    await this.checkAuthStatus();
+                    if (!this.authenticated) {
+                        this.showRestoreDialog = false;
+                        this.showLoginModal = true;
+                        return;
+                    }
+                    
                     if (!filename) {
                         alert('Please select a backup to restore');
                         return;
@@ -701,14 +1246,20 @@
                     try {
                         const response = await fetch(`/api/bootstrap-script/backup/${filename}/restore`, {
                             method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
+                            headers: this.getCsrfHeaders(),
                             body: JSON.stringify({
-                                restore_as: restoreAs
-                            })
+                                restore_as: restoreAs,
+                                csrf_token: this.csrfToken
+                            }),
+                            credentials: 'same-origin'
                         });
                         const data = await response.json();
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.showRestoreDialog = false;
+                            this.showLoginModal = true;
+                            return;
+                        }
                         if (data.success) {
                             await this.loadScripts();
                             await this.loadBackups();
@@ -722,9 +1273,37 @@
                     }
                 },
                 
+                async triggerConfigTab() {
+                    // Require authentication BEFORE showing configuration tab
+                    await this.requireAuth(async () => {
+                        this.activeTab = 'config';
+                        // Load config after switching to tab
+                        await this.loadConfig();
+                    });
+                },
+                
                 async loadConfig() {
+                    this.loadingStates.config = true;
+                    // User should already be authenticated (tab only opens after auth)
+                    // But double-check to be safe
+                    await this.checkAuthStatus();
+                    if (!this.authenticated) {
+                        this.activeTab = 'scripts'; // Switch away from config tab
+                        this.showLoginModal = true;
+                        this.loadingStates.config = false;
+                        return;
+                    }
+                    
                     try {
-                        const response = await fetch('/api/config');
+                        const response = await fetch('/api/config', {
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.activeTab = 'scripts'; // Switch away from config tab
+                            this.showLoginModal = true;
+                            return;
+                        }
                         if (!response.ok) {
                             console.error('Config API returned:', response.status, response.statusText);
                             this.config = {};
@@ -745,6 +1324,8 @@
                         });
                     } catch (error) {
                         console.error('Failed to load config:', error);
+                    } finally {
+                        this.loadingStates.config = false;
                     }
                 },
                 
@@ -796,6 +1377,7 @@
                 },
                 
                 async loadLogs() {
+                    this.loadingStates.logs = true;
                     try {
                         const response = await fetch(`/api/logs?source=${this.logSource}&lines=${this.logLines}`);
                         const data = await response.json();
@@ -807,11 +1389,12 @@
                             const nginxMatch = logText.match(/=== ztpbootstrap-nginx\.service ===([\s\S]*?)(?=== |$)/);
                             const webuiMatch = logText.match(/=== ztpbootstrap-webui\.service ===([\s\S]*?)(?=== |$)/);
                             
+                            // Update individual properties for Alpine.js reactivity
                             this.logsPod = podMatch ? podMatch[1].trim() : 'No pod logs available';
                             this.logsNginx = nginxMatch ? nginxMatch[1].trim() : 'No nginx logs available';
                             this.logsWebUI = webuiMatch ? webuiMatch[1].trim() : 'No webui logs available';
                         } else {
-                            // Ensure logs is a string
+                            // Ensure logs is a string and update directly for reactivity
                             this.logs = typeof data.logs === 'string' ? data.logs : (data.logs || 'No logs available');
                             // Auto-scroll to bottom
                             this.$nextTick(() => {
@@ -823,10 +1406,13 @@
                     } catch (error) {
                         console.error('Failed to load logs:', error);
                         this.logs = 'Failed to load logs';
+                    } finally {
+                        this.loadingStates.logs = false;
                     }
                 },
                 
                 async loadDeviceConnections() {
+                    this.loadingStates.deviceConnections = true;
                     try {
                         const response = await fetch('/api/device-connections');
                         if (!response.ok) {
@@ -842,7 +1428,20 @@
                     } catch (error) {
                         console.error('Failed to load device connections:', error);
                         this.devices = [];
+                    } finally {
+                        this.loadingStates.deviceConnections = false;
                     }
+                },
+                
+                // Helper function to get CSRF headers for write operations
+                getCsrfHeaders() {
+                    const headers = {
+                        'Content-Type': 'application/json'
+                    };
+                    if (this.csrfToken) {
+                        headers['X-CSRF-Token'] = this.csrfToken;
+                    }
+                    return headers;
                 },
                 
                 async viewScript(filename) {
@@ -891,20 +1490,61 @@
                 },
                 
                 async markLogs() {
+                    console.log('markLogs called, authenticated:', this.authenticated);
+                    
+                    // Check authentication first
+                    if (!this.authenticated) {
+                        console.log('Not authenticated, showing login modal');
+                        this.pendingAction = () => this.markLogs();
+                        this.showLoginModal = true;
+                        await this.$nextTick();
+                        console.log('showLoginModal set to:', this.showLoginModal);
+                        return;
+                    }
+                    
                     try {
                         // Mark the currently selected log source (or both if container logs)
                         const source = this.logSource === 'container' ? 'both' : this.logSource;
+                        console.log('Marking logs for source:', source);
+                        
+                        const headers = {};
+                        if (this.csrfToken) {
+                            headers['X-CSRF-Token'] = this.csrfToken;
+                        }
                         const response = await fetch(`/api/logs/mark?source=${source}`, {
-                            method: 'POST'
+                            method: 'POST',
+                            headers: headers,
+                            credentials: 'same-origin'
                         });
+                        
+                        console.log('Mark response status:', response.status);
+                        
+                        if (response.status === 401) {
+                            console.log('Received 401, authentication expired');
+                            this.authenticated = false;
+                            await this.checkAuthStatus(); // Update auth status
+                            this.pendingAction = () => this.markLogs();
+                            this.showLoginModal = true;
+                            await this.$nextTick();
+                            return;
+                        }
+                        
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+                        
                         const data = await response.json();
+                        console.log('Mark response data:', data);
+                        
                         if (data.success) {
+                            console.log('Mark successful, reloading logs');
                             // Reload logs to show the new MARK
                             await this.loadLogs();
                         } else {
                             alert('Failed to mark logs: ' + (data.error || 'Unknown error'));
                         }
                     } catch (error) {
+                        console.error('Error marking logs:', error);
                         alert('Failed to mark logs: ' + error.message);
                     }
                 }
