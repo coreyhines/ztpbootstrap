@@ -2989,7 +2989,7 @@ parse_args() {
                     shift 2
                 else
                     # No password provided, use default
-                    RESET_PASSWORD="ztpboot"
+                    RESET_PASSWORD="ztpboot123"
                     shift
                 fi
                 ;;
@@ -3008,7 +3008,7 @@ Options:
                             Strict upgrade mode: requires existing install, requires successful backup,
                             uses all previous values, runs non-interactively. Use for upgrades only.
     --reset-pass [PASSWORD] Set/reset admin password for Web UI (can be used with --upgrade)
-                            If PASSWORD is not provided, defaults to "ztpboot"
+                            If PASSWORD is not provided, defaults to "ztpboot123"
                             Password can be quoted: --reset-pass 'password' or --reset-pass "password"
                             Overrides existing password hash in upgrade mode.
     -h, --help              Show this help message
@@ -3019,9 +3019,9 @@ Examples:
     $0 --auto               # Same as --non-interactive
     $0 --upgrade            # Upgrade existing installation (non-interactive, preserves all values)
     $0 --upgrade --reset-pass 'newpassword'  # Upgrade and reset password
-    $0 --upgrade --reset-pass  # Upgrade and reset to default password "ztpboot"
+    $0 --upgrade --reset-pass  # Upgrade and reset to default password "ztpboot123"
     $0 --reset-pass 'mypass123'  # Set password during setup
-    $0 --reset-pass  # Set default password "ztpboot" during setup
+    $0 --reset-pass  # Set default password "ztpboot123" during setup
     $0 --restore            # List and restore from available backups
     $0 --restore 20240101_120000  # Restore from specific backup
 
