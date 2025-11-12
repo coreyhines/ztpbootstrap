@@ -18,23 +18,37 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Prompt for backup host if not set
-if [[ -z "${BACKUP_HOST:-}" ]]; then
-    echo -e "${CYAN}[?]${NC} Enter backup host (e.g., fedora1.freeblizz.com): "
-    read -r BACKUP_HOST
-    if [[ -z "$BACKUP_HOST" ]]; then
-        echo -e "${RED}[ERROR]${NC} Backup host is required"
-        exit 1
-    fi
+# Ask if user wants to restore a production backup
+RESTORE_BACKUP="${RESTORE_BACKUP:-}"
+if [[ -z "$RESTORE_BACKUP" ]]; then
+    echo -e "${CYAN}[?]${NC} Do you want to restore a production backup to the VM? [y/N]: "
+    read -r RESTORE_BACKUP
+    RESTORE_BACKUP="${RESTORE_BACKUP:-n}"
 fi
 
-# Prompt for backup user if not set
-if [[ -z "${BACKUP_USER:-}" ]]; then
-    echo -e "${CYAN}[?]${NC} Enter backup user (e.g., corey) [${CYAN}${USER:-$(whoami)}${NC}]: "
-    read -r BACKUP_USER
-    if [[ -z "$BACKUP_USER" ]]; then
-        BACKUP_USER="${USER:-$(whoami)}"
+# Only prompt for backup host/user if restoring backup
+if [[ "${RESTORE_BACKUP,,}" == "y" ]] || [[ "${RESTORE_BACKUP,,}" == "yes" ]]; then
+    RESTORE_BACKUP="true"
+    # Prompt for backup host if not set
+    if [[ -z "${BACKUP_HOST:-}" ]]; then
+        echo -e "${CYAN}[?]${NC} Enter backup host (e.g., fedora1.freeblizz.com): "
+        read -r BACKUP_HOST
+        if [[ -z "$BACKUP_HOST" ]]; then
+            echo -e "${RED}[ERROR]${NC} Backup host is required when restoring backup"
+            exit 1
+        fi
     fi
+
+    # Prompt for backup user if not set
+    if [[ -z "${BACKUP_USER:-}" ]]; then
+        echo -e "${CYAN}[?]${NC} Enter backup user (e.g., corey) [${CYAN}${USER:-$(whoami)}${NC}]: "
+        read -r BACKUP_USER
+        if [[ -z "$BACKUP_USER" ]]; then
+            BACKUP_USER="${USER:-$(whoami)}"
+        fi
+    fi
+else
+    RESTORE_BACKUP="false"
 fi
 
 # Check for --skip-vm flag
@@ -94,7 +108,11 @@ echo "=========================================="
 echo "Interactive Setup Test"
 echo "=========================================="
 echo "Distribution: $DISTRO $VERSION"
-echo "Backup source: ${BACKUP_USER}@${BACKUP_HOST}"
+if [[ "$RESTORE_BACKUP" == "true" ]]; then
+    echo "Backup source: ${BACKUP_USER}@${BACKUP_HOST}"
+else
+    echo "Backup restoration: Skipped"
+fi
 echo "Date: $(date +'%Y-%m-%d %H:%M:%S')"
 echo ""
 echo "Usage:"
@@ -103,9 +121,15 @@ echo ""
 echo "  --skip-vm    Skip VM creation, assume VM is already running"
 echo "               Use this if you have a VM already set up"
 echo ""
+echo "  Environment variables:"
+echo "    RESTORE_BACKUP=y    Restore production backup (will prompt for host/user)"
+echo "    BACKUP_HOST=host    Backup host (required if RESTORE_BACKUP=y)"
+echo "    BACKUP_USER=user    Backup user (optional, defaults to current user)"
+echo ""
 
-# Step 1: Get backup from backup host
-log_step "Step 1: Retrieving backup from ${BACKUP_HOST}"
+# Step 1: Get backup from backup host (only if restoring)
+if [[ "$RESTORE_BACKUP" == "true" ]]; then
+    log_step "Step 1: Retrieving backup from ${BACKUP_HOST}"
 BACKUP_FILE=$(ssh "${BACKUP_USER}@${BACKUP_HOST}" "ls -t ~${BACKUP_USER}/ztpbootstrap-backup-*.tar.gz 2>/dev/null | head -1" 2>/dev/null || echo "")
 
 if [[ -z "$BACKUP_FILE" ]]; then
@@ -249,8 +273,9 @@ fi
 
 log_info "✓ Ready to proceed"
 
-# Step 4: Copy backup to VM and restore
-log_step "Step 4: Restoring backup in VM"
+# Step 4: Copy backup to VM and restore (only if restoring backup)
+if [[ "$RESTORE_BACKUP" == "true" ]]; then
+    log_step "Step 4: Restoring backup in VM"
 log_info "Copying backup to VM..."
 scp -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -P 2222 "$LOCAL_BACKUP" "${DEFAULT_USER}@localhost:~/backup.tar.gz" 2>&1 || {
     log_error "Failed to copy backup to VM"
@@ -295,7 +320,11 @@ rm -rf restore-tmp backup.tar.gz
 echo "✓ Backup restored successfully"
 RESTORE_EOF
 
-log_info "✓ Backup restored in VM"
+    log_info "✓ Backup restored in VM"
+else
+    log_step "Step 4: Skipping backup restoration"
+    log_info "No backup restoration requested - proceeding with fresh VM"
+fi
 
 # Step 5: Clone repo and prepare for interactive setup
 log_step "Step 5: Preparing repository in VM"
@@ -351,9 +380,10 @@ PREP_EOF
 
 log_info "✓ Repository prepared"
 
-# Step 6: Verify restored installation
-log_step "Step 6: Verifying restored installation"
-ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 "${DEFAULT_USER}@localhost" << 'VERIFY_EOF'
+# Step 6: Verify restored installation (only if backup was restored)
+if [[ "$RESTORE_BACKUP" == "true" ]]; then
+    log_step "Step 6: Verifying restored installation"
+    ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 "${DEFAULT_USER}@localhost" << 'VERIFY_EOF'
 echo "Checking restored files..."
 if [ -f /opt/containerdata/ztpbootstrap/ztpbootstrap.env ]; then
     echo "✓ ztpbootstrap.env exists"
@@ -387,7 +417,11 @@ echo ""
 echo "✓ Verification complete"
 VERIFY_EOF
 
-log_info "✓ Installation verified"
+    log_info "✓ Installation verified"
+else
+    log_step "Step 6: Skipping verification (no backup restored)"
+    log_info "VM is ready for fresh installation"
+fi
 
 echo ""
 echo "=========================================="
