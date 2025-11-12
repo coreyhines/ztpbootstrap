@@ -2207,6 +2207,8 @@ interactive_config() {
     # Check if --reset-pass was provided (takes precedence)
     if [[ -n "${RESET_PASSWORD:-}" ]]; then
         log "Password reset requested via --reset-pass flag."
+        # Debug: log password details (without exposing the actual password)
+        log "Password length: ${#RESET_PASSWORD} characters"
         # Validate password length
         if [[ ${#RESET_PASSWORD} -lt 8 ]]; then
             error "Password must be at least 8 characters long."
@@ -2218,6 +2220,10 @@ interactive_config() {
         ADMIN_PASSWORD_HASH=$(echo "$RESET_PASSWORD" | python3 2>/dev/null <<'PYTHON_SCRIPT'
 import sys
 password = sys.stdin.read().rstrip('\n')
+# Verify we got the password correctly
+if len(password) == 0:
+    sys.stderr.write("ERROR: Empty password received!\n")
+    sys.exit(1)
 try:
     from werkzeug.security import generate_password_hash
     hash_value = generate_password_hash(password)
@@ -2249,6 +2255,41 @@ PYTHON_SCRIPT
             log "Hash format: $(echo "$ADMIN_PASSWORD_HASH" | cut -d: -f1)"
             log "Hash length: ${#ADMIN_PASSWORD_HASH} characters"
             log "Hash preview: ${ADMIN_PASSWORD_HASH:0:30}..."
+            
+            # Verify the hash works with the password we just hashed
+            log "Verifying hash matches password..."
+            VERIFICATION_RESULT=$(echo "$RESET_PASSWORD" | python3 2>/dev/null <<PYTHON_VERIFY
+import sys
+import hashlib
+import base64
+password = sys.stdin.read().rstrip('\n')
+hash_value = "$ADMIN_PASSWORD_HASH"
+
+if hash_value.startswith('pbkdf2:sha256:') and '\$' not in hash_value:
+    hash_part = hash_value.split(':', 2)[2]
+    stored_hash = base64.b64decode(hash_part)
+    computed_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)
+    match = (stored_hash == computed_hash)
+    print("MATCH" if match else "MISMATCH")
+else:
+    try:
+        from werkzeug.security import check_password_hash
+        match = check_password_hash(hash_value, password)
+        print("MATCH" if match else "MISMATCH")
+    except:
+        print("ERROR")
+PYTHON_VERIFY
+)
+            
+            if [[ "$VERIFICATION_RESULT" == "MATCH" ]]; then
+                log "✓ Hash verification successful - password and hash match"
+            else
+                error "✗ Hash verification FAILED - password and hash do not match!"
+                error "This indicates a bug in password hashing. Please report this issue."
+                error "Password length was: ${#RESET_PASSWORD}"
+                exit 1
+            fi
+            
             SET_ADMIN_PASSWORD="true"
             # Clear password from memory
             RESET_PASSWORD=""
