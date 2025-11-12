@@ -536,8 +536,23 @@ def auth_change_password():
                     print(f"  Got: {loaded_hash[:50] if loaded_hash else 'None'}... (len={len(loaded_hash) if loaded_hash else 0})")
                 else:
                     # Verify the new password works with the loaded hash
-                    from werkzeug.security import check_password_hash
-                    test_result = check_password_hash(loaded_hash, new_password)
+                    test_result = False
+                    try:
+                        from werkzeug.security import check_password_hash
+                        test_result = check_password_hash(loaded_hash, new_password)
+                    except (ImportError, NameError):
+                        # Fallback format verification
+                        if loaded_hash and loaded_hash.startswith('pbkdf2:sha256:') and '$' not in loaded_hash:
+                            import hashlib
+                            import base64
+                            try:
+                                hash_part = loaded_hash.split(':', 2)[2]
+                                stored_hash = base64.b64decode(hash_part)
+                                computed_hash = hashlib.pbkdf2_hmac('sha256', new_password.encode('utf-8'), b'ztpbootstrap', 100000)
+                                test_result = (stored_hash == computed_hash)
+                            except Exception:
+                                test_result = False
+                    
                     if not test_result:
                         print(f"ERROR: New password hash verification failed after reload!")
                         print(f"  Hash: {loaded_hash[:50]}...")
