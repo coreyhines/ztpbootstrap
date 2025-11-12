@@ -10,6 +10,7 @@ A containerized service that provides a secure HTTPS endpoint for serving Arista
 - **[docs/QUICK_START.md](docs/QUICK_START.md)** - Complete step-by-step installation guide (start here!)
 - **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 - **[docs/TESTING.md](docs/TESTING.md)** - Testing procedures and validation scripts
+- **[docs/SECURITY.md](docs/SECURITY.md)** - Security features, authentication, and security testing
 
 **For Developers:**
 - **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - Development workflow, VM testing, and upgrade scenarios
