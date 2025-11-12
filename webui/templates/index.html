@@ -696,9 +696,7 @@
                 
                 async requireAuth(action) {
                     // Double-check authentication status
-                    if (this.authenticated) {
-                        return await action();
-                    } else {
+                    if (!this.authenticated) {
                         // Only show modal if not already showing
                         if (!this.showLoginModal) {
                             this.pendingAction = action;
@@ -712,8 +710,11 @@
                             // Modal already showing, just store the action
                             this.pendingAction = action;
                         }
-                        return; // Return early to prevent action from executing
+                        // Return early to prevent action from executing
+                        return;
                     }
+                    // User is authenticated, execute the action
+                    return await action();
                 },
                 
                 async loadStatus() {
