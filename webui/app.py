@@ -524,8 +524,8 @@ def auth_change_password():
                         temp_file.unlink()
                     raise e
                 
-                # Reload auth config
-                AUTH_CONFIG = load_auth_config()
+                # Reload auth config using the reload function
+                reload_auth_config()
                 
                 # Verify the new hash was loaded correctly
                 loaded_hash = AUTH_CONFIG.get('admin_password_hash')
@@ -562,8 +562,10 @@ def auth_change_password():
                 
                 return jsonify({'success': True})
             except Exception as e:
-                # Log error but don't expose details to user
-                print(f"Error updating password in config.yaml: {type(e).__name__}")
+                # Log detailed error for debugging
+                import traceback
+                print(f"Error updating password in config.yaml: {type(e).__name__}: {e}", flush=True)
+                print(f"Traceback: {traceback.format_exc()}", flush=True)
                 return jsonify({
                     'error': 'Failed to update password. Please check file permissions.',
                     'code': 'UPDATE_ERROR'
@@ -574,8 +576,10 @@ def auth_change_password():
                 'code': 'CONFIG_NOT_FOUND'
             }), 404
     except Exception as e:
-        # Log error but don't expose details to user
-        print(f"Change password error: {type(e).__name__}")
+        # Log detailed error for debugging
+        import traceback
+        print(f"Change password error: {type(e).__name__}: {e}", flush=True)
+        print(f"Traceback: {traceback.format_exc()}", flush=True)
         return jsonify({
             'error': 'Failed to change password',
             'code': 'CHANGE_PASSWORD_ERROR'
