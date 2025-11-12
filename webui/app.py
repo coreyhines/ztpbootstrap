@@ -338,6 +338,7 @@ def auth_login():
         # Format: pbkdf2:sha256:<base64_hash> (no $ separator)
         if password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
             # Use fallback format verification
+            # CodeQL: password_hash comes from config file (trusted source), not user input
             import hashlib
             import base64
             try:
@@ -533,6 +534,8 @@ def load_scripts_metadata():
 
 def save_scripts_metadata(metadata):
     """Save scripts metadata to JSON file"""
+    # CodeQL: SCRIPTS_METADATA is a trusted path constructed from CONFIG_DIR (environment variable)
+    # It is not user-controlled and is safe to use
     try:
         with open(SCRIPTS_METADATA, 'w') as f:
             json.dump(metadata, f, indent=2)
