@@ -282,6 +282,9 @@ def auth_change_password():
                 'code': 'PASSWORD_TOO_SHORT'
             }), 400
         
+        # Declare global before using it
+        global AUTH_CONFIG
+        
         # Verify current password
         password_hash = AUTH_CONFIG['admin_password_hash']
         password_valid = False
@@ -330,7 +333,6 @@ def auth_change_password():
                     yaml.dump(yaml_config, f, default_flow_style=False, sort_keys=False)
                 
                 # Reload auth config
-                global AUTH_CONFIG
                 AUTH_CONFIG = load_auth_config()
                 
                 return jsonify({'success': True})
