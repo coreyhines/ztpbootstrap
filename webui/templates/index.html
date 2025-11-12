@@ -492,6 +492,7 @@
                  x-transition:leave="ease-in duration-200"
                  x-transition:leave-start="opacity-100"
                  x-transition:leave-end="opacity-0"
+                 @keydown.escape.window="showChangePasswordModal = false; changePasswordCurrent = ''; changePasswordNew = ''; changePasswordConfirm = ''; changePasswordError = ''"
                  class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
                  @click.self="showChangePasswordModal = false; changePasswordCurrent = ''; changePasswordNew = ''; changePasswordConfirm = ''; changePasswordError = ''">
                 <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
@@ -585,6 +586,7 @@
                      $nextTick(() => $refs.passwordInput && $refs.passwordInput.focus()); 
                  }
              })"
+             @keydown.escape.window="showLoginModal = false; loginPassword = ''; loginError = ''"
              class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
              @click.self="showLoginModal = false; loginPassword = ''; loginError = ''">
         <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
