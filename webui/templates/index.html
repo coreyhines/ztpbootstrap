@@ -514,6 +514,8 @@
                                 <input type="password"
                                     id="changePasswordCurrent"
                                     x-model="changePasswordCurrent"
+                                    autocomplete="current-password"
+                                    @keyup.escape="showChangePasswordModal = false; changePasswordCurrent = ''; changePasswordNew = ''; changePasswordConfirm = ''; changePasswordError = ''"
                                     class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     placeholder="Enter current password"
                                     :disabled="changePasswordLoading"
@@ -526,6 +528,8 @@
                                 <input type="password"
                                     id="changePasswordNew"
                                     x-model="changePasswordNew"
+                                    autocomplete="new-password"
+                                    @keyup.escape="showChangePasswordModal = false; changePasswordCurrent = ''; changePasswordNew = ''; changePasswordConfirm = ''; changePasswordError = ''"
                                     class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     placeholder="Enter new password (min 8 characters)"
                                     :disabled="changePasswordLoading"
@@ -538,6 +542,8 @@
                                 <input type="password"
                                     id="changePasswordConfirm"
                                     x-model="changePasswordConfirm"
+                                    autocomplete="new-password"
+                                    @keyup.escape="showChangePasswordModal = false; changePasswordCurrent = ''; changePasswordNew = ''; changePasswordConfirm = ''; changePasswordError = ''"
                                     class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     placeholder="Confirm new password"
                                     :disabled="changePasswordLoading"
@@ -608,6 +614,7 @@
                             id="loginPassword"
                             x-model="loginPassword"
                             x-ref="passwordInput"
+                            autocomplete="current-password"
                             @keyup.escape="showLoginModal = false; loginPassword = ''; loginError = ''"
                             class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                             placeholder="Enter admin password"
@@ -675,6 +682,7 @@
                 // Authentication state
                 authenticated: false,
                 authExpiresAt: null,
+                csrfToken: null,
                 showLoginModal: false,
                 loginPassword: '',
                 loginError: '',
@@ -686,6 +694,15 @@
                 changePasswordConfirm: '',
                 changePasswordError: '',
                 changePasswordLoading: false,
+                // Loading states for async operations
+                loadingStates: {
+                    scripts: false,
+                    backups: false,
+                    config: false,
+                    logs: false,
+                    deviceConnections: false,
+                    status: false
+                },
                 
                 async init() {
                     // Ensure modal is hidden on initial load
@@ -744,9 +761,11 @@
                         const data = await response.json();
                         this.authenticated = data.authenticated || false;
                         this.authExpiresAt = data.expires_at || null;
+                        this.csrfToken = data.csrf_token || null;
                     } catch (error) {
                         console.error('Failed to check auth status:', error);
                         this.authenticated = false;
+                        this.csrfToken = null;
                     }
                 },
                 
@@ -770,6 +789,7 @@
                             // Update authentication state first
                             this.authenticated = true;
                             this.authExpiresAt = data.expires_at;
+                            this.csrfToken = data.csrf_token || null;
                             console.log('Login successful, authenticated:', this.authenticated);
                             
                             // Store pending action before clearing modal
@@ -852,12 +872,11 @@
                     try {
                         const response = await fetch('/api/auth/change-password', {
                             method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
+                            headers: this.getCsrfHeaders(),
                             body: JSON.stringify({
                                 current_password: this.changePasswordCurrent,
-                                new_password: this.changePasswordNew
+                                new_password: this.changePasswordNew,
+                                csrf_token: this.csrfToken
                             }),
                             credentials: 'same-origin'
                         });
@@ -916,6 +935,7 @@
                 },
                 
                 async loadStatus() {
+                    this.loadingStates.status = true;
                     try {
                         const response = await fetch('/api/status');
                         if (!response.ok) {
@@ -932,10 +952,13 @@
                         console.log('Status object after update:', this.status);
                     } catch (error) {
                         console.error('Failed to load status:', error);
+                    } finally {
+                        this.loadingStates.status = false;
                     }
                 },
                 
                 async loadScripts() {
+                    this.loadingStates.scripts = true;
                     try {
                         const response = await fetch('/api/bootstrap-scripts');
                         if (!response.ok) {
@@ -951,10 +974,13 @@
                     } catch (error) {
                         console.error('Failed to load scripts:', error);
                         this.scripts = [];
+                    } finally {
+                        this.loadingStates.scripts = false;
                     }
                 },
                 
                 async loadBackups() {
+                    this.loadingStates.backups = true;
                     try {
                         const response = await fetch('/api/bootstrap-scripts/backups');
                         if (!response.ok) {
@@ -967,6 +993,8 @@
                     } catch (error) {
                         console.error('Failed to load backups:', error);
                         this.backups = [];
+                    } finally {
+                        this.loadingStates.backups = false;
                     }
                 },
                 
@@ -1008,8 +1036,13 @@
                     formData.append('file', file);
                     
                     try {
+                        const headers = {};
+                        if (this.csrfToken) {
+                            headers['X-CSRF-Token'] = this.csrfToken;
+                        }
                         const response = await fetch('/api/bootstrap-script/upload', {
                             method: 'POST',
+                            headers: headers,
                             body: formData,
                             credentials: 'same-origin'
                         });
@@ -1038,6 +1071,7 @@
                         try {
                             const response = await fetch(`/api/bootstrap-script/${filename}/set-active`, {
                                 method: 'POST',
+                                headers: this.getCsrfHeaders(),
                                 credentials: 'same-origin'
                             });
                             const data = await response.json();
@@ -1078,11 +1112,10 @@
                         try {
                             const response = await fetch(`/api/bootstrap-script/${filename}/rename`, {
                                 method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                },
+                                headers: this.getCsrfHeaders(),
                                 body: JSON.stringify({
-                                    new_name: newName
+                                    new_name: newName,
+                                    csrf_token: this.csrfToken
                                 }),
                                 credentials: 'same-origin'
                             });
@@ -1117,8 +1150,13 @@
                         }
                         
                         try {
+                            const headers = {};
+                            if (this.csrfToken) {
+                                headers['X-CSRF-Token'] = this.csrfToken;
+                            }
                             const response = await fetch(`/api/bootstrap-script/${filename}`, {
                                 method: 'DELETE',
+                                headers: headers,
                                 credentials: 'same-origin'
                             });
                             const data = await response.json();
@@ -1150,11 +1188,10 @@
                         try {
                             const response = await fetch(`/api/bootstrap-script/${filename}/serve-as-filename`, {
                                 method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                },
+                                headers: this.getCsrfHeaders(),
                                 body: JSON.stringify({
-                                    serve_as_filename: serveAsFilename
+                                    serve_as_filename: serveAsFilename,
+                                    csrf_token: this.csrfToken
                                 }),
                                 credentials: 'same-origin'
                             });
@@ -1207,11 +1244,10 @@
                     try {
                         const response = await fetch(`/api/bootstrap-script/backup/${filename}/restore`, {
                             method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
+                            headers: this.getCsrfHeaders(),
                             body: JSON.stringify({
-                                restore_as: restoreAs
+                                restore_as: restoreAs,
+                                csrf_token: this.csrfToken
                             }),
                             credentials: 'same-origin'
                         });
@@ -1245,12 +1281,14 @@
                 },
                 
                 async loadConfig() {
+                    this.loadingStates.config = true;
                     // User should already be authenticated (tab only opens after auth)
                     // But double-check to be safe
                     await this.checkAuthStatus();
                     if (!this.authenticated) {
                         this.activeTab = 'scripts'; // Switch away from config tab
                         this.showLoginModal = true;
+                        this.loadingStates.config = false;
                         return;
                     }
                     
@@ -1284,6 +1322,8 @@
                         });
                     } catch (error) {
                         console.error('Failed to load config:', error);
+                    } finally {
+                        this.loadingStates.config = false;
                     }
                 },
                 
@@ -1335,6 +1375,7 @@
                 },
                 
                 async loadLogs() {
+                    this.loadingStates.logs = true;
                     try {
                         const response = await fetch(`/api/logs?source=${this.logSource}&lines=${this.logLines}`);
                         const data = await response.json();
@@ -1363,10 +1404,13 @@
                     } catch (error) {
                         console.error('Failed to load logs:', error);
                         this.logs = 'Failed to load logs';
+                    } finally {
+                        this.loadingStates.logs = false;
                     }
                 },
                 
                 async loadDeviceConnections() {
+                    this.loadingStates.deviceConnections = true;
                     try {
                         const response = await fetch('/api/device-connections');
                         if (!response.ok) {
@@ -1382,7 +1426,20 @@
                     } catch (error) {
                         console.error('Failed to load device connections:', error);
                         this.devices = [];
+                    } finally {
+                        this.loadingStates.deviceConnections = false;
                     }
+                },
+                
+                // Helper function to get CSRF headers for write operations
+                getCsrfHeaders() {
+                    const headers = {
+                        'Content-Type': 'application/json'
+                    };
+                    if (this.csrfToken) {
+                        headers['X-CSRF-Token'] = this.csrfToken;
+                    }
+                    return headers;
                 },
                 
                 async viewScript(filename) {
@@ -1448,8 +1505,13 @@
                         const source = this.logSource === 'container' ? 'both' : this.logSource;
                         console.log('Marking logs for source:', source);
                         
+                        const headers = {};
+                        if (this.csrfToken) {
+                            headers['X-CSRF-Token'] = this.csrfToken;
+                        }
                         const response = await fetch(`/api/logs/mark?source=${source}`, {
                             method: 'POST',
+                            headers: headers,
                             credentials: 'same-origin'
                         });
                         

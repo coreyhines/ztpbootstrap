@@ -101,7 +101,14 @@ def clean_old_attempts():
         del login_attempts[ip]
 
 def is_rate_limited(ip):
-    """Check if IP is rate limited"""
+    """
+    Check if IP is rate limited
+
+    Rate limiting rules:
+    - Maximum 5 failed attempts per 15 minutes
+    - Lockout duration: 15 minutes from first failed attempt
+    - Successful login resets the counter
+    """
     clean_old_attempts()
     if ip in login_attempts:
         data = login_attempts[ip]
@@ -140,12 +147,43 @@ def is_authenticated():
             return False
     return True
 
+def generate_csrf_token():
+    """Generate a CSRF token for the current session"""
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    return session["csrf_token"]
+
+
+def validate_csrf_token(token):
+    """Validate a CSRF token"""
+    if "csrf_token" not in session:
+        return False
+    return secrets.compare_digest(session["csrf_token"], token)
+
+
 def require_auth(f):
     """Decorator to require authentication for write endpoints"""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if not is_authenticated():
             return jsonify({'error': 'Authentication required', 'code': 'AUTH_REQUIRED'}), 401
+
+        # CSRF protection for write operations (POST, PUT, DELETE, PATCH)
+        if request.method in ["POST", "PUT", "DELETE", "PATCH"]:
+            # Get CSRF token from header or JSON body
+            csrf_token = (
+                request.headers.get("X-CSRF-Token")
+                or request.get_json(silent=True, force=True)
+                or {}
+            )
+            if isinstance(csrf_token, dict):
+                csrf_token = csrf_token.get("csrf_token")
+
+            if not csrf_token or not validate_csrf_token(csrf_token):
+                return jsonify(
+                    {"error": "Invalid or missing CSRF token", "code": "CSRF_ERROR"}
+                ), 403
+
         return f(*args, **kwargs)
     return decorated_function
 
@@ -157,14 +195,16 @@ def require_auth(f):
 def auth_status():
     """Get current authentication status"""
     if is_authenticated():
-        return jsonify({
-            'authenticated': True,
-            'expires_at': session.get('expires_at')
-        })
-    return jsonify({
-        'authenticated': False,
-        'expires_at': None
-    })
+        # Generate CSRF token if not exists
+        csrf_token = generate_csrf_token()
+        return jsonify(
+            {
+                "authenticated": True,
+                "expires_at": session.get("expires_at"),
+                "csrf_token": csrf_token,
+            }
+        )
+    return jsonify({"authenticated": False, "expires_at": None, "csrf_token": None})
 
 @app.route('/api/auth/login', methods=['POST'])
 def auth_login():
@@ -175,6 +215,19 @@ def auth_login():
         
         # Check rate limiting
         if is_rate_limited(client_ip):
+            # Calculate remaining lockout time
+            if client_ip in login_attempts:
+                remaining_time = int(
+                    login_attempts[client_ip]["reset_time"] - time.time()
+                )
+                remaining_minutes = max(0, remaining_time // 60)
+                return jsonify(
+                    {
+                        "error": f"Too many login attempts. Please try again in {remaining_minutes} minute(s).",
+                        "code": "RATE_LIMITED",
+                        "remaining_time": remaining_time,
+                    }
+                ), 429
             return jsonify({
                 'error': 'Too many login attempts. Please try again later.',
                 'code': 'RATE_LIMITED'
@@ -235,11 +288,17 @@ def auth_login():
             session['login_time'] = time.time()
             session['expires_at'] = time.time() + AUTH_CONFIG['session_timeout']
             session.permanent = True
-            
-            return jsonify({
-                'success': True,
-                'expires_at': session['expires_at']
-            })
+
+            # Generate CSRF token for the session
+            csrf_token = generate_csrf_token()
+
+            return jsonify(
+                {
+                    "success": True,
+                    "expires_at": session["expires_at"],
+                    "csrf_token": csrf_token,
+                }
+            )
         else:
             # Failed login
             record_login_attempt(client_ip, False)
