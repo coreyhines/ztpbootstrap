@@ -9,8 +9,33 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DISTRO="${1:-fedora}"
 VERSION="${2:-43}"
 SKIP_VM_CREATE="${SKIP_VM_CREATE:-false}"
-BACKUP_HOST="${BACKUP_HOST:-fedora1.freeblizz.com}"
-BACKUP_USER="${BACKUP_USER:-corey}"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Prompt for backup host if not set
+if [[ -z "${BACKUP_HOST:-}" ]]; then
+    echo -e "${CYAN}[?]${NC} Enter backup host (e.g., fedora1.freeblizz.com): "
+    read -r BACKUP_HOST
+    if [[ -z "$BACKUP_HOST" ]]; then
+        echo -e "${RED}[ERROR]${NC} Backup host is required"
+        exit 1
+    fi
+fi
+
+# Prompt for backup user if not set
+if [[ -z "${BACKUP_USER:-}" ]]; then
+    echo -e "${CYAN}[?]${NC} Enter backup user (e.g., corey) [${CYAN}${USER:-$(whoami)}${NC}]: "
+    read -r BACKUP_USER
+    if [[ -z "$BACKUP_USER" ]]; then
+        BACKUP_USER="${USER:-$(whoami)}"
+    fi
+fi
 
 # Check for --skip-vm flag
 if [[ "${1:-}" == "--skip-vm" ]] || [[ "${2:-}" == "--skip-vm" ]] || [[ "${3:-}" == "--skip-vm" ]]; then
@@ -37,12 +62,15 @@ else
     DEFAULT_USER="$CURRENT_USER"
 fi
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Colors (if not already defined)
+if [[ -z "${RED:-}" ]]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    NC='\033[0m'
+fi
 
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
