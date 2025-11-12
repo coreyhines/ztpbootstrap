@@ -511,14 +511,15 @@ stop_services_gracefully() {
     elif [[ "$service_type" == "pod-based" ]]; then
         # New version: stop containers first, then pod
         log "Stopping pod-based services..."
+        local pod_service_name="ztpbootstrap-pod.service"
         if [[ $EUID -eq 0 ]]; then
             systemctl stop ztpbootstrap-nginx.service ztpbootstrap-webui.service 2>/dev/null || true
             sleep 1
-            systemctl stop ztpbootstrap.service 2>/dev/null || warn "Failed to stop ztpbootstrap.service"
+            systemctl stop "$pod_service_name" 2>/dev/null || warn "Failed to stop $pod_service_name"
         else
             sudo systemctl stop ztpbootstrap-nginx.service ztpbootstrap-webui.service 2>/dev/null || true
             sleep 1
-            sudo systemctl stop ztpbootstrap.service 2>/dev/null || warn "Failed to stop ztpbootstrap.service"
+            sudo systemctl stop "$pod_service_name" 2>/dev/null || warn "Failed to stop $pod_service_name"
         fi
         sleep 2
     fi
