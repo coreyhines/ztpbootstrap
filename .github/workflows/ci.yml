@@ -171,13 +171,19 @@ jobs:
       run: |
         sudo mkdir -p /opt/containerdata/ztpbootstrap
         sudo mkdir -p /opt/containerdata/certs/wild
+        sudo mkdir -p /opt/containerdata/ztpbootstrap/systemd
         sudo cp bootstrap.py /opt/containerdata/ztpbootstrap/
         sudo cp nginx.conf /opt/containerdata/ztpbootstrap/
         sudo cp setup.sh /opt/containerdata/ztpbootstrap/
+        sudo cp setup-interactive.sh /opt/containerdata/ztpbootstrap/
+        sudo cp update-config.sh /opt/containerdata/ztpbootstrap/
         sudo cp test-service.sh /opt/containerdata/ztpbootstrap/
         sudo cp integration-test.sh /opt/containerdata/ztpbootstrap/
         sudo cp ci-test.sh /opt/containerdata/ztpbootstrap/
         sudo cp README.md /opt/containerdata/ztpbootstrap/
+        sudo cp config.yaml.template /opt/containerdata/ztpbootstrap/
+        sudo cp systemd/*.pod /opt/containerdata/ztpbootstrap/systemd/ 2>/dev/null || true
+        sudo cp systemd/*.container /opt/containerdata/ztpbootstrap/systemd/ 2>/dev/null || true
     
     - name: Run CI validation tests
       run: |
