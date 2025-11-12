@@ -167,7 +167,8 @@ def reload_auth_config():
     """Reload authentication configuration from config.yaml"""
     global AUTH_CONFIG
     AUTH_CONFIG = load_auth_config()
-    print(f"Auth config reloaded - Hash present: {AUTH_CONFIG['admin_password_hash'] is not None}, Hash length: {len(AUTH_CONFIG['admin_password_hash']) if AUTH_CONFIG['admin_password_hash'] else 0}")
+    hash_str = str(AUTH_CONFIG['admin_password_hash']) if AUTH_CONFIG['admin_password_hash'] else 'None'
+    print(f"[AUTH] Config reloaded - Hash present: {AUTH_CONFIG['admin_password_hash'] is not None}, Hash length: {len(hash_str)}, Hash preview: {hash_str[:50] if hash_str != 'None' else 'None'}", flush=True)
 
 # Configure Flask session
 app.secret_key = AUTH_CONFIG['session_secret']
@@ -346,7 +347,7 @@ def auth_login():
         password_valid = False
         
         # Debug logging (remove in production if needed)
-        print(f"Login attempt - Password length: {len(password)}, Hash length: {len(password_hash) if password_hash else 0}, Hash preview: {password_hash[:30] if password_hash else 'None'}...")
+        print(f"[AUTH] Login attempt - Password length: {len(password)}, Hash length: {len(password_hash) if password_hash else 0}, Hash preview: {password_hash[:50] if password_hash else 'None'}...", flush=True)
         
         # Check if this is the fallback format from setup-interactive.sh
         # Format: pbkdf2:sha256:<base64_hash> (no $ separator)
@@ -363,17 +364,17 @@ def auth_login():
                 # Generate hash with same parameters (salt='ztpbootstrap', iterations=100000)
                 computed_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)
                 password_valid = (stored_hash == computed_hash)
-                print(f"Fallback format verification: {password_valid} (stored_len={len(stored_hash)}, computed_len={len(computed_hash)})")
+                print(f"[AUTH] Fallback format verification: {password_valid} (stored_len={len(stored_hash)}, computed_len={len(computed_hash)}, hash_match={stored_hash == computed_hash})", flush=True)
             except Exception as e:
-                print(f"Fallback format verification error: {type(e).__name__}: {e}")
+                print(f"[AUTH] Fallback format verification error: {type(e).__name__}: {e}", flush=True)
                 password_valid = False
         else:
             # Use Werkzeug's standard format
             try:
                 password_valid = check_password_hash(password_hash, password)
-                print(f"Werkzeug format verification: {password_valid}")
+                print(f"[AUTH] Werkzeug format verification: {password_valid}", flush=True)
             except (ValueError, TypeError) as e:
-                print(f"Werkzeug format verification error: {type(e).__name__}: {e}")
+                print(f"[AUTH] Werkzeug format verification error: {type(e).__name__}: {e}", flush=True)
                 password_valid = False
         
         if password_valid:
@@ -404,7 +405,9 @@ def auth_login():
                 'code': 'INVALID_PASSWORD'
             }), 401
     except Exception as e:
-        print(f"Login error: {e}")
+        import traceback
+        print(f"[AUTH] Login error: {e}", flush=True)
+        print(f"[AUTH] Traceback: {traceback.format_exc()}", flush=True)
         return jsonify({
             'error': 'Login failed',
             'code': 'LOGIN_ERROR'
