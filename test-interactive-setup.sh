@@ -334,6 +334,7 @@ log_step "Step 5: Preparing repository in VM"
 log_info "Cloning repository to ${DEFAULT_USER}'s home directory..."
 ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p 2222 "${DEFAULT_USER}@localhost" << 'PREP_EOF'
 set -e
+set +u  # Allow unbound variables in remote script
 # Ensure we're in the correct user's home directory
 cd ~
 CURRENT_USER=$(whoami)
