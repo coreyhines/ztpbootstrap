@@ -364,8 +364,9 @@ def index():
     return render_template('index.html')
 
 @app.route('/api/config')
+@require_auth
 def get_config():
-    """Get current configuration"""
+    """Get current configuration (requires authentication due to sensitive data)"""
     try:
         if CONFIG_FILE.exists():
             raw_content = CONFIG_FILE.read_text()

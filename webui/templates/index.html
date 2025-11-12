@@ -1234,9 +1234,35 @@
                     }
                 },
                 
+                async triggerConfigTab() {
+                    // Require authentication BEFORE showing configuration tab
+                    await this.requireAuth(async () => {
+                        this.activeTab = 'config';
+                        // Load config after switching to tab
+                        await this.loadConfig();
+                    });
+                },
+                
                 async loadConfig() {
+                    // User should already be authenticated (tab only opens after auth)
+                    // But double-check to be safe
+                    await this.checkAuthStatus();
+                    if (!this.authenticated) {
+                        this.activeTab = 'scripts'; // Switch away from config tab
+                        this.showLoginModal = true;
+                        return;
+                    }
+                    
                     try {
-                        const response = await fetch('/api/config');
+                        const response = await fetch('/api/config', {
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.activeTab = 'scripts'; // Switch away from config tab
+                            this.showLoginModal = true;
+                            return;
+                        }
                         if (!response.ok) {
                             console.error('Config API returned:', response.status, response.statusText);
                             this.config = {};
