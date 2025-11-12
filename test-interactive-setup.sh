@@ -104,14 +104,14 @@ echo "  --skip-vm    Skip VM creation, assume VM is already running"
 echo "               Use this if you have a VM already set up"
 echo ""
 
-# Step 1: Get backup from fedora1
+# Step 1: Get backup from backup host
 log_step "Step 1: Retrieving backup from ${BACKUP_HOST}"
-BACKUP_FILE=$(ssh "${BACKUP_USER}@${BACKUP_HOST}" "ls -t ~corey/ztpbootstrap-backup-*.tar.gz 2>/dev/null | head -1" 2>/dev/null || echo "")
+BACKUP_FILE=$(ssh "${BACKUP_USER}@${BACKUP_HOST}" "ls -t ~${BACKUP_USER}/ztpbootstrap-backup-*.tar.gz 2>/dev/null | head -1" 2>/dev/null || echo "")
 
 if [[ -z "$BACKUP_FILE" ]]; then
     log_error "No backup found on ${BACKUP_HOST}"
     log_info "Please create a backup first:"
-    echo "  ssh ${BACKUP_USER}@${BACKUP_HOST} 'sudo bash -c \"BACKUP_DIR=\"/tmp/ztpbootstrap-backup-\$(date +%Y%m%d_%H%M%S)\"; mkdir -p \"\$BACKUP_DIR\"; cp -r /opt/containerdata/ztpbootstrap \"\$BACKUP_DIR/containerdata_ztpbootstrap\" && cp -r /etc/containers/systemd/ztpbootstrap \"\$BACKUP_DIR/etc_containers_systemd_ztpbootstrap\" && cp -r /opt/containerdata/certs/wild \"\$BACKUP_DIR/certs_wild\" && cd /tmp && tar -czf ~corey/ztpbootstrap-backup-\$(date +%Y%m%d_%H%M%S).tar.gz -C \"\$BACKUP_DIR\" . && rm -rf \"\$BACKUP_DIR\" && echo \"Backup: ~corey/ztpbootstrap-backup-\$(date +%Y%m%d_%H%M%S).tar.gz\"'"
+    echo "  ssh ${BACKUP_USER}@${BACKUP_HOST} 'sudo bash -c \"BACKUP_DIR=\"/tmp/ztpbootstrap-backup-\$(date +%Y%m%d_%H%M%S)\"; mkdir -p \"\$BACKUP_DIR\"; cp -r /opt/containerdata/ztpbootstrap \"\$BACKUP_DIR/containerdata_ztpbootstrap\" && cp -r /etc/containers/systemd/ztpbootstrap \"\$BACKUP_DIR/etc_containers_systemd_ztpbootstrap\" && cp -r /opt/containerdata/certs/wild \"\$BACKUP_DIR/certs_wild\" && cd /tmp && tar -czf ~${BACKUP_USER}/ztpbootstrap-backup-\$(date +%Y%m%d_%H%M%S).tar.gz -C \"\$BACKUP_DIR\" . && rm -rf \"\$BACKUP_DIR\" && echo \"Backup: ~${BACKUP_USER}/ztpbootstrap-backup-\$(date +%Y%m%d_%H%M%S).tar.gz\"'"
     exit 1
 fi
 
