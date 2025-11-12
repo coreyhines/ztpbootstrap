@@ -336,9 +336,12 @@ def auth_login():
         password_hash = AUTH_CONFIG['admin_password_hash']
         password_valid = False
         
+        # Debug logging (remove in production if needed)
+        print(f"Login attempt - Password length: {len(password)}, Hash length: {len(password_hash) if password_hash else 0}, Hash preview: {password_hash[:30] if password_hash else 'None'}...")
+        
         # Check if this is the fallback format from setup-interactive.sh
         # Format: pbkdf2:sha256:<base64_hash> (no $ separator)
-        if password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
+        if password_hash and password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
             # Use fallback format verification
             # CodeQL: password_hash comes from config file (trusted source), not user input
             import hashlib
@@ -351,13 +354,17 @@ def auth_login():
                 # Generate hash with same parameters (salt='ztpbootstrap', iterations=100000)
                 computed_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)
                 password_valid = (stored_hash == computed_hash)
-            except Exception:
+                print(f"Fallback format verification: {password_valid} (stored_len={len(stored_hash)}, computed_len={len(computed_hash)})")
+            except Exception as e:
+                print(f"Fallback format verification error: {type(e).__name__}: {e}")
                 password_valid = False
         else:
             # Use Werkzeug's standard format
             try:
                 password_valid = check_password_hash(password_hash, password)
-            except (ValueError, TypeError):
+                print(f"Werkzeug format verification: {password_valid}")
+            except (ValueError, TypeError) as e:
+                print(f"Werkzeug format verification error: {type(e).__name__}: {e}")
                 password_valid = False
         
         if password_valid:
