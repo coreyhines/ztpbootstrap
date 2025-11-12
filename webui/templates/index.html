@@ -207,10 +207,11 @@
                         class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium transition-colors">
                     Restore Backup
                 </button>
-                <label class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm font-medium transition-colors cursor-pointer">
-                    <input type="file" x-on:change="uploadScript($event)" x-ref="fileInput" accept=".py" class="hidden">
+                <button @click="triggerFileUpload()" 
+                        class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm font-medium transition-colors cursor-pointer">
                     Upload Script
-                </label>
+                </button>
+                <input type="file" x-on:change="uploadScript($event)" x-ref="fileInput" accept=".py" class="hidden">
             </div>
                     </div>
                     
@@ -558,17 +559,8 @@
                     // Ensure modal is hidden on initial load
                     this.showLoginModal = false;
                     
-                    // Ensure file input change handler is bound
-                    await this.$nextTick();
-                    const fileInput = this.$refs.fileInput;
-                    if (fileInput) {
-                        console.log('File input found, ensuring change handler is bound');
-                        // The x-on:change directive should handle this, but let's verify
-                        fileInput.addEventListener('change', (e) => {
-                            console.log('Native change event fired on file input');
-                            this.uploadScript(e);
-                        });
-                    }
+                    // File input change handler is bound via x-on:change directive
+                    // No need for explicit addEventListener since we authenticate before opening file picker
                     
                     // Load theme preference
                     const savedTheme = localStorage.getItem('ztpbootstrap-theme');
