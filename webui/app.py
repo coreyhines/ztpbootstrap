@@ -483,7 +483,16 @@ def auth_change_password():
             }), 401
         
         # Generate new password hash
-        new_password_hash = generate_password_hash(new_password)
+        # Try werkzeug first, fall back to hashlib if not available
+        try:
+            new_password_hash = generate_password_hash(new_password)
+        except (ImportError, NameError):
+            # Fallback to hashlib format (same as setup script)
+            import hashlib
+            import base64
+            hash_bytes = hashlib.pbkdf2_hmac('sha256', new_password.encode('utf-8'), b'ztpbootstrap', 100000)
+            hash_b64 = base64.b64encode(hash_bytes).decode('utf-8')
+            new_password_hash = f'pbkdf2:sha256:{hash_b64}'
         
         # Update config.yaml
         if CONFIG_FILE.exists():
