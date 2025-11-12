@@ -347,7 +347,12 @@ def auth_login():
         password_valid = False
         
         # Debug logging (remove in production if needed)
-        print(f"[AUTH] Login attempt - Password length: {len(password)}, Hash length: {len(password_hash) if password_hash else 0}, Hash preview: {password_hash[:50] if password_hash else 'None'}...", flush=True)
+        print(f"[AUTH] Login attempt - Password: '{password}' (length: {len(password)})", flush=True)
+        print(f"[AUTH] Hash from config: '{password_hash}' (length: {len(password_hash) if password_hash else 0}, type: {type(password_hash).__name__})", flush=True)
+        if password_hash:
+            print(f"[AUTH] Hash starts with 'pbkdf2:sha256:': {password_hash.startswith('pbkdf2:sha256:')}", flush=True)
+            print(f"[AUTH] Hash contains '$': {'$' in password_hash}", flush=True)
+            print(f"[AUTH] Hash full value: {repr(password_hash)}", flush=True)
         
         # Check if this is the fallback format from setup-interactive.sh
         # Format: pbkdf2:sha256:<base64_hash> (no $ separator)
@@ -359,14 +364,20 @@ def auth_login():
             try:
                 # Extract the base64 hash
                 hash_part = password_hash.split(':', 2)[2]
+                print(f"[AUTH] Extracted hash part: '{hash_part}' (length: {len(hash_part)})", flush=True)
                 # Decode the base64 hash
                 stored_hash = base64.b64decode(hash_part)
+                print(f"[AUTH] Decoded stored hash: {len(stored_hash)} bytes, first 10 bytes: {stored_hash[:10].hex()}", flush=True)
                 # Generate hash with same parameters (salt='ztpbootstrap', iterations=100000)
                 computed_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)
+                print(f"[AUTH] Computed hash: {len(computed_hash)} bytes, first 10 bytes: {computed_hash[:10].hex()}", flush=True)
                 password_valid = (stored_hash == computed_hash)
-                print(f"[AUTH] Fallback format verification: {password_valid} (stored_len={len(stored_hash)}, computed_len={len(computed_hash)}, hash_match={stored_hash == computed_hash})", flush=True)
+                print(f"[AUTH] Hash comparison: stored==computed = {stored_hash == computed_hash}", flush=True)
+                print(f"[AUTH] Fallback format verification result: {password_valid}", flush=True)
             except Exception as e:
+                import traceback
                 print(f"[AUTH] Fallback format verification error: {type(e).__name__}: {e}", flush=True)
+                print(f"[AUTH] Traceback: {traceback.format_exc()}", flush=True)
                 password_valid = False
         else:
             # Use Werkzeug's standard format
