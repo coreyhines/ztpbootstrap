@@ -60,6 +60,7 @@ def validate_path_in_directory(file_path, base_directory):
     """
     try:
         # Resolve both paths (this normalizes .. and . components)
+        # lgtm[py/path-injection]
         # CodeQL: file_path is validated before calling this function via safe_path_join()
         # The path is guaranteed to be within base_directory by the caller
         resolved_path = file_path.resolve()
