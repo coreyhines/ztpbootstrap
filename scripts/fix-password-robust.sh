@@ -17,14 +17,17 @@ echo "Password: $PASSWORD"
 echo ""
 
 # Generate hash using Python (same method as webui)
-PASSWORD_HASH=$(printf '%s' "$PASSWORD" | python3 <<'PYTHON_GEN'
+# Use environment variable to pass password safely
+export FIX_PASSWORD="$PASSWORD"
+PASSWORD_HASH=$(python3 <<'PYTHON_GEN'
+import os
 import sys
 import hashlib
 import base64
 
-password = sys.stdin.read().rstrip('\n\r')
+password = os.environ.get('FIX_PASSWORD', '')
 if len(password) == 0:
-    sys.stderr.write("ERROR: Empty password!\n")
+    sys.stderr.write("ERROR: Empty password! Environment variable FIX_PASSWORD not set.\n")
     sys.exit(1)
 
 # Generate hash using exact same method as webui fallback format
