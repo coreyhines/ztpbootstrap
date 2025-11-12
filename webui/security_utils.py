@@ -45,8 +45,11 @@ def validate_path_in_directory(file_path, base_directory):
     """
     Validate that a file path is within the base directory (prevents path traversal).
     
-    This function ensures that the resolved absolute path of file_path is strictly
-    within the resolved absolute path of base_directory, preventing directory traversal attacks.
+    This function ensures that the resolved path of file_path is strictly
+    within the resolved path of base_directory, preventing directory traversal attacks.
+    
+    Uses Path.is_relative_to() (Python 3.9+) or Path.relative_to() (Python <3.9)
+    for reliable path containment checking.
     
     Args:
         file_path: The Path object to validate
@@ -56,25 +59,22 @@ def validate_path_in_directory(file_path, base_directory):
         True if path is safe, False otherwise
     """
     try:
-        # Resolve both paths to absolute paths (this normalizes .. and . components)
-        resolved_path = file_path.resolve().absolute()
-        resolved_base = base_directory.resolve().absolute()
+        # Resolve both paths (this normalizes .. and . components)
+        resolved_path = file_path.resolve()
+        resolved_base = base_directory.resolve()
         
-        # Ensure resolved_base ends with separator for proper comparison
-        base_str = str(resolved_base)
-        if not base_str.endswith(os.sep):
-            base_str += os.sep
-        
-        path_str = str(resolved_path)
-        
-        # Check if resolved path is strictly within base directory
-        # Using os.path.commonpath for additional safety check
-        try:
-            common_path = os.path.commonpath([path_str, base_str])
-            return common_path == base_str.rstrip(os.sep)
-        except ValueError:
-            # Paths are on different drives (Windows) or invalid
-            return False
+        # Use Path.is_relative_to if available (Python 3.9+)
+        # This is the most reliable way to check path containment
+        if hasattr(resolved_path, "is_relative_to"):
+            return resolved_path.is_relative_to(resolved_base)
+        else:
+            # Fallback for Python <3.9: use relative_to() which raises ValueError if not relative
+            try:
+                resolved_path.relative_to(resolved_base)
+                return True
+            except ValueError:
+                # Path is not relative to base directory
+                return False
     except (OSError, ValueError, RuntimeError):
         return False
 
