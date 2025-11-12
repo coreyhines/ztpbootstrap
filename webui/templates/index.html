@@ -695,6 +695,9 @@
                 },
                 
                 async requireAuth(action) {
+                    // Always check auth status first to ensure it's current
+                    await this.checkAuthStatus();
+                    
                     // Double-check authentication status
                     if (!this.authenticated) {
                         // Only show modal if not already showing
