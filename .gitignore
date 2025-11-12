@@ -10,6 +10,9 @@ ztpbootstrap.env
 # Generated files
 bootstrap_configured.py
 
+# Security scan reports (generated, can be recreated)
+security-reports/
+
 # SSL certificates (should never be in git)
 *.pem
 *.key

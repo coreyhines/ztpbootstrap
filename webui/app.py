@@ -18,6 +18,44 @@ from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
+# Import security utilities
+try:
+    from security_utils import (
+        sanitize_filename,
+        validate_path_in_directory,
+        validate_filename_for_api,
+    )
+except ImportError:
+    # Fallback if security_utils not available
+    def sanitize_filename(filename):
+        if not filename or not isinstance(filename, str):
+            return None
+        filename = Path(filename).name.replace("\x00", "")
+        if not re.match(r"^bootstrap[a-zA-Z0-9_.-]*\.py$", filename):
+            return None
+        if any(pattern in filename for pattern in ["..", "/", "\\"]):
+            return None
+        return filename
+
+    def validate_path_in_directory(file_path, base_directory):
+        try:
+            resolved_path = file_path.resolve()
+            resolved_base = base_directory.resolve()
+            return str(resolved_path).startswith(str(resolved_base))
+        except (OSError, ValueError):
+            return False
+
+    def validate_filename_for_api(filename):
+        if (
+            not filename
+            or not isinstance(filename, str)
+            or not filename.endswith(".py")
+        ):
+            return False, None
+        sanitized = sanitize_filename(filename)
+        return (sanitized is not None), sanitized
+
+
 app = Flask(__name__)
 # Enable template auto-reload in production for development/testing
 app.config["TEMPLATES_AUTO_RELOAD"] = True
@@ -603,7 +641,17 @@ def list_bootstrap_scripts():
 def get_bootstrap_script(filename):
     """Get bootstrap script content"""
     try:
-        script_path = CONFIG_DIR / filename
+        # Validate filename to prevent path traversal
+        is_valid, sanitized_filename = validate_filename_for_api(filename)
+        if not is_valid:
+            return jsonify({"error": "Invalid filename"}), 400
+
+        script_path = CONFIG_DIR / sanitized_filename
+
+        # Additional path validation to prevent path traversal
+        if not validate_path_in_directory(script_path, CONFIG_DIR):
+            return jsonify({"error": "Invalid path"}), 400
+
         if not script_path.exists() or not script_path.suffix == '.py':
             return jsonify({'error': 'Script not found'}), 404
         
@@ -619,12 +667,14 @@ def get_bootstrap_script(filename):
             except:
                 is_active = script_path.name == active_path.name
         
-        return jsonify({
-            'name': filename,
-            'content': script_path.read_text(),
-            'path': str(script_path),
-            'active': is_active
-        })
+        return jsonify(
+            {
+                "name": sanitized_filename,
+                "content": script_path.read_text(),
+                "path": str(script_path),
+                "active": is_active,
+            }
+        )
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -633,12 +683,22 @@ def get_bootstrap_script(filename):
 def set_active_script(filename):
     """Set a bootstrap script as active"""
     try:
-        script_path = CONFIG_DIR / filename
+        # Validate filename to prevent path traversal
+        is_valid, sanitized_filename = validate_filename_for_api(filename)
+        if not is_valid:
+            return jsonify({"error": "Invalid filename"}), 400
+
+        script_path = CONFIG_DIR / sanitized_filename
+
+        # Additional path validation
+        if not validate_path_in_directory(script_path, CONFIG_DIR):
+            return jsonify({"error": "Invalid path"}), 400
+
         if not script_path.exists() or not script_path.suffix == '.py':
             return jsonify({'error': 'Script not found'}), 404
         
         # Special case: if setting bootstrap.py as active, ensure it's a regular file
-        if filename == 'bootstrap.py':
+        if sanitized_filename == "bootstrap.py":
             target = BOOTSTRAP_SCRIPT
             
             # If bootstrap.py doesn't exist, we need to find what it should point to
@@ -692,11 +752,13 @@ def set_active_script(filename):
         # Create symlink to the selected script
         target.symlink_to(script_path.name)
         
-        return jsonify({
-            'success': True,
-            'message': f'{filename} is now the active bootstrap script',
-            'active': filename
-        })
+        return jsonify(
+            {
+                "success": True,
+                "message": f"{sanitized_filename} is now the active bootstrap script",
+                "active": sanitized_filename,
+            }
+        )
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -705,7 +767,17 @@ def set_active_script(filename):
 def rename_bootstrap_script(filename):
     """Rename a bootstrap script"""
     try:
-        script_path = CONFIG_DIR / filename
+        # Validate filename to prevent path traversal
+        is_valid, sanitized_filename = validate_filename_for_api(filename)
+        if not is_valid:
+            return jsonify({"error": "Invalid filename"}), 400
+
+        script_path = CONFIG_DIR / sanitized_filename
+
+        # Additional path validation
+        if not validate_path_in_directory(script_path, CONFIG_DIR):
+            return jsonify({"error": "Invalid path"}), 400
+
         if not script_path.exists() or not script_path.suffix == '.py':
             return jsonify({'error': 'Script not found'}), 404
         
@@ -714,14 +786,20 @@ def rename_bootstrap_script(filename):
         
         if not new_name:
             return jsonify({'error': 'New name is required'}), 400
-        
-        # Validate new name
-        if not new_name.endswith('.py'):
-            return jsonify({'error': 'New name must end with .py'}), 400
-        
-        # Ensure it starts with bootstrap
-        if not new_name.startswith('bootstrap'):
-            new_name = f'bootstrap_{new_name}'
+
+        # Sanitize and validate new name
+        sanitized_new_name = sanitize_filename(new_name)
+        if not sanitized_new_name:
+            # If sanitization fails, try to fix it
+            if not new_name.endswith(".py"):
+                return jsonify({"error": "New name must end with .py"}), 400
+            if not new_name.startswith("bootstrap"):
+                new_name = f"bootstrap_{new_name}"
+            sanitized_new_name = sanitize_filename(new_name)
+            if not sanitized_new_name:
+                return jsonify({"error": "Invalid new filename format"}), 400
+
+        new_name = sanitized_new_name
         
         # Check if new name already exists
         new_path = CONFIG_DIR / new_name
@@ -747,16 +825,18 @@ def rename_bootstrap_script(filename):
             
             # Update metadata if it exists
             metadata = load_scripts_metadata()
-            if filename in metadata:
-                metadata[new_name] = metadata.pop(filename)
+            if sanitized_filename in metadata:
+                metadata[new_name] = metadata.pop(sanitized_filename)
                 save_scripts_metadata(metadata)
             
-            return jsonify({
-                'success': True,
-                'message': f'Script renamed from {filename} to {new_name}',
-                'old_name': filename,
-                'new_name': new_name
-            })
+            return jsonify(
+                {
+                    "success": True,
+                    "message": f"Script renamed from {sanitized_filename} to {new_name}",
+                    "old_name": sanitized_filename,
+                    "new_name": new_name,
+                }
+            )
         except OSError as e:
             return jsonify({'error': f'Failed to rename file: {str(e)}'}), 500
     except Exception as e:
@@ -767,12 +847,22 @@ def rename_bootstrap_script(filename):
 def delete_bootstrap_script(filename):
     """Delete a bootstrap script"""
     try:
-        script_path = CONFIG_DIR / filename
+        # Validate filename to prevent path traversal
+        is_valid, sanitized_filename = validate_filename_for_api(filename)
+        if not is_valid:
+            return jsonify({"error": "Invalid filename"}), 400
+
+        script_path = CONFIG_DIR / sanitized_filename
+
+        # Additional path validation
+        if not validate_path_in_directory(script_path, CONFIG_DIR):
+            return jsonify({"error": "Invalid path"}), 400
+
         if not script_path.exists() or not script_path.suffix == '.py':
             return jsonify({'error': 'Script not found'}), 404
         
         # Prevent deleting bootstrap.py if it's the active script (not a symlink)
-        if filename == 'bootstrap.py':
+        if sanitized_filename == "bootstrap.py":
             target = BOOTSTRAP_SCRIPT
             if target.exists() and not target.is_symlink():
                 return jsonify({'error': 'Cannot delete bootstrap.py when it is the active script. Set another script as active first.'}), 400
@@ -850,8 +940,17 @@ def restore_backup_script(filename):
         # Validate filename is a backup
         if not filename.startswith('bootstrap_backup_') or not filename.endswith('.py'):
             return jsonify({'error': 'Invalid backup filename'}), 400
-        
-        backup_path = CONFIG_DIR / filename
+
+        # Sanitize filename to prevent path traversal
+        sanitized_filename = sanitize_filename(filename)
+        if not sanitized_filename:
+            return jsonify({"error": "Invalid backup filename"}), 400
+
+        backup_path = CONFIG_DIR / sanitized_filename
+
+        # Additional path validation
+        if not validate_path_in_directory(backup_path, CONFIG_DIR):
+            return jsonify({"error": "Invalid path"}), 400
         if not backup_path.exists():
             return jsonify({'error': 'Backup not found'}), 404
         
@@ -907,14 +1006,32 @@ def upload_bootstrap_script():
         
         if not file.filename.endswith('.py'):
             return jsonify({'error': 'File must be a Python script (.py)'}), 400
-        
-        # Save file
-        filename = file.filename
-        if not filename.startswith('bootstrap'):
-            filename = f'bootstrap_{filename}'
+
+        # Sanitize and validate filename
+        original_filename = file.filename
+        if not original_filename:
+            return jsonify({"error": "Invalid filename"}), 400
+
+        # Sanitize filename to prevent path traversal
+        filename = sanitize_filename(original_filename)
+        if not filename:
+            # Try to fix common cases
+            if not original_filename.startswith("bootstrap"):
+                original_filename = f"bootstrap_{original_filename}"
+            filename = sanitize_filename(original_filename)
+            if not filename:
+                return jsonify(
+                    {
+                        "error": "Invalid filename format. Must be a valid Python filename starting with bootstrap"
+                    }
+                ), 400
         
         file_path = CONFIG_DIR / filename
-        
+
+        # Additional path validation
+        if not validate_path_in_directory(file_path, CONFIG_DIR):
+            return jsonify({"error": "Invalid file path"}), 400
+
         # Try to save with proper error handling
         try:
             file.save(str(file_path))
