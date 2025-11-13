@@ -4,30 +4,30 @@ Get your Arista ZTP Bootstrap Service up and running quickly.
 
 ## Prerequisites
 
-- **Podman 4.0+** installed (4.9.3+ recommended)
+- **Podman** installed (tested with 4.9.3 on Ubuntu 24.04, 5.6.2 on Fedora 43)
 - **Root/sudo access** for setup
 - **Enrollment token** from CVaaS Device Registration page
 - **SSL certificates** (or use HTTP-only mode for testing)
 
-**Supported Distributions:**
-- **Fedora 40+** (43+ recommended) - RedHat/RPM-based
-- **Ubuntu 24.04+** - Debian/APT-based
+**Tested Distributions:**
+- **Fedora 43** (ARM64) - RedHat/RPM-based, Podman 5.6.2
+- **Ubuntu 24.04** (ARM64) - Debian/APT-based, Podman 4.9.3
 
 ## Installation
 
 ### Step 1: Install Podman
 
-**Fedora 40+ / RHEL / Rocky Linux (RedHat/RPM-based):**
+**Fedora 43 (RedHat/RPM-based):**
 ```bash
 sudo dnf install podman
 ```
 
-**Ubuntu 24.04+ / Debian (Debian/APT-based):**
+**Ubuntu 24.04 (Debian/APT-based):**
 ```bash
 sudo apt update && sudo apt install podman
 ```
 
-**Note:** Ubuntu 24.04 ships with Podman 4.9.3 by default, which is fully supported. Fedora 43+ ships with Podman 5.6.2+. Both versions meet the minimum requirement of Podman 4.0+.
+**Note:** These are tested configurations. Ubuntu 24.04 ships with Podman 4.9.3 by default. Fedora 43 ships with Podman 5.6.2 by default. Other distributions or Podman versions may work but have not been verified.
 
 ### Step 2: Clone Repository
 

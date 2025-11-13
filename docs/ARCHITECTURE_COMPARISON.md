@@ -65,18 +65,16 @@ This document compares the ZTP Bootstrap Service across different architectures 
 **Tested Versions:**
 - ✅ Fedora 43 (ARM64) - Fully tested and working
 
-**Requirements:**
-- Podman 4.0+ (tested with 5.6.2)
-- Systemd with quadlet support (Fedora 37+)
+**Tested Configuration:**
+- Podman 5.6.2 (default in Fedora 43)
+- Systemd with quadlet support
 - SELinux support (can be disabled if needed)
-
-**Recommended Versions:**
-- Fedora 41+ for best compatibility
-- Fedora 37+ minimum (for systemd quadlet support)
 
 **Package Manager:** `dnf` (RPM)
 
-**Status:** ✅ Recommended and tested
+**Status:** ✅ Tested and working
+
+**Note:** Other Fedora versions may work but have not been tested. Fedora 37+ recommended for systemd quadlet support.
 
 ---
 
@@ -85,20 +83,16 @@ This document compares the ZTP Bootstrap Service across different architectures 
 **Tested Versions:**
 - ✅ Ubuntu 24.04 (ARM64) - Fully tested and working
 
-**Requirements:**
-- Podman 4.0+ (tested with 4.9.3, default in Ubuntu 24.04)
+**Tested Configuration:**
+- Podman 4.9.3 (default in Ubuntu 24.04)
 - Systemd with quadlet support
 - AppArmor (default, SELinux optional)
 
-**Recommended Versions:**
-- Ubuntu 24.04+ for best compatibility
-- Ubuntu 22.04+ minimum (may require manual Podman installation)
-
 **Package Manager:** `apt` (DEB)
 
-**Status:** ✅ Recommended and tested
+**Status:** ✅ Tested and working
 
-**Note:** See [docs/UBUNTU_SETUP_NOTES.md](UBUNTU_SETUP_NOTES.md) for Ubuntu-specific setup details.
+**Note:** See [docs/UBUNTU_SETUP_NOTES.md](UBUNTU_SETUP_NOTES.md) for Ubuntu-specific setup details. Other Ubuntu versions may work but have not been tested.
 
 ---
 
@@ -110,12 +104,12 @@ This document compares the ZTP Bootstrap Service across different architectures 
 - openSUSE
 
 **Expected Compatibility:**
-- Should work on any Linux distribution with:
-  - Podman 4.0+
+- May work on other Linux distributions with:
+  - Podman (tested versions: 4.9.3, 5.6.2)
   - Systemd with quadlet support
   - SELinux or AppArmor (optional, can be disabled)
 
-**Status:** ⚠️ Not tested - compatibility assumed based on standard Linux tools
+**Status:** ⚠️ Not tested - compatibility not verified
 
 ---
 

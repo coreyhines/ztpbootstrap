@@ -19,7 +19,7 @@ A containerized service that provides a secure HTTPS endpoint for serving Arista
 
 ## Quick Start
 
-**Prerequisites:** Podman 4.0+ (4.9.3+ recommended), enrollment token from CVaaS, SSL certificates (or HTTP-only mode for testing)
+**Prerequisites:** Podman (tested with 4.9.3 on Ubuntu 24.04, 5.6.2 on Fedora 43), enrollment token from CVaaS, SSL certificates (or HTTP-only mode for testing)
 
 ```bash
 # Clone repository
@@ -298,23 +298,25 @@ curl -k https://ztpboot.example.com/health
 
 ---
 
-## Platform Support
+## Tested Platforms
 
-**Tested Platforms:**
-- **Architecture:** ARM64 (aarch64) - ✅ Fully tested
-- **OS:** 
-  - **Fedora 40+** (43+ recommended) - ✅ Fully tested
+**Tested Configurations:**
+- **Architecture:** ARM64 (aarch64) - ✅ Tested and working
+- **OS:**
+  - **Fedora 43** (ARM64) - ✅ Tested and working
     - RedHat/RPM-based, `dnf` package manager
-    - Podman 5.6.2 tested
-  - **Ubuntu 24.04+** - ✅ Fully tested
+    - Podman 5.6.2 (default in Fedora 43)
+  - **Ubuntu 24.04** (ARM64) - ✅ Tested and working
     - Debian/APT-based, `apt` package manager
-    - Podman 4.9.3 tested (default in Ubuntu 24.04)
-- **Podman:** 4.0+ (4.9.3 tested on Ubuntu 24.04, 5.6.2 tested on Fedora 43) - ✅ Fully tested
-- **Systemd:** Full quadlet support - ✅ Fully tested
+    - Podman 4.9.3 (default in Ubuntu 24.04)
+- **Podman:** Tested with 4.9.3 (Ubuntu 24.04) and 5.6.2 (Fedora 43)
+- **Systemd:** Full quadlet support - ✅ Tested and working
 
-**Choosing Between Distributions:**
-- **Fedora**: Best for SELinux environments, latest Podman versions, cutting-edge features
-- **Ubuntu**: Good for AppArmor environments, enterprise-friendly, LTS support
+**Choosing Between Tested Paths:**
+- **Fedora 43**: RedHat/RPM-based, SELinux environments, Podman 5.6.2
+- **Ubuntu 24.04**: Debian/APT-based, AppArmor environments, Podman 4.9.3, LTS support
+
+**Note:** These are tested configurations. Other distributions or Podman versions may work but have not been verified.
 
 **Notes:**
 - x86_64 not tested on ARM64 macOS (would require emulation). See [docs/ARCHITECTURE_COMPARISON.md](docs/ARCHITECTURE_COMPARISON.md) for details.
