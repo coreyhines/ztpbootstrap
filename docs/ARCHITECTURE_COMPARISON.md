@@ -86,7 +86,7 @@ This document compares the ZTP Bootstrap Service across different architectures 
 - ✅ Ubuntu 24.04 (ARM64) - Fully tested and working
 
 **Requirements:**
-- Podman 4.0+ (tested with 5.6+)
+- Podman 4.0+ (tested with 4.9.3, default in Ubuntu 24.04)
 - Systemd with quadlet support
 - AppArmor (default, SELinux optional)
 

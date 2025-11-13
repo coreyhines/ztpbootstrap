@@ -19,7 +19,7 @@ A containerized service that provides a secure HTTPS endpoint for serving Arista
 
 ## Quick Start
 
-**Prerequisites:** Podman 5.6+, enrollment token from CVaaS, SSL certificates (or HTTP-only mode for testing)
+**Prerequisites:** Podman 4.0+ (4.9.3+ recommended), enrollment token from CVaaS, SSL certificates (or HTTP-only mode for testing)
 
 ```bash
 # Clone repository
@@ -308,8 +308,8 @@ curl -k https://ztpboot.example.com/health
     - Podman 5.6.2 tested
   - **Ubuntu 24.04+** - ✅ Fully tested
     - Debian/APT-based, `apt` package manager
-    - Podman 5.6+ tested
-- **Podman:** 5.6+ (5.6.2 tested) - ✅ Fully tested
+    - Podman 4.9.3 tested (default in Ubuntu 24.04)
+- **Podman:** 4.0+ (4.9.3 tested on Ubuntu 24.04, 5.6.2 tested on Fedora 43) - ✅ Fully tested
 - **Systemd:** Full quadlet support - ✅ Fully tested
 
 **Choosing Between Distributions:**
