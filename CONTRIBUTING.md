@@ -111,7 +111,7 @@ The `vm-create-native.sh` script can download and create VMs for the following d
 | Fedora | 43 | aarch64 | cloud | ✅ Yes | Fully tested, recommended for development |
 | Ubuntu | 24.04 LTS | arm64 (aarch64) | cloud | ✅ Yes | Fully tested, use `--version 24.04` |
 
-**Additional Supported Distributions** (available on both x86_64 and aarch64, supported by `vm-create-native.sh`):
+**Additional Distributions Available for Testing** (available on both x86_64 and aarch64, can be downloaded/created by `vm-create-native.sh`):
 
 | Distribution | Cloud Image Availability | Architecture Support | Script Support | Notes |
 |--------------|--------------------------|----------------------|----------------|-------|
@@ -121,11 +121,12 @@ The `vm-create-native.sh` script can download and create VMs for the following d
 | openSUSE Leap | ✅ Yes | aarch64, x86_64 | ✅ Yes | Stable SUSE release, LTS-like cycle, good for production testing |
 
 **Notes:**
-- **Tested**: Distribution/architecture combination has been verified to work with the ZTP Bootstrap Service
+- **Tested**: Distribution/architecture combination has been verified to work with the ZTP Bootstrap Service. Only Fedora 43 and Ubuntu 24.04 have been tested.
+- **Script Support**: The `vm-create-native.sh` script can download cloud images and create VMs for these distributions. However, they have **not been tested** with the ZTP Bootstrap Service. These are opportunities for contributors to expand testing coverage by following the testing workflow described in this document.
 - **Type**: `cloud` = pre-built disk image (boots directly, cloud-init ready), `iso` = installer image (requires installation)
 - **Architecture**: `aarch64` = ARM64 (native on Apple Silicon), `x86_64` = Intel/AMD (emulated on Apple Silicon)
 - Cloud images are recommended for development/testing as they boot faster and have cloud-init pre-configured
-- To add support for additional distributions, modify `vm-create-native.sh`'s `download_iso()` function
+- To add support for additional distributions in the script, modify `vm-create-native.sh`'s `download_iso()` function
 
 ---
 
