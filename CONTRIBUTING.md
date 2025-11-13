@@ -1,4 +1,4 @@
-# Development Guide
+# Contributing Guide
 
 This document describes the development workflow for testing and iterating on the ZTP Bootstrap Service, particularly for testing the interactive setup script with upgrade scenarios.
 
