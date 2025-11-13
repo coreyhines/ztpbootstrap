@@ -4,15 +4,19 @@ This document tracks known issues, their workarounds, and planned fixes.
 
 ## Important Implementation Notes
 
-### Ubuntu Support
+### Ubuntu Testing Status
 
-**Ubuntu 22.04 (and potentially other Ubuntu versions) has known issues with SSH key deployment via cloud-init in this environment.** 
+**Ubuntu 24.04 (ARM64) has been tested and works correctly.** ✅
 
-The cloud-init `ssh_authorized_keys` mechanism and `write_files + runcmd` approaches both fail to deploy SSH keys correctly, resulting in SSH authentication failures. This appears to be related to how Ubuntu cloud images handle cloud-init user-data processing.
+**Ubuntu 22.04** has known issues with SSH key deployment via cloud-init in VM creation workflows. The cloud-init `ssh_authorized_keys` mechanism and `write_files + runcmd` approaches both fail to deploy SSH keys correctly, resulting in SSH authentication failures. This appears to be related to how Ubuntu 22.04 cloud images handle cloud-init user-data processing.
 
-**Status:** Ubuntu is not fully supported. If you need to use Ubuntu, you may need to manually configure SSH access or work around cloud-init limitations.
+**Tested Configuration:**
+- ✅ Ubuntu 24.04 (ARM64) - Tested with Podman 4.9.3
 
-**Recommended:** Use Fedora 43 or later, which has been fully tested and works correctly.
+**Other Versions:**
+- ⚠️ Ubuntu 22.04 - Not tested; may require manual SSH configuration in VM workflows
+
+**Note:** Ubuntu 24.04 is a tested path. Other Ubuntu versions may work but have not been verified.
 
 ---
 

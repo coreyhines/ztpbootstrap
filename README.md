@@ -19,7 +19,7 @@ A containerized service that provides a secure HTTPS endpoint for serving Arista
 
 ## Quick Start
 
-**Prerequisites:** Podman 5.6+, enrollment token from CVaaS, SSL certificates (or HTTP-only mode for testing)
+**Prerequisites:** Podman (tested with 4.9.3 on Ubuntu 24.04, 5.6.2 on Fedora 43), enrollment token from CVaaS, SSL certificates (or HTTP-only mode for testing)
 
 ```bash
 # Clone repository
@@ -298,19 +298,29 @@ curl -k https://ztpboot.example.com/health
 
 ---
 
-## Platform Support
+## Tested Platforms
 
-**Tested Platforms:**
-- **Architecture:** ARM64 (aarch64) - ✅ Fully tested
-- **OS:** 
-  - Fedora 40+ (43+ recommended) - ✅ Fully tested
-  - Ubuntu 22.04+ (with Podman 5.6+) - ✅ Should work out-of-the-box
-- **Podman:** 5.6+ (5.6.2 tested) - ✅ Fully tested
-- **Systemd:** Full quadlet support - ✅ Fully tested
+**Tested Configurations:**
+- **Architecture:** ARM64 (aarch64) - ✅ Tested and working
+- **OS:**
+  - **Fedora 43** (ARM64) - ✅ Tested and working
+    - RedHat/RPM-based, `dnf` package manager
+    - Podman 5.6.2 (default in Fedora 43)
+  - **Ubuntu 24.04** (ARM64) - ✅ Tested and working
+    - Debian/APT-based, `apt` package manager
+    - Podman 4.9.3 (default in Ubuntu 24.04)
+- **Podman:** Tested with 4.9.3 (Ubuntu 24.04) and 5.6.2 (Fedora 43)
+- **Systemd:** Full quadlet support - ✅ Tested and working
+
+**Choosing Between Tested Paths:**
+- **Fedora 43**: RedHat/RPM-based, SELinux environments, Podman 5.6.2
+- **Ubuntu 24.04**: Debian/APT-based, AppArmor environments, Podman 4.9.3 (Ubuntu 24.04 is an LTS release)
+
+**Note:** These are tested configurations. Only the specific versions listed above have been verified. Other distributions or Podman versions have not been tested.
 
 **Notes:**
 - x86_64 not tested on ARM64 macOS (would require emulation). See [docs/ARCHITECTURE_COMPARISON.md](docs/ARCHITECTURE_COMPARISON.md) for details.
-- Ubuntu may have SSH/cloud-init issues in VM creation workflows. See [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) for details.
+- Ubuntu 22.04 has known SSH/cloud-init issues in VM creation workflows. Only Ubuntu 24.04 with Podman 4.9.3 has been tested. See [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) for details.
 
 **Network Configuration:**
 - **Macvlan network** (recommended for production) - Provides dedicated IP address, isolates containers from host network. Run `./check-macvlan.sh` to verify or create.
