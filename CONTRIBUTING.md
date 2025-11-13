@@ -108,19 +108,9 @@ The `vm-create-native.sh` script can download and create VMs for the following d
 
 | Distribution | Version | Architecture | Type | Tested | Notes |
 |--------------|---------|--------------|------|--------|-------|
-| Fedora | Latest (auto-detected) | aarch64 | cloud | ✅ Yes | Default, recommended for development |
-| Fedora | Latest (auto-detected) | x86_64 | cloud | ⚠️ No | Works but slow on ARM64 hosts (emulation) |
-| Fedora | 41+ | aarch64 | cloud | ✅ Yes | Tested with Fedora 43 |
-| Fedora | 41+ | x86_64 | cloud | ⚠️ No | Not tested on ARM64 hosts |
-| Fedora | 41+ | aarch64 | iso | ⚠️ No | Installer ISO, requires installation |
-| Fedora | 41+ | x86_64 | iso | ⚠️ No | Installer ISO, not tested |
-| Ubuntu | 22.04 LTS | arm64 (aarch64) | cloud | ⚠️ No | Script default, not tested |
+| Fedora | 43 | aarch64 | cloud | ✅ Yes | Fully tested, recommended for development |
+| Fedora | Latest (auto-detected) | aarch64 | cloud | ✅ Yes | Script fetches latest, tested with Fedora 43 |
 | Ubuntu | 24.04 LTS | arm64 (aarch64) | cloud | ✅ Yes | Fully tested, use `--version 24.04` |
-| Ubuntu | 22.04+ | arm64 (aarch64) | iso | ⚠️ No | Installer ISO, requires installation |
-| Ubuntu | 22.04+ | x86_64 | cloud | ⚠️ No | Script supports but not tested |
-| Debian | 11 (bullseye) | arm64 (aarch64) | iso | ⚠️ No | Installer ISO only, use `--version 11` |
-| Debian | 12 (stable) | arm64 (aarch64) | iso | ⚠️ No | Installer ISO only, cloud images not supported by script |
-| Debian | 12 (stable) | x86_64 | iso | ⚠️ No | Installer ISO only, not tested |
 
 **Potential Test Candidates** (not currently supported by script, but offer cloud-init images):
 
