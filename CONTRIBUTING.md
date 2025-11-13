@@ -109,19 +109,16 @@ The `vm-create-native.sh` script can download and create VMs for the following d
 | Distribution | Version | Architecture | Type | Tested | Notes |
 |--------------|---------|--------------|------|--------|-------|
 | Fedora | 43 | aarch64 | cloud | ✅ Yes | Fully tested, recommended for development |
-| Fedora | Latest (auto-detected) | aarch64 | cloud | ✅ Yes | Script fetches latest, tested with Fedora 43 |
 | Ubuntu | 24.04 LTS | arm64 (aarch64) | cloud | ✅ Yes | Fully tested, use `--version 24.04` |
 
-**Potential Test Candidates** (not currently supported by script, but offer cloud-init images):
+**Additional Supported Distributions** (available on both x86_64 and aarch64, supported by `vm-create-native.sh`):
 
-| Distribution | Cloud Image Availability | Architecture Support | Notes |
-|--------------|--------------------------|----------------------|-------|
-| Rocky Linux | ✅ Yes | aarch64, x86_64 | RHEL-compatible, good for enterprise testing |
-| AlmaLinux | ✅ Yes | aarch64, x86_64 | RHEL-compatible alternative |
-| CentOS Stream | ✅ Yes | aarch64, x86_64 | Rolling RHEL preview |
-| openSUSE Leap | ✅ Yes | aarch64, x86_64 | SUSE-based, different package manager |
-| openSUSE Tumbleweed | ✅ Yes | aarch64, x86_64 | Rolling release |
-| Arch Linux | ⚠️ Limited | x86_64 primarily | Minimal cloud images available |
+| Distribution | Cloud Image Availability | Architecture Support | Script Support | Notes |
+|--------------|--------------------------|----------------------|----------------|-------|
+| Rocky Linux | ✅ Yes | aarch64, x86_64 | ✅ Yes | RHEL-compatible, good for enterprise testing |
+| AlmaLinux | ✅ Yes | aarch64, x86_64 | ✅ Yes | RHEL-compatible alternative |
+| CentOS Stream | ✅ Yes | aarch64, x86_64 | ✅ Yes | Rolling RHEL preview |
+| openSUSE Leap | ✅ Yes | aarch64, x86_64 | ✅ Yes | Stable SUSE release, LTS-like cycle, good for production testing |
 
 **Notes:**
 - **Tested**: Distribution/architecture combination has been verified to work with the ZTP Bootstrap Service
