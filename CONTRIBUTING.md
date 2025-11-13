@@ -102,6 +102,44 @@ If you prefer to create the VM manually:
 
 **Note:** The VM creation scripts (`vm-create-native.sh`, `test-interactive-setup.sh`) are in `.gitignore` and are development tools, not part of the standard deployment.
 
+#### Supported Distributions and Architectures
+
+The `vm-create-native.sh` script can download and create VMs for the following distributions:
+
+| Distribution | Version | Architecture | Type | Tested | Notes |
+|--------------|---------|--------------|------|--------|-------|
+| Fedora | Latest (auto-detected) | aarch64 | cloud | ✅ Yes | Default, recommended for development |
+| Fedora | Latest (auto-detected) | x86_64 | cloud | ⚠️ No | Works but slow on ARM64 hosts (emulation) |
+| Fedora | 41+ | aarch64 | cloud | ✅ Yes | Tested with Fedora 43 |
+| Fedora | 41+ | x86_64 | cloud | ⚠️ No | Not tested on ARM64 hosts |
+| Fedora | 41+ | aarch64 | iso | ⚠️ No | Installer ISO, requires installation |
+| Fedora | 41+ | x86_64 | iso | ⚠️ No | Installer ISO, not tested |
+| Ubuntu | 22.04 LTS | arm64 (aarch64) | cloud | ⚠️ No | Script default, not tested |
+| Ubuntu | 24.04 LTS | arm64 (aarch64) | cloud | ✅ Yes | Fully tested, use `--version 24.04` |
+| Ubuntu | 22.04+ | arm64 (aarch64) | iso | ⚠️ No | Installer ISO, requires installation |
+| Ubuntu | 22.04+ | x86_64 | cloud | ⚠️ No | Script supports but not tested |
+| Debian | 11 (bullseye) | arm64 (aarch64) | iso | ⚠️ No | Installer ISO only, use `--version 11` |
+| Debian | 12 (stable) | arm64 (aarch64) | iso | ⚠️ No | Installer ISO only, cloud images not supported by script |
+| Debian | 12 (stable) | x86_64 | iso | ⚠️ No | Installer ISO only, not tested |
+
+**Potential Test Candidates** (not currently supported by script, but offer cloud-init images):
+
+| Distribution | Cloud Image Availability | Architecture Support | Notes |
+|--------------|--------------------------|----------------------|-------|
+| Rocky Linux | ✅ Yes | aarch64, x86_64 | RHEL-compatible, good for enterprise testing |
+| AlmaLinux | ✅ Yes | aarch64, x86_64 | RHEL-compatible alternative |
+| CentOS Stream | ✅ Yes | aarch64, x86_64 | Rolling RHEL preview |
+| openSUSE Leap | ✅ Yes | aarch64, x86_64 | SUSE-based, different package manager |
+| openSUSE Tumbleweed | ✅ Yes | aarch64, x86_64 | Rolling release |
+| Arch Linux | ⚠️ Limited | x86_64 primarily | Minimal cloud images available |
+
+**Notes:**
+- **Tested**: Distribution/architecture combination has been verified to work with the ZTP Bootstrap Service
+- **Type**: `cloud` = pre-built disk image (boots directly, cloud-init ready), `iso` = installer image (requires installation)
+- **Architecture**: `aarch64` = ARM64 (native on Apple Silicon), `x86_64` = Intel/AMD (emulated on Apple Silicon)
+- Cloud images are recommended for development/testing as they boot faster and have cloud-init pre-configured
+- To add support for additional distributions, modify `vm-create-native.sh`'s `download_iso()` function
+
 ---
 
 ### Step 2: Restore Production Backup
