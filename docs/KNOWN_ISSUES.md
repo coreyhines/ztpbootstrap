@@ -6,13 +6,15 @@ This document tracks known issues, their workarounds, and planned fixes.
 
 ### Ubuntu Support
 
-**Ubuntu 22.04 (and potentially other Ubuntu versions) has known issues with SSH key deployment via cloud-init in this environment.** 
+**Ubuntu 24.04+ is fully supported and tested.** ✅
 
-The cloud-init `ssh_authorized_keys` mechanism and `write_files + runcmd` approaches both fail to deploy SSH keys correctly, resulting in SSH authentication failures. This appears to be related to how Ubuntu cloud images handle cloud-init user-data processing.
+**Ubuntu 22.04** has known issues with SSH key deployment via cloud-init in VM creation workflows. The cloud-init `ssh_authorized_keys` mechanism and `write_files + runcmd` approaches both fail to deploy SSH keys correctly, resulting in SSH authentication failures. This appears to be related to how Ubuntu 22.04 cloud images handle cloud-init user-data processing.
 
-**Status:** Ubuntu is not fully supported. If you need to use Ubuntu, you may need to manually configure SSH access or work around cloud-init limitations.
+**Status:** 
+- ✅ Ubuntu 24.04+ - Fully supported and tested
+- ⚠️ Ubuntu 22.04 - May require manual SSH configuration in VM workflows
 
-**Recommended:** Use Fedora 43 or later, which has been fully tested and works correctly.
+**Recommended:** Use Ubuntu 24.04+ or Fedora 43+ for best compatibility.
 
 ---
 

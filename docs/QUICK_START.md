@@ -4,24 +4,30 @@ Get your Arista ZTP Bootstrap Service up and running quickly.
 
 ## Prerequisites
 
-- **Podman** installed
+- **Podman 5.6+** installed
 - **Root/sudo access** for setup
 - **Enrollment token** from CVaaS Device Registration page
 - **SSL certificates** (or use HTTP-only mode for testing)
+
+**Supported Distributions:**
+- **Fedora 40+** (43+ recommended) - RedHat/RPM-based
+- **Ubuntu 24.04+** - Debian/APT-based
 
 ## Installation
 
 ### Step 1: Install Podman
 
-**Fedora / RHEL / Rocky Linux:**
+**Fedora 40+ / RHEL / Rocky Linux (RedHat/RPM-based):**
 ```bash
 sudo dnf install podman
 ```
 
-**Ubuntu / Debian:**
+**Ubuntu 24.04+ / Debian (Debian/APT-based):**
 ```bash
 sudo apt update && sudo apt install podman
 ```
+
+**Note:** Ensure Podman 5.6+ is installed. On Ubuntu 22.04, you may need to install from a PPA or use a newer Ubuntu version.
 
 ### Step 2: Clone Repository
 

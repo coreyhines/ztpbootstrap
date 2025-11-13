@@ -303,14 +303,22 @@ curl -k https://ztpboot.example.com/health
 **Tested Platforms:**
 - **Architecture:** ARM64 (aarch64) - ✅ Fully tested
 - **OS:** 
-  - Fedora 40+ (43+ recommended) - ✅ Fully tested
-  - Ubuntu 22.04+ (with Podman 5.6+) - ✅ Should work out-of-the-box
+  - **Fedora 40+** (43+ recommended) - ✅ Fully tested
+    - RedHat/RPM-based, `dnf` package manager
+    - Podman 5.6.2 tested
+  - **Ubuntu 24.04+** - ✅ Fully tested
+    - Debian/APT-based, `apt` package manager
+    - Podman 5.6+ tested
 - **Podman:** 5.6+ (5.6.2 tested) - ✅ Fully tested
 - **Systemd:** Full quadlet support - ✅ Fully tested
 
+**Choosing Between Distributions:**
+- **Fedora**: Best for SELinux environments, latest Podman versions, cutting-edge features
+- **Ubuntu**: Good for AppArmor environments, enterprise-friendly, LTS support
+
 **Notes:**
 - x86_64 not tested on ARM64 macOS (would require emulation). See [docs/ARCHITECTURE_COMPARISON.md](docs/ARCHITECTURE_COMPARISON.md) for details.
-- Ubuntu may have SSH/cloud-init issues in VM creation workflows. See [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) for details.
+- Ubuntu 22.04 may have SSH/cloud-init issues in VM creation workflows. Ubuntu 24.04+ recommended. See [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) for details.
 
 **Network Configuration:**
 - **Macvlan network** (recommended for production) - Provides dedicated IP address, isolates containers from host network. Run `./check-macvlan.sh` to verify or create.

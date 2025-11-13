@@ -9,6 +9,7 @@ This document compares the ZTP Bootstrap Service across different architectures 
 **Tested On:**
 - macOS (Apple Silicon - M1/M2/M3/M4)
 - Fedora 43 Cloud
+- Ubuntu 24.04 Cloud
 
 **Performance:**
 - ✅ Native performance using Apple Hypervisor Framework (HVF)
@@ -59,7 +60,7 @@ This document compares the ZTP Bootstrap Service across different architectures 
 
 ## Operating System Compatibility
 
-### Fedora
+### Fedora (RedHat/RPM-based)
 
 **Tested Versions:**
 - ✅ Fedora 43 (ARM64) - Fully tested and working
@@ -73,14 +74,37 @@ This document compares the ZTP Bootstrap Service across different architectures 
 - Fedora 41+ for best compatibility
 - Fedora 37+ minimum (for systemd quadlet support)
 
+**Package Manager:** `dnf` (RPM)
+
 **Status:** ✅ Recommended and tested
+
+---
+
+### Ubuntu (Debian/APT-based)
+
+**Tested Versions:**
+- ✅ Ubuntu 24.04 (ARM64) - Fully tested and working
+
+**Requirements:**
+- Podman 4.0+ (tested with 5.6+)
+- Systemd with quadlet support
+- AppArmor (default, SELinux optional)
+
+**Recommended Versions:**
+- Ubuntu 24.04+ for best compatibility
+- Ubuntu 22.04+ minimum (may require manual Podman installation)
+
+**Package Manager:** `apt` (DEB)
+
+**Status:** ✅ Recommended and tested
+
+**Note:** See [docs/UBUNTU_SETUP_NOTES.md](UBUNTU_SETUP_NOTES.md) for Ubuntu-specific setup details.
 
 ---
 
 ### Other Linux Distributions
 
 **Not Tested:**
-- Ubuntu
 - Debian
 - RHEL/Rocky Linux/AlmaLinux
 - openSUSE
@@ -89,7 +113,7 @@ This document compares the ZTP Bootstrap Service across different architectures 
 - Should work on any Linux distribution with:
   - Podman 4.0+
   - Systemd with quadlet support
-  - SELinux (optional, can be disabled)
+  - SELinux or AppArmor (optional, can be disabled)
 
 **Status:** ⚠️ Not tested - compatibility assumed based on standard Linux tools
 
@@ -131,7 +155,9 @@ This document compares the ZTP Bootstrap Service across different architectures 
 2. **For Production:**
    - ✅ Use native architecture for best performance
    - ✅ ARM64 or x86_64 both work correctly
-   - ✅ Use Fedora 41+ for best compatibility
+   - ✅ Use Fedora 41+ or Ubuntu 24.04+ for best compatibility
+   - **RedHat/RPM-based (Fedora)**: Best for SELinux environments, latest Podman versions
+   - **Debian/APT-based (Ubuntu)**: Good for AppArmor environments, enterprise-friendly
 
 3. **For CI/CD:**
    - Test on both architectures if possible
@@ -157,7 +183,7 @@ This document compares the ZTP Bootstrap Service across different architectures 
 ## Testing Status Summary
 
 - ✅ ARM64 (Fedora 43): Fully tested and working
+- ✅ ARM64 (Ubuntu 24.04): Fully tested and working
 - ⚠️ x86_64: Not tested (would require x86_64 host or slow emulation)
 - ✅ Container images: Available for both architectures
 - ✅ Scripts: Architecture-agnostic, work on both
-
