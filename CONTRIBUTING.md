@@ -113,8 +113,6 @@ The `vm-create-native.sh` script can download and create VMs for the following d
 
 #### Candidate Distributions and Architecture
 
-**Available for Testing** (available on both x86_64 and aarch64, can be downloaded/created by `vm-create-native.sh`):
-
 | Distribution | Cloud Image Availability | Architecture Support | Script Support | Notes |
 |--------------|--------------------------|----------------------|----------------|-------|
 | Rocky Linux | ✅ Yes | aarch64, x86_64 | ✅ Yes | RHEL-compatible, good for enterprise testing |
