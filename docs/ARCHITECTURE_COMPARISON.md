@@ -74,7 +74,7 @@ This document compares the ZTP Bootstrap Service across different architectures 
 
 **Status:** ✅ Tested and working
 
-**Note:** Other Fedora versions may work but have not been tested. Fedora 37+ recommended for systemd quadlet support.
+**Note:** Other Fedora versions have not been tested. Only Fedora 43 with Podman 5.6.2 has been verified.
 
 ---
 
@@ -92,7 +92,7 @@ This document compares the ZTP Bootstrap Service across different architectures 
 
 **Status:** ✅ Tested and working
 
-**Note:** See [docs/UBUNTU_SETUP_NOTES.md](UBUNTU_SETUP_NOTES.md) for Ubuntu-specific setup details. Other Ubuntu versions may work but have not been tested.
+**Note:** See [docs/UBUNTU_SETUP_NOTES.md](UBUNTU_SETUP_NOTES.md) for Ubuntu-specific setup details. Only Ubuntu 24.04 with Podman 4.9.3 has been tested.
 
 ---
 
@@ -103,13 +103,12 @@ This document compares the ZTP Bootstrap Service across different architectures 
 - RHEL/Rocky Linux/AlmaLinux
 - openSUSE
 
-**Expected Compatibility:**
-- May work on other Linux distributions with:
-  - Podman (tested versions: 4.9.3, 5.6.2)
-  - Systemd with quadlet support
-  - SELinux or AppArmor (optional, can be disabled)
+**Untested Configurations:**
+- Other Linux distributions have not been tested
+- Other Podman versions have not been tested (we tested 4.9.3 and 5.6.2)
+- Compatibility with other configurations is unknown
 
-**Status:** ⚠️ Not tested - compatibility not verified
+**Status:** ⚠️ Not tested - use at your own risk
 
 ---
 
@@ -167,10 +166,11 @@ This document compares the ZTP Bootstrap Service across different architectures 
    - Not recommended for regular use
    - May not work without Rosetta 2
 
-2. **Older Fedora Versions:**
-   - Fedora 36 and earlier may lack full systemd quadlet support
-   - Podman 3.x may have different behavior
-   - Not tested, compatibility not guaranteed
+2. **Untested Configurations:**
+   - Other Fedora versions (not tested)
+   - Other Podman versions (not tested - we tested 4.9.3 and 5.6.2)
+   - Other Ubuntu versions (not tested)
+   - Compatibility with untested configurations is unknown
 
 ---
 
