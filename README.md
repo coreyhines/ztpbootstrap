@@ -13,7 +13,7 @@ A containerized service that provides a secure HTTPS endpoint for serving Arista
 - **[docs/SECURITY.md](docs/SECURITY.md)** - Security features, authentication, and security testing
 
 **For Developers:**
-- **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)** - Development workflow, VM testing, and upgrade scenarios
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development workflow, VM testing, and upgrade scenarios
 - **[docs/ARCHITECTURE_COMPARISON.md](docs/ARCHITECTURE_COMPARISON.md)** - Detailed architecture and design decisions
 - **[docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md)** - Known issues and implementation notes
 

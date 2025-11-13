@@ -2,16 +2,17 @@
 
 Common issues and solutions for the Arista ZTP Bootstrap Service.
 
-## Table of Contents
+## Quick Navigation
 
-- [Service Won't Start](#service-wont-start)
-- [Container Issues](#container-issues)
-- [Network Connectivity](#network-connectivity)
-- [SSL Certificate Problems](#ssl-certificate-problems)
-- [Bootstrap Script Issues](#bootstrap-script-issues)
-- [Device Enrollment Failures](#device-enrollment-failures)
-- [Configuration Problems](#configuration-problems)
-- [Performance Issues](#performance-issues)
+**Common Issues:**
+- [Service Won't Start](#service-wont-start) - Container/service startup problems
+- [Container Issues](#container-issues) - Container errors and failures
+- [Network Connectivity](#network-connectivity) - Network and firewall issues
+- [SSL Certificate Problems](#ssl-certificate-problems) - Certificate errors and expiration
+- [Bootstrap Script Issues](#bootstrap-script-issues) - Script serving and execution problems
+- [Device Enrollment Failures](#device-enrollment-failures) - CVaaS enrollment issues
+- [Configuration Problems](#configuration-problems) - Configuration errors and validation
+- [Performance Issues](#performance-issues) - Slow response times and resource usage
 
 ## Service Won't Start
 
