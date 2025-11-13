@@ -102,7 +102,7 @@ If you prefer to create the VM manually:
 
 **Note:** The VM creation scripts (`vm-create-native.sh`, `test-interactive-setup.sh`) are in `.gitignore` and are development tools, not part of the standard deployment.
 
-#### Supported Distributions and Architectures
+#### Tested Distributions and Architecture
 
 The `vm-create-native.sh` script can download and create VMs for the following distributions:
 
@@ -111,7 +111,9 @@ The `vm-create-native.sh` script can download and create VMs for the following d
 | Fedora | 43 | aarch64 | cloud | ✅ Yes | Fully tested, recommended for development |
 | Ubuntu | 24.04 LTS | arm64 (aarch64) | cloud | ✅ Yes | Fully tested, use `--version 24.04` |
 
-**Additional Distributions Available for Testing** (available on both x86_64 and aarch64, can be downloaded/created by `vm-create-native.sh`):
+#### Candidate Distributions and Architecture
+
+**Available for Testing** (available on both x86_64 and aarch64, can be downloaded/created by `vm-create-native.sh`):
 
 | Distribution | Cloud Image Availability | Architecture Support | Script Support | Notes |
 |--------------|--------------------------|----------------------|----------------|-------|
