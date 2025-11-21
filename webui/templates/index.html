@@ -407,7 +407,7 @@
                     
                     <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
                         <div x-show="config.error" class="text-red-600" x-text="config.error"></div>
-                        <div x-show="config.raw && !config.error" class="overflow-x-auto overflow-y-auto max-h-96">
+                        <div x-show="config.raw && !config.error" class="overflow-x-auto overflow-y-auto max-h-[600px]">
                             <pre class="language-yaml"><code class="language-yaml" x-text="config.raw" x-ref="yamlCode"></code></pre>
                         </div>
                     </div>
