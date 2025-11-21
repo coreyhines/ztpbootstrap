@@ -6,7 +6,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VM_NAME="${VM_NAME:-ztpbootstrap-test-vm}"
-VM_DISK="${VM_DISK:-ztpbootstrap-test.qcow2}"
+ISO_DIR="${ISO_DIR:-$HOME/Downloads}"
+# VM disk files should always be in Downloads, not repo directory
+VM_DISK="${VM_DISK:-${ISO_DIR}/ztpbootstrap-test.qcow2}"
 VM_DISK_SIZE="${VM_DISK_SIZE:-20G}"
 VM_MEMORY="${VM_MEMORY:-4096}"
 VM_CPUS="${VM_CPUS:-2}"
@@ -15,7 +17,6 @@ DOWNLOAD_DISTRO="${DOWNLOAD_DISTRO:-}"
 DOWNLOAD_VERSION="${DOWNLOAD_VERSION:-}"
 DOWNLOAD_TYPE="${DOWNLOAD_TYPE:-iso}"  # iso or cloud
 DOWNLOAD_ARCH="${DOWNLOAD_ARCH:-}"  # aarch64 or x86_64 (auto-detected if not set)
-ISO_DIR="${ISO_DIR:-$HOME/Downloads}"
 HEADLESS="${HEADLESS:-false}"
 CONSOLE="${CONSOLE:-false}"
 AUTO_SETUP="${AUTO_SETUP:-false}"  # Auto-run interactive setup after boot
@@ -78,6 +79,16 @@ fi
 
 # Function to create disk image
 create_disk() {
+    # Ensure the directory for VM_DISK exists (usually Downloads)
+    local disk_dir
+    disk_dir=$(dirname "$VM_DISK")
+    if [[ ! -d "$disk_dir" ]]; then
+        mkdir -p "$disk_dir" || {
+            log_error "Failed to create directory for VM disk: $disk_dir"
+            exit 1
+        }
+    fi
+    
     if [[ -f "$VM_DISK" ]]; then
         log_warn "Disk image $VM_DISK already exists"
         # In headless mode, auto-delete to ensure fresh test runs
@@ -121,11 +132,21 @@ start_vm() {
         
         if [[ "$ISO_PATH" == *.raw ]]; then
             # Raw cloud image - create a qcow2 copy so cloud-init can run fresh each time
-            local qcow2_copy="${VM_DISK%.qcow2}-cloud.qcow2"
+            # Store in Downloads directory, not repo directory
+            local qcow2_copy="${ISO_DIR}/$(basename "${VM_DISK%.qcow2}")-cloud.qcow2"
             if [[ ! -f "$qcow2_copy" ]] || [[ "$ISO_PATH" -nt "$qcow2_copy" ]]; then
                 log_info "Creating qcow2 copy of cloud image for fresh cloud-init runs..."
                 if qemu-img convert -f raw -O qcow2 "$ISO_PATH" "$qcow2_copy"; then
                     log_info "✓ Created qcow2 copy: $qcow2_copy"
+                    # Resize the cloud image copy to the requested disk size
+                    if [[ -n "$VM_DISK_SIZE" ]] && [[ "$VM_DISK_SIZE" != "20G" ]]; then
+                        log_info "Resizing cloud image to ${VM_DISK_SIZE}..."
+                        if qemu-img resize "$qcow2_copy" "$VM_DISK_SIZE" 2>/dev/null; then
+                            log_info "✓ Resized cloud image to ${VM_DISK_SIZE}"
+                        else
+                            log_warn "Failed to resize cloud image (may be in use), using original size"
+                        fi
+                    fi
                 else
                     log_warn "Failed to create qcow2 copy, using raw image directly"
                     log_warn "Note: Cloud-init will only run on first boot with raw images"
@@ -133,6 +154,18 @@ start_vm() {
                 fi
             else
                 log_info "Using existing qcow2 copy: $qcow2_copy"
+                # Resize existing copy if size parameter was provided and differs
+                if [[ -n "$VM_DISK_SIZE" ]] && [[ "$VM_DISK_SIZE" != "20G" ]]; then
+                    local current_size=$(qemu-img info "$qcow2_copy" 2>/dev/null | grep "virtual size" | awk '{print $3$4}' || echo "")
+                    if [[ "$current_size" != "$VM_DISK_SIZE" ]]; then
+                        log_info "Resizing existing cloud image from $current_size to ${VM_DISK_SIZE}..."
+                        if qemu-img resize "$qcow2_copy" "$VM_DISK_SIZE" 2>/dev/null; then
+                            log_info "✓ Resized cloud image to ${VM_DISK_SIZE}"
+                        else
+                            log_warn "Failed to resize cloud image (may be in use), using existing size"
+                        fi
+                    fi
+                fi
             fi
             drive_arg="-drive file=$qcow2_copy,if=virtio,format=qcow2"
         elif [[ "$ISO_PATH" == *.qcow2 ]]; then
@@ -144,8 +177,9 @@ start_vm() {
             if [[ "$ISO_PATH" == *cloudimg* ]] || [[ "$ISO_PATH" == *cloud* ]]; then
                 # Cloud image - detect actual format and create a qcow2 copy so cloud-init can run fresh each time
                 # Ubuntu cloud images are often already qcow2 even with .img extension
+                # Store in Downloads directory, not repo directory
                 local actual_format=$(qemu-img info "$ISO_PATH" 2>/dev/null | grep "file format:" | awk '{print $3}' || echo "raw")
-                local qcow2_copy="${VM_DISK%.qcow2}-cloud.qcow2"
+                local qcow2_copy="${ISO_DIR}/$(basename "${VM_DISK%.qcow2}")-cloud.qcow2"
                 
                 if [[ "$actual_format" == "qcow2" ]]; then
                     # Already qcow2 - create a standalone copy for fresh cloud-init runs
@@ -154,6 +188,15 @@ start_vm() {
                     if [[ ! -f "$qcow2_copy" ]] || [[ "$ISO_PATH" -nt "$qcow2_copy" ]]; then
                         if qemu-img convert -f qcow2 -O qcow2 "$ISO_PATH" "$qcow2_copy"; then
                             log_info "✓ Created qcow2 copy: $qcow2_copy"
+                            # Resize the cloud image copy to the requested disk size
+                            if [[ -n "$VM_DISK_SIZE" ]] && [[ "$VM_DISK_SIZE" != "20G" ]]; then
+                                log_info "Resizing cloud image to ${VM_DISK_SIZE}..."
+                                if qemu-img resize "$qcow2_copy" "$VM_DISK_SIZE" 2>/dev/null; then
+                                    log_info "✓ Resized cloud image to ${VM_DISK_SIZE}"
+                                else
+                                    log_warn "Failed to resize cloud image (may be in use), using original size"
+                                fi
+                            fi
                         else
                             log_warn "Failed to create qcow2 copy, using original image"
                             log_warn "Note: Cloud-init will only run on first boot with original image"
@@ -161,6 +204,18 @@ start_vm() {
                         fi
                     else
                         log_info "Using existing qcow2 copy: $qcow2_copy"
+                        # Resize existing copy if size parameter was provided and differs
+                        if [[ -n "$VM_DISK_SIZE" ]] && [[ "$VM_DISK_SIZE" != "20G" ]]; then
+                            local current_size=$(qemu-img info "$qcow2_copy" 2>/dev/null | grep "virtual size" | awk '{print $3$4}' || echo "")
+                            if [[ "$current_size" != "$VM_DISK_SIZE" ]]; then
+                                log_info "Resizing existing cloud image from $current_size to ${VM_DISK_SIZE}..."
+                                if qemu-img resize "$qcow2_copy" "$VM_DISK_SIZE" 2>/dev/null; then
+                                    log_info "✓ Resized cloud image to ${VM_DISK_SIZE}"
+                                else
+                                    log_warn "Failed to resize cloud image (may be in use), using existing size"
+                                fi
+                            fi
+                        fi
                     fi
                 else
                     # Raw format - convert to qcow2
@@ -168,6 +223,15 @@ start_vm() {
                     if [[ ! -f "$qcow2_copy" ]] || [[ "$ISO_PATH" -nt "$qcow2_copy" ]]; then
                         if qemu-img convert -f raw -O qcow2 "$ISO_PATH" "$qcow2_copy"; then
                             log_info "✓ Created qcow2 copy: $qcow2_copy"
+                            # Resize the cloud image copy to the requested disk size
+                            if [[ -n "$VM_DISK_SIZE" ]] && [[ "$VM_DISK_SIZE" != "20G" ]]; then
+                                log_info "Resizing cloud image to ${VM_DISK_SIZE}..."
+                                if qemu-img resize "$qcow2_copy" "$VM_DISK_SIZE" 2>/dev/null; then
+                                    log_info "✓ Resized cloud image to ${VM_DISK_SIZE}"
+                                else
+                                    log_warn "Failed to resize cloud image (may be in use), using original size"
+                                fi
+                            fi
                         else
                             log_warn "Failed to create qcow2 copy, using raw image directly"
                             log_warn "Note: Cloud-init will only run on first boot with raw images"
@@ -175,6 +239,18 @@ start_vm() {
                         fi
                     else
                         log_info "Using existing qcow2 copy: $qcow2_copy"
+                        # Resize existing copy if size parameter was provided and differs
+                        if [[ -n "$VM_DISK_SIZE" ]] && [[ "$VM_DISK_SIZE" != "20G" ]]; then
+                            local current_size=$(qemu-img info "$qcow2_copy" 2>/dev/null | grep "virtual size" | awk '{print $3$4}' || echo "")
+                            if [[ "$current_size" != "$VM_DISK_SIZE" ]]; then
+                                log_info "Resizing existing cloud image from $current_size to ${VM_DISK_SIZE}..."
+                                if qemu-img resize "$qcow2_copy" "$VM_DISK_SIZE" 2>/dev/null; then
+                                    log_info "✓ Resized cloud image to ${VM_DISK_SIZE}"
+                                else
+                                    log_warn "Failed to resize cloud image (may be in use), using existing size"
+                                fi
+                            fi
+                        fi
                     fi
                 fi
                 drive_arg="-drive file=$qcow2_copy,if=virtio,format=qcow2"
@@ -361,19 +437,46 @@ start_vm() {
         # Get current logged-in user for SSH key injection
         local current_user="${USER:-$(whoami)}"
         
-        if [[ "$ISO_PATH" == *ubuntu* ]] || [[ "$ISO_PATH" == *Ubuntu* ]] || [[ "$DOWNLOAD_DISTRO" == "ubuntu" ]] || [[ "$DOWNLOAD_DISTRO" == "Ubuntu" ]]; then
+        # Normalize download distro name for comparison
+        local distro_lower=$(echo "${DOWNLOAD_DISTRO:-}" | tr '[:upper:]' '[:lower:]')
+        
+        if [[ "$ISO_PATH" == *ubuntu* ]] || [[ "$ISO_PATH" == *Ubuntu* ]] || [[ "$distro_lower" == "ubuntu" ]]; then
             distro_user="ubuntu"
             distro_pkg_mgr="apt"
             # Ubuntu uses 'ssh' as the systemd service name, but we need to ensure it's installed and enabled
             distro_ssh_service="ssh"
             distro_sudo_group="sudo"
             distro_install_cmd="apt-get update && apt-get install -y"
-        elif [[ "$ISO_PATH" == *debian* ]] || [[ "$ISO_PATH" == *Debian* ]] || [[ "$DOWNLOAD_DISTRO" == "debian" ]] || [[ "$DOWNLOAD_DISTRO" == "Debian" ]]; then
+        elif [[ "$ISO_PATH" == *debian* ]] || [[ "$ISO_PATH" == *Debian* ]] || [[ "$distro_lower" == "debian" ]]; then
             distro_user="debian"
             distro_pkg_mgr="apt"
             distro_ssh_service="ssh"
             distro_sudo_group="sudo"
             distro_install_cmd="apt-get update && apt-get install -y"
+        elif [[ "$ISO_PATH" == *rocky* ]] || [[ "$ISO_PATH" == *Rocky* ]] || [[ "$distro_lower" == "rocky" ]] || [[ "$distro_lower" == "rockylinux" ]]; then
+            distro_user="rocky"
+            distro_pkg_mgr="dnf"
+            distro_ssh_service="sshd"
+            distro_sudo_group="wheel"
+            distro_install_cmd="dnf install -y"
+        elif [[ "$ISO_PATH" == *almalinux* ]] || [[ "$ISO_PATH" == *AlmaLinux* ]] || [[ "$distro_lower" == "almalinux" ]] || [[ "$distro_lower" == "alma" ]]; then
+            distro_user="almalinux"
+            distro_pkg_mgr="dnf"
+            distro_ssh_service="sshd"
+            distro_sudo_group="wheel"
+            distro_install_cmd="dnf install -y"
+        elif [[ "$ISO_PATH" == *centos* ]] || [[ "$ISO_PATH" == *CentOS* ]] || [[ "$distro_lower" == "centos" ]] || [[ "$distro_lower" == "centos-stream" ]] || [[ "$distro_lower" == "centosstream" ]]; then
+            distro_user="cloud-user"  # CentOS Stream uses cloud-user
+            distro_pkg_mgr="dnf"
+            distro_ssh_service="sshd"
+            distro_sudo_group="wheel"
+            distro_install_cmd="dnf install -y"
+        elif [[ "$ISO_PATH" == *opensuse* ]] || [[ "$ISO_PATH" == *OpenSUSE* ]] || [[ "$ISO_PATH" == *leap* ]] || [[ "$ISO_PATH" == *Leap* ]] || [[ "$distro_lower" == "opensuse" ]] || [[ "$distro_lower" == "opensuse-leap" ]] || [[ "$distro_lower" == "leap" ]]; then
+            distro_user="opensuse"
+            distro_pkg_mgr="zypper"
+            distro_ssh_service="sshd"
+            distro_sudo_group="wheel"
+            distro_install_cmd="zypper install -y"
         fi
         
         # Create user-data for cloud-init (enable SSH, set password, clone repo, setup macvlan)
@@ -494,11 +597,64 @@ runcmd:
     sleep 2
     systemctl status __DISTRO_SSH_SERVICE__ || true
   - |
-    # Install required packages
+    # Install required packages (git, podman, curl, openssl, wget)
     if command -v apt-get &>/dev/null; then
-      apt-get update -qq && apt-get install -y -qq git podman curl yq || true
+      apt-get update -qq && apt-get install -y -qq git podman curl openssl wget || true
     elif command -v dnf &>/dev/null; then
-      dnf install -y -q git podman curl yq || true
+      dnf install -y -q git podman curl openssl wget || true
+    elif command -v zypper &>/dev/null; then
+      zypper refresh -q && zypper install -y git podman curl openssl wget || true
+    fi
+    # Verify podman is installed and in PATH
+    if command -v podman &>/dev/null; then
+      echo "✓ podman installed: $(command -v podman)"
+      podman --version || true
+    else
+      echo "⚠ WARNING: podman not found in PATH after installation"
+      # Try to find podman in common locations and add to PATH
+      if [ -f /usr/bin/podman ]; then
+        export PATH="/usr/bin:$PATH"
+        echo "✓ Added /usr/bin to PATH, podman found: $(command -v podman)"
+      elif [ -f /usr/local/bin/podman ]; then
+        export PATH="/usr/local/bin:$PATH"
+        echo "✓ Added /usr/local/bin to PATH, podman found: $(command -v podman)"
+      else
+        echo "✗ ERROR: podman not found in standard locations"
+      fi
+    fi
+  - |
+    # Install correct yq (mikefarah/yq) from GitHub (package manager versions are wrong)
+    if ! command -v yq &>/dev/null || ! yq --version 2>&1 | grep -q "yq version\|v[0-9]"; then
+      ARCH=$(uname -m)
+      if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+        YQ_ARCH="arm64"
+      elif [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "amd64" ]; then
+        YQ_ARCH="amd64"
+      else
+        YQ_ARCH="amd64"
+      fi
+      YQ_VERSION="v4.44.3"
+      YQ_URL="https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${YQ_ARCH}"
+      if command -v wget &>/dev/null; then
+        wget -qO /usr/local/bin/yq "$YQ_URL" && chmod +x /usr/local/bin/yq || true
+      elif command -v curl &>/dev/null; then
+        curl -sL "$YQ_URL" -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq || true
+      fi
+      export PATH="/usr/local/bin:$PATH"
+      if command -v yq &>/dev/null && yq --version 2>&1 | grep -q "yq version\|v[0-9]"; then
+        echo "✓ Installed correct yq (mikefarah/yq) from GitHub"
+      else
+        echo "⚠ Failed to install yq from GitHub, will try package manager as fallback"
+        if command -v apt-get &>/dev/null; then
+          apt-get install -y -qq yq || true
+        elif command -v dnf &>/dev/null; then
+          dnf install -y -q yq || true
+        elif command -v zypper &>/dev/null; then
+          zypper install -y yq || true
+        fi
+      fi
+    else
+      echo "✓ yq already installed and correct version"
     fi
   - |
     # Set up SSH authorized_keys from host if available
@@ -532,11 +688,19 @@ runcmd:
           apt-get update -qq && apt-get install -y -qq git || true
         elif command -v dnf &>/dev/null; then
           dnf install -y -q git || true
+        elif command -v zypper &>/dev/null; then
+          zypper refresh -q && zypper install -y git || true
         fi
       fi
       # Try cloning with retries
+      # Check if ZTP_BRANCH environment variable is set (for testing specific branches)
+      local branch_arg=""
+      if [ -n "${ZTP_BRANCH:-}" ]; then
+        branch_arg="-b ${ZTP_BRANCH}"
+        echo "Cloning branch: ${ZTP_BRANCH}"
+      fi
       for i in 1 2 3; do
-        if sudo -u __CURRENT_USER__ git clone https://github.com/coreyhines/ztpbootstrap.git /home/__CURRENT_USER__/ztpbootstrap 2>&1; then
+        if sudo -u __CURRENT_USER__ git clone ${branch_arg} https://github.com/coreyhines/ztpbootstrap.git /home/__CURRENT_USER__/ztpbootstrap 2>&1; then
           echo "Repository cloned successfully to /home/__CURRENT_USER__/ztpbootstrap"
           break
         elif [ $i -eq 3 ]; then
@@ -548,32 +712,38 @@ runcmd:
       done
     fi
   - |
-    # Create minimal ztpbootstrap.env file for automated testing
-    # This allows setup.sh to run without manual configuration
-    # Create directory first
-    mkdir -p /opt/containerdata/ztpbootstrap
-    # Create env file using printf to avoid YAML heredoc issues
-    printf '%s\n' \
-      '# Minimal configuration for automated testing' \
-      'CV_ADDR=www.arista.io' \
-      'ENROLLMENT_TOKEN=test_token_for_automated_testing' \
-      'CV_PROXY=' \
-      'EOS_URL=' \
-      'NTP_SERVER=time.nist.gov' \
-      'TZ=UTC' \
-      'NGINX_HOST=ztpboot.example.com' \
-      'NGINX_PORT=443' > /opt/containerdata/ztpbootstrap/ztpbootstrap.env
-    chmod 644 /opt/containerdata/ztpbootstrap/ztpbootstrap.env
-    # Also copy bootstrap.py and nginx.conf to expected location for setup.sh if repo was cloned
-    if [ -f /home/__CURRENT_USER__/ztpbootstrap/bootstrap.py ]; then
-      cp /home/__CURRENT_USER__/ztpbootstrap/bootstrap.py /opt/containerdata/ztpbootstrap/bootstrap.py
-      chmod 644 /opt/containerdata/ztpbootstrap/bootstrap.py
+    # Create minimal ztpbootstrap.env file for automated testing (only if AUTO_SETUP flag is set)
+    # This allows setup.sh to run without manual configuration in automated test scenarios
+    # For manual testing, we skip this to avoid false "previous installation" warnings
+    AUTO_SETUP_VAL=$(if [ -f /tmp/auto-setup-flag ]; then echo "true"; else echo "false"; fi)
+    if [ "$AUTO_SETUP_VAL" = "true" ]; then
+      # Create directory first
+      mkdir -p /opt/containerdata/ztpbootstrap
+      # Create env file using printf to avoid YAML heredoc issues
+      printf '%s\n' \
+        '# Minimal configuration for automated testing' \
+        'CV_ADDR=www.arista.io' \
+        'ENROLLMENT_TOKEN=test_token_for_automated_testing' \
+        'CV_PROXY=' \
+        'EOS_URL=' \
+        'NTP_SERVER=time.nist.gov' \
+        'TZ=UTC' \
+        'NGINX_HOST=ztpboot.example.com' \
+        'NGINX_PORT=443' > /opt/containerdata/ztpbootstrap/ztpbootstrap.env
+      chmod 644 /opt/containerdata/ztpbootstrap/ztpbootstrap.env
+      # Also copy bootstrap.py and nginx.conf to expected location for setup.sh if repo was cloned
+      if [ -f /home/__CURRENT_USER__/ztpbootstrap/bootstrap.py ]; then
+        cp /home/__CURRENT_USER__/ztpbootstrap/bootstrap.py /opt/containerdata/ztpbootstrap/bootstrap.py
+        chmod 644 /opt/containerdata/ztpbootstrap/bootstrap.py
+      fi
+      if [ -f /home/__CURRENT_USER__/ztpbootstrap/nginx.conf ]; then
+        cp /home/__CURRENT_USER__/ztpbootstrap/nginx.conf /opt/containerdata/ztpbootstrap/nginx.conf
+        chmod 644 /opt/containerdata/ztpbootstrap/nginx.conf
+      fi
+      echo "Created minimal ztpbootstrap.env for automated testing"
+    else
+      echo "Skipping minimal config creation (manual testing mode)"
     fi
-    if [ -f /home/__CURRENT_USER__/ztpbootstrap/nginx.conf ]; then
-      cp /home/__CURRENT_USER__/ztpbootstrap/nginx.conf /opt/containerdata/ztpbootstrap/nginx.conf
-      chmod 644 /opt/containerdata/ztpbootstrap/nginx.conf
-    fi
-    echo "Created minimal ztpbootstrap.env for automated testing"
   - |
     # Setup macvlan network on the primary ethernet interface
     # Find the primary ethernet interface (usually eth0 or ens*)
@@ -606,6 +776,35 @@ runcmd:
   - |
     # Ensure README file has correct ownership (created by write_files)
     chown __CURRENT_USER__:__CURRENT_USER__ /home/__CURRENT_USER__/README_VM_SETUP.txt 2>/dev/null || true
+  - |
+    # Ensure PATH includes standard binary directories for all users
+    # This ensures podman and other tools are available in PATH
+    export PATH="/usr/bin:/usr/local/bin:$PATH"
+    # Update user's shell profile to ensure PATH is set permanently
+    for profile in /home/__DISTRO_USER__/.bashrc /home/__DISTRO_USER__/.bash_profile /home/__DISTRO_USER__/.profile; do
+      if [ -f "$profile" ]; then
+        if ! grep -q "export PATH=\"/usr/bin:/usr/local/bin:\$PATH\"" "$profile"; then
+          echo 'export PATH="/usr/bin:/usr/local/bin:$PATH"' >> "$profile"
+        fi
+      fi
+    done
+    # Also update current user's profile if different from distro user
+    if [ "__CURRENT_USER__" != "__DISTRO_USER__" ]; then
+      for profile in /home/__CURRENT_USER__/.bashrc /home/__CURRENT_USER__/.bash_profile /home/__CURRENT_USER__/.profile; do
+        if [ -f "$profile" ]; then
+          if ! grep -q "export PATH=\"/usr/bin:/usr/local/bin:\$PATH\"" "$profile"; then
+            echo 'export PATH="/usr/bin:/usr/local/bin:$PATH"' >> "$profile"
+          fi
+        fi
+      done
+    fi
+    # Verify critical dependencies are available
+    echo "Verifying critical dependencies:"
+    command -v podman >/dev/null && echo "  ✓ podman: $(command -v podman)" || echo "  ✗ podman: NOT FOUND"
+    command -v yq >/dev/null && echo "  ✓ yq: $(command -v yq)" || echo "  ✗ yq: NOT FOUND"
+    command -v git >/dev/null && echo "  ✓ git: $(command -v git)" || echo "  ✗ git: NOT FOUND"
+    command -v curl >/dev/null && echo "  ✓ curl: $(command -v curl)" || echo "  ✗ curl: NOT FOUND"
+    command -v openssl >/dev/null && echo "  ✓ openssl: $(command -v openssl)" || echo "  ✗ openssl: NOT FOUND"
   - echo "Cloud-init completed. Repository cloned and macvlan network configured."
   - cat /home/__CURRENT_USER__/README_VM_SETUP.txt
   - |
@@ -782,9 +981,130 @@ CLOUDINITEOF
         log_info "VM starting... Console output will appear below:"
         echo ""
         exec $qemu_cmd
+    elif [[ "$HEADLESS" == "true" ]]; then
+        # In headless mode, run in background and wait for SSH
+        log_info "Starting VM in background..."
+        log_info "VM output will be logged to: $log_file"
+        $qemu_cmd > "$log_file" 2>&1 &
+        local qemu_pid=$!
+        log_info "VM started (PID: $qemu_pid)"
+        log_info "Waiting for SSH to be ready on port 2222..."
+        log_info "This may take 1-3 minutes for cloud-init to complete..."
+        
+        # Wait for SSH to be ready
+        local ssh_timeout=300  # 5 minutes
+        local ssh_interval=2
+        local start_time=$(date +%s)
+        local elapsed=0
+        local ssh_ready=false
+        local port_open=false
+        
+        # Phase 1: Wait for port to be open
+        while [ $elapsed -lt $ssh_timeout ]; do
+            if timeout 1 bash -c "echo > /dev/tcp/localhost/2222" 2>/dev/null; then
+                log_info "✓ Port 2222 is open (${elapsed}s)"
+                port_open=true
+                break
+            fi
+            sleep $ssh_interval
+            elapsed=$(($(date +%s) - start_time))
+            if [ $((elapsed % 20)) -eq 0 ]; then
+                log_info "  Still waiting for port... (${elapsed}s elapsed)"
+            fi
+        done
+        
+        if [ "$port_open" != "true" ]; then
+            log_error "SSH port did not open within ${ssh_timeout}s"
+            log_info "Check VM logs: tail -f $log_file"
+            log_info "VM is still running (PID: $qemu_pid). To stop: pkill -f 'qemu-system.*${VM_NAME}'"
+            exit 1
+        fi
+        
+        # Phase 2: Wait for SSH to accept connections
+        log_info "Waiting for SSH to accept connections..."
+        start_time=$(date +%s)
+        elapsed=0
+        # Determine SSH user - try current user first, then distro default (fedora)
+        local ssh_user="${USER:-$(whoami)}"
+        local distro_default_user="fedora"
+        
+        while [ $elapsed -lt $ssh_timeout ]; do
+            # Try current user first (created by cloud-init)
+            if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -p 2222 "${ssh_user}@localhost" "echo 'SSH ready'" 2>/dev/null; then
+                log_info "✓ SSH is ready and accepting connections as ${ssh_user} (${elapsed}s)"
+                ssh_ready=true
+                break
+            fi
+            # Fall back to distro default user (fedora)
+            if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -p 2222 "${distro_default_user}@localhost" "echo 'SSH ready'" 2>/dev/null; then
+                log_info "✓ SSH is ready and accepting connections as ${distro_default_user} (${elapsed}s)"
+                ssh_ready=true
+                ssh_user="${distro_default_user}"
+                break
+            fi
+            sleep $ssh_interval
+            elapsed=$(($(date +%s) - start_time))
+            if [ $((elapsed % 20)) -eq 0 ]; then
+                log_info "  Still waiting for SSH... (${elapsed}s elapsed)"
+            fi
+        done
+        
+        if [ "$ssh_ready" != "true" ]; then
+            log_error "SSH did not become ready within ${ssh_timeout}s"
+            log_info "Check VM logs: tail -f $log_file"
+            log_info "VM is still running (PID: $qemu_pid). To stop: pkill -f 'qemu-system.*${VM_NAME}'"
+            exit 1
+        fi
+        
+        log_info "✓ VM is ready! SSH available on port 2222"
+        log_info "VM is running (PID: $qemu_pid). To stop: pkill -f 'qemu-system.*${VM_NAME}'"
+        log_info "To view logs: tail -f $log_file"
+        exit 0
     else
         # In other modes, log to file
         exec $qemu_cmd 2>&1 | tee "$log_file"
+    fi
+}
+
+# Function to find valid URL from multiple patterns
+# Tries each URL pattern and returns the first one that exists (HTTP 200)
+find_valid_url() {
+    local patterns=("$@")
+    local found_url=""
+    local found_file=""
+    
+    for pattern_info in "${patterns[@]}"; do
+        # Pattern format: "url|filename" or just "url" (filename derived from URL)
+        local test_url=""
+        local test_file=""
+        
+        if [[ "$pattern_info" == *"|"* ]]; then
+            # Split on | to get URL and filename
+            test_url="${pattern_info%%|*}"
+            test_file="${pattern_info#*|}"
+        else
+            # Just URL, derive filename from URL
+            test_url="$pattern_info"
+            test_file=$(basename "$test_url")
+        fi
+        
+        local http_code=$(curl -s -o /dev/null -w "%{http_code}" -L --head "$test_url" 2>/dev/null)
+        
+        if [[ "$http_code" == "200" ]]; then
+            found_url="$test_url"
+            found_file="$test_file"
+            # Log to stderr so it doesn't interfere with stdout output
+            log_info "✓ Found valid URL: $test_url" >&2
+            break
+        fi
+    done
+    
+    if [[ -n "$found_url" ]]; then
+        # Output to stdout (for capture), log messages go to stderr
+        echo "${found_url}|${found_file}"
+        return 0
+    else
+        return 1
     fi
 }
 
@@ -966,9 +1286,195 @@ download_iso() {
             iso_path="${ISO_DIR}/${iso_file}"
             ;;
             
+        rocky|Rocky|rockylinux|RockyLinux)
+            # Detect architecture
+            local arch="${DOWNLOAD_ARCH}"
+            if [[ -z "$arch" ]]; then
+                if [[ "$(uname -m)" == "arm64" ]] || [[ "$(uname -m)" == "aarch64" ]]; then
+                    arch="aarch64"
+                else
+                    arch="x86_64"
+                fi
+            fi
+            
+            if [[ "$version" == "latest" ]]; then
+                version="9"
+                log_info "Using Rocky Linux latest stable: $version"
+            fi
+            
+            if [[ "$DOWNLOAD_TYPE" == "cloud" ]]; then
+                log_info "Finding available Rocky Linux Cloud image for ${arch}..."
+                # Try multiple URL patterns
+                local url_patterns=(
+                    "https://dl.rockylinux.org/pub/rocky/${version}/images/${arch}/Rocky-${version}-CLOUD.latest.${arch}.qcow2|Rocky-${version}-CLOUD.latest.${arch}.qcow2"
+                    "https://download.rockylinux.org/pub/rocky/${version}/images/${arch}/Rocky-${version}-CLOUD.latest.${arch}.qcow2|Rocky-${version}-CLOUD.latest.${arch}.qcow2"
+                    "https://dl.rockylinux.org/pub/rocky/${version}/images/${arch}/Rocky-${version}-GenericCloud-Base-${arch}.qcow2|Rocky-${version}-GenericCloud-Base-${arch}.qcow2"
+                    "https://download.rockylinux.org/pub/rocky/${version}/images/${arch}/Rocky-${version}-GenericCloud-Base-${arch}.qcow2|Rocky-${version}-GenericCloud-Base-${arch}.qcow2"
+                )
+                
+                local url_result=$(find_valid_url "${url_patterns[@]}")
+                if [[ -z "$url_result" ]]; then
+                    log_error "Could not find Rocky Linux Cloud image for version ${version} architecture ${arch}"
+                    log_info "Tried patterns:"
+                    for pattern in "${url_patterns[@]}"; do
+                        log_info "  - ${pattern%%|*}"
+                    done
+                    return 1
+                fi
+                
+                # Extract URL and filename, trimming any whitespace
+                download_url=$(echo "${url_result%%|*}" | tr -d '\n\r' | xargs)
+                iso_file=$(echo "${url_result#*|}" | tr -d '\n\r' | xargs)
+                iso_path="${ISO_DIR}/${iso_file}"
+                log_info "Downloading Rocky Linux Cloud image (boots directly, SSH enabled)"
+            else
+                log_error "Rocky Linux ISO installer not yet supported, use --type cloud"
+                return 1
+            fi
+            ;;
+            
+        almalinux|AlmaLinux|alma|Alma)
+            # Detect architecture
+            local arch="${DOWNLOAD_ARCH}"
+            if [[ -z "$arch" ]]; then
+                if [[ "$(uname -m)" == "arm64" ]] || [[ "$(uname -m)" == "aarch64" ]]; then
+                    arch="aarch64"
+                else
+                    arch="x86_64"
+                fi
+            fi
+            
+            if [[ "$version" == "latest" ]]; then
+                version="9"
+                log_info "Using AlmaLinux latest stable: $version"
+            fi
+            
+            if [[ "$DOWNLOAD_TYPE" == "cloud" ]]; then
+                log_info "Finding available AlmaLinux Cloud image for ${arch}..."
+                # Try multiple URL patterns
+                local url_patterns=(
+                    "https://repo.almalinux.org/almalinux/${version}/cloud/${arch}/images/AlmaLinux-${version}-GenericCloud-latest.${arch}.qcow2|AlmaLinux-${version}-GenericCloud-latest.${arch}.qcow2"
+                    "https://repo.almalinux.org/almalinux/${version}/cloud/${arch}/images/AlmaLinux-${version}-GenericCloud-Base-${arch}.qcow2|AlmaLinux-${version}-GenericCloud-Base-${arch}.qcow2"
+                    "https://repo.almalinux.org/almalinux/${version}/cloud/${arch}/images/AlmaLinux-${version}-GenericCloud-${arch}.qcow2|AlmaLinux-${version}-GenericCloud-${arch}.qcow2"
+                )
+                
+                local url_result=$(find_valid_url "${url_patterns[@]}")
+                if [[ -z "$url_result" ]]; then
+                    log_error "Could not find AlmaLinux Cloud image for version ${version} architecture ${arch}"
+                    log_info "Tried patterns:"
+                    for pattern in "${url_patterns[@]}"; do
+                        log_info "  - ${pattern%%|*}"
+                    done
+                    return 1
+                fi
+                
+                # Extract URL and filename, trimming any whitespace
+                download_url=$(echo "${url_result%%|*}" | tr -d '\n\r' | xargs)
+                iso_file=$(echo "${url_result#*|}" | tr -d '\n\r' | xargs)
+                iso_path="${ISO_DIR}/${iso_file}"
+                log_info "Downloading AlmaLinux Cloud image (boots directly, SSH enabled)"
+            else
+                log_error "AlmaLinux ISO installer not yet supported, use --type cloud"
+                return 1
+            fi
+            ;;
+            
+        centos|CentOS|centos-stream|CentOS-Stream|centosstream|CentOSStream)
+            # Detect architecture
+            local arch="${DOWNLOAD_ARCH}"
+            if [[ -z "$arch" ]]; then
+                if [[ "$(uname -m)" == "arm64" ]] || [[ "$(uname -m)" == "aarch64" ]]; then
+                    arch="aarch64"
+                else
+                    arch="x86_64"
+                fi
+            fi
+            
+            if [[ "$version" == "latest" ]]; then
+                # CentOS Stream doesn't use version numbers the same way, use "9" for Stream 9
+                version="9"
+                log_info "Using CentOS Stream 9"
+            fi
+            
+            if [[ "$DOWNLOAD_TYPE" == "cloud" ]]; then
+                log_info "Finding available CentOS Stream Cloud image for ${arch}..."
+                # Try multiple URL patterns
+                local url_patterns=(
+                    "https://cloud.centos.org/centos/${version}-stream/${arch}/images/CentOS-Stream-GenericCloud-${version}-latest.${arch}.qcow2|CentOS-Stream-GenericCloud-${version}-latest.${arch}.qcow2"
+                    "https://cloud.centos.org/centos/${version}-stream/${arch}/images/CentOS-Stream-GenericCloud-${version}-${arch}.qcow2|CentOS-Stream-GenericCloud-${version}-${arch}.qcow2"
+                    "https://cloud.centos.org/centos/${version}-stream/${arch}/images/CentOS-Stream-GenericCloud-Base-${version}-${arch}.qcow2|CentOS-Stream-GenericCloud-Base-${version}-${arch}.qcow2"
+                )
+                
+                local url_result=$(find_valid_url "${url_patterns[@]}")
+                if [[ -z "$url_result" ]]; then
+                    log_error "Could not find CentOS Stream Cloud image for version ${version} architecture ${arch}"
+                    log_info "Tried patterns:"
+                    for pattern in "${url_patterns[@]}"; do
+                        log_info "  - ${pattern%%|*}"
+                    done
+                    return 1
+                fi
+                
+                # Extract URL and filename, trimming any whitespace
+                download_url=$(echo "${url_result%%|*}" | tr -d '\n\r' | xargs)
+                iso_file=$(echo "${url_result#*|}" | tr -d '\n\r' | xargs)
+                iso_path="${ISO_DIR}/${iso_file}"
+                log_info "Downloading CentOS Stream Cloud image (boots directly, SSH enabled)"
+            else
+                log_error "CentOS Stream ISO installer not yet supported, use --type cloud"
+                return 1
+            fi
+            ;;
+            
+        opensuse|OpenSUSE|opensuse-leap|OpenSUSE-Leap|leap|Leap)
+            # Detect architecture
+            local arch="${DOWNLOAD_ARCH}"
+            if [[ -z "$arch" ]]; then
+                if [[ "$(uname -m)" == "arm64" ]] || [[ "$(uname -m)" == "aarch64" ]]; then
+                    arch="aarch64"
+                else
+                    arch="x86_64"
+                fi
+            fi
+            
+            if [[ "$version" == "latest" ]]; then
+                version="15.6"
+                log_info "Using openSUSE Leap latest: $version"
+            fi
+            
+            if [[ "$DOWNLOAD_TYPE" == "cloud" ]]; then
+                log_info "Finding available openSUSE Leap Cloud image for ${arch}..."
+                # Try multiple URL patterns
+                local url_patterns=(
+                    "https://download.opensuse.org/distribution/leap/${version}/appliances/openSUSE-Leap-${version}-OpenStack-Cloud.${arch}.qcow2|openSUSE-Leap-${version}-OpenStack-Cloud.${arch}.qcow2"
+                    "https://download.opensuse.org/distribution/leap/${version}/appliances/openSUSE-Leap-${version}-${arch}.qcow2|openSUSE-Leap-${version}-${arch}.qcow2"
+                    "https://download.opensuse.org/distribution/leap/${version}/appliances/openSUSE-Leap-${version}-KVM.${arch}.qcow2|openSUSE-Leap-${version}-KVM.${arch}.qcow2"
+                )
+                
+                local url_result=$(find_valid_url "${url_patterns[@]}")
+                if [[ -z "$url_result" ]]; then
+                    log_error "Could not find openSUSE Leap Cloud image for version ${version} architecture ${arch}"
+                    log_info "Tried patterns:"
+                    for pattern in "${url_patterns[@]}"; do
+                        log_info "  - ${pattern%%|*}"
+                    done
+                    return 1
+                fi
+                
+                # Extract URL and filename, trimming any whitespace
+                download_url=$(echo "${url_result%%|*}" | tr -d '\n\r' | xargs)
+                iso_file=$(echo "${url_result#*|}" | tr -d '\n\r' | xargs)
+                iso_path="${ISO_DIR}/${iso_file}"
+                log_info "Downloading openSUSE Leap Cloud image (boots directly, SSH enabled)"
+            else
+                log_error "openSUSE Leap ISO installer not yet supported, use --type cloud"
+                return 1
+            fi
+            ;;
+            
         *)
             log_error "Unsupported distribution: $distro"
-            log_info "Supported: fedora, ubuntu, debian"
+            log_info "Supported: fedora, ubuntu, debian, rocky, almalinux, centos-stream, opensuse-leap"
             return 1
             ;;
     esac
@@ -1005,6 +1511,18 @@ download_iso() {
                 else
                     patterns=("ubuntu-*-server-cloudimg-${arch}.img")
                 fi
+                ;;
+            rocky|Rocky|rockylinux|RockyLinux)
+                patterns=("Rocky-*-GenericCloud-Base-${arch}.qcow2")
+                ;;
+            almalinux|AlmaLinux|alma|Alma)
+                patterns=("AlmaLinux-*-GenericCloud-Base-${arch}.qcow2")
+                ;;
+            centos|CentOS|centos-stream|CentOS-Stream|centosstream|CentOSStream)
+                patterns=("CentOS-Stream-GenericCloud-*-${arch}.qcow2")
+                ;;
+            opensuse|OpenSUSE|opensuse-leap|OpenSUSE-Leap|leap|Leap)
+                patterns=("openSUSE-Leap-*-${arch}.qcow2")
                 ;;
         esac
         
@@ -1043,13 +1561,16 @@ download_iso() {
     
     # Download with progress (follow redirects with -L)
     if command -v curl &> /dev/null; then
-        # First verify URL is valid
-        log_info "Verifying download URL..."
-        local http_code=$(curl -s -o /dev/null -w "%{http_code}" -L --head "$download_url" 2>/dev/null)
-        if [[ "$http_code" != "200" ]]; then
-            log_error "URL returned HTTP $http_code (file may not exist)"
-            log_info "URL: $download_url"
-            return 1
+        # URL was already verified by find_valid_url() if it was used, but verify again for direct URLs
+        # Skip verification if URL contains "latest" (was found via find_valid_url)
+        if [[ "$download_url" != *"latest"* ]]; then
+            log_info "Verifying download URL..."
+            local http_code=$(curl -s -o /dev/null -w "%{http_code}" -L --head "$download_url" 2>/dev/null)
+            if [[ "$http_code" != "200" ]]; then
+                log_error "URL returned HTTP $http_code (file may not exist)"
+                log_info "URL: $download_url"
+                return 1
+            fi
         fi
         
         if curl -L --progress-bar -o "$iso_path" "$download_url"; then
@@ -1157,7 +1678,7 @@ Create and run a native ARM64 Linux VM using Apple's Hypervisor Framework.
 
 Options:
     -n, --name NAME          VM name (default: $VM_NAME)
-    -d, --disk FILE          Disk image file (default: $VM_DISK)
+    -d, --disk FILE          Disk image file (default: ~/Downloads/ztpbootstrap-test.qcow2)
     -s, --size SIZE          Disk size (default: $VM_DISK_SIZE)
     -m, --memory MB          Memory in MB (default: $VM_MEMORY)
     -c, --cpus NUM           Number of CPUs (default: $VM_CPUS)
@@ -1188,7 +1709,7 @@ Examples:
     # Download specific Ubuntu version
     $0 --download ubuntu --version 22.04
 
-    # Use existing image
+    # Use existing image (script checks Downloads automatically)
     $0 -i ~/Downloads/Fedora-Cloud-Base-41-1.2.aarch64.raw
 
     # Create VM with custom settings
@@ -1200,6 +1721,8 @@ Examples:
 Notes:
     - Uses Apple's native Hypervisor Framework (HVF) for best performance
     - Requires ARM64 Linux images for native performance
+    - All VM files (disk images, cloud images) are stored in: ${ISO_DIR}
+    - Script automatically checks Downloads folder for existing images
     - Port forwarding:
         * SSH: localhost:2222 -> VM:22
         * HTTP: localhost:8080 -> VM:80

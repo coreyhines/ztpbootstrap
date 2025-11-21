@@ -453,13 +453,7 @@ check_running_services() {
     local running_services=()
     local service_type="none"
     
-    # Check for old single-container service
-    if systemctl is-active --quiet ztpbootstrap.service 2>/dev/null; then
-        running_services+=("ztpbootstrap.service")
-        service_type="single-container"
-    fi
-    
-    # Check for new pod-based services (quadlet generates ztpbootstrap-pod.service from ztpbootstrap.pod)
+    # Check for pod-based services (quadlet generates ztpbootstrap-pod.service from ztpbootstrap.pod)
     if systemctl is-active --quiet ztpbootstrap-pod.service 2>/dev/null; then
         running_services+=("ztpbootstrap-pod.service")
         service_type="pod-based"
@@ -498,17 +492,7 @@ stop_services_gracefully() {
     fi
     
     log "Stopping services gracefully..."
-    
-    if [[ "$service_type" == "single-container" ]]; then
-        # Old version: stop single container service
-        log "Stopping ztpbootstrap.service (single-container setup)..."
-        if [[ $EUID -eq 0 ]]; then
-            systemctl stop ztpbootstrap.service 2>/dev/null || warn "Failed to stop ztpbootstrap.service"
-        else
-            sudo systemctl stop ztpbootstrap.service 2>/dev/null || warn "Failed to stop ztpbootstrap.service"
-        fi
-        sleep 2
-    elif [[ "$service_type" == "pod-based" ]]; then
+    if [[ "$service_type" == "pod-based" ]]; then
         # New version: stop containers first, then pod
         log "Stopping pod-based services..."
         local pod_service_name="ztpbootstrap-pod.service"
@@ -1569,6 +1553,89 @@ create_self_signed_cert() {
     warn "⚠️  This is a self-signed certificate and should not be used in production"
 }
 
+# Build webui container image from Containerfile if it exists
+build_webui_image() {
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local containerfile="${repo_dir}/webui/Containerfile"
+    local image_tag="ztpbootstrap-webui:local"
+    
+    # Check if Containerfile exists
+    if [[ ! -f "$containerfile" ]]; then
+        log "Containerfile not found at $containerfile, skipping image build"
+        return 0
+    fi
+    
+    # Check if podman is available
+    if ! command -v podman >/dev/null 2>&1; then
+        warn "podman not found, cannot build image. Will use base Fedora image."
+        return 1
+    fi
+    
+    # Check available disk space (need at least 1.5GB free for build)
+    local available_space
+    if command -v df >/dev/null 2>&1; then
+        # Get available space in MB (works on both Linux and macOS)
+        if df --version 2>/dev/null | grep -q GNU; then
+            # GNU df (Linux)
+            available_space=$(df -BM / 2>/dev/null | tail -1 | awk '{print $4}' | sed 's/M//' || echo "0")
+        else
+            # BSD df (macOS) - output is in 512-byte blocks
+            available_space=$(df / 2>/dev/null | tail -1 | awk '{print int($4 * 512 / 1024 / 1024)}' || echo "0")
+        fi
+        
+        if [[ -n "$available_space" ]] && [[ "$available_space" -lt 1500 ]]; then
+            warn "Insufficient disk space for image build: ${available_space}MB available (need at least 1500MB)"
+            warn "The build process requires temporary space for layers and package installation."
+            warn "Skipping image build. Container will use base Fedora image and install packages at runtime."
+            warn "To free up space, you can run: podman system prune -a"
+            return 1
+        fi
+    fi
+    
+    # Check if image already exists
+    if podman image exists "$image_tag" 2>/dev/null; then
+        log "Image $image_tag already exists"
+        if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
+            # Non-interactive: skip rebuild unless forced
+            log "Non-interactive mode: Using existing image (use --force-rebuild to rebuild)"
+            return 0
+        else
+            prompt_yes_no "Image $image_tag already exists. Rebuild it?" "n" REBUILD_IMAGE
+            if [[ "$REBUILD_IMAGE" != "true" ]]; then
+                log "Using existing image: $image_tag"
+                return 0
+            fi
+        fi
+    fi
+    
+    log "Building webui container image from Containerfile..."
+    log "This will install Python, podman, and systemd in the image for faster container startup."
+    log "Image tag: $image_tag"
+    
+    # Build the image
+    local build_cmd="podman build -t $image_tag -f $containerfile $repo_dir"
+    if [[ $EUID -ne 0 ]]; then
+        # Non-root: podman should work in rootless mode
+        if $build_cmd 2>&1; then
+            log "✓ Successfully built image: $image_tag"
+            return 0
+        else
+            warn "Failed to build image. Will use base Fedora image (packages will install at runtime)."
+            return 1
+        fi
+    else
+        # Root: use podman directly
+        if $build_cmd 2>&1; then
+            log "✓ Successfully built image: $image_tag"
+            return 0
+        else
+            warn "Failed to build image. Will use base Fedora image (packages will install at runtime)."
+            return 1
+        fi
+    fi
+}
+
 # Create pod and container systemd files from config.yaml
 # This replicates the setup_pod() function from setup.sh
 create_pod_files_from_config() {
@@ -1736,6 +1803,77 @@ create_pod_files_from_config() {
         fi
         log "Web UI container configuration installed"
         
+        # Determine which image to use for webui container
+        local webui_container_file="${systemd_dir}/ztpbootstrap-webui.container"
+        local script_dir
+        script_dir=$(yq eval '.paths.script_dir // "/opt/containerdata/ztpbootstrap"' "${repo_dir}/config.yaml" 2>/dev/null || echo "/opt/containerdata/ztpbootstrap")
+        local config_file="${script_dir}/config.yaml"
+        local image_tag=""
+        
+        # First, check if a registry image was configured (from previous setup)
+        if [[ -f "$config_file" ]]; then
+            local registry_image
+            registry_image=$(yq eval '.webui.registry_image // ""' "$config_file" 2>/dev/null || echo "")
+            if [[ -n "$registry_image" ]] && [[ "$registry_image" != "null" ]] && [[ "$registry_image" != "" ]]; then
+                # If it's just a registry URL (no / or no image name), append default image name
+                if [[ "$registry_image" != "ztpbootstrap-webui:local" ]] && [[ "$registry_image" != *"localhost"* ]]; then
+                    if [[ "$registry_image" != *"/"* ]] || [[ "$registry_image" == *"/" ]] || [[ "$registry_image" != *":"* ]]; then
+                        # It's just a registry URL, append the default image name and tag
+                        if [[ "$registry_image" == *"/" ]]; then
+                            # Remove trailing slash if present
+                            registry_image="${registry_image%/}"
+                        fi
+                        registry_image="${registry_image}/ztpbootstrap-webui:latest"
+                        log "Appended default image name to registry URL from config.yaml: $registry_image"
+                    fi
+                fi
+                
+                # Check if it's a remote registry image (contains / and not localhost)
+                local is_remote_registry=false
+                if [[ "$registry_image" == *"/"* ]] && [[ "$registry_image" != "localhost"* ]] && [[ "$registry_image" != "ztpbootstrap-webui:local" ]]; then
+                    is_remote_registry=true
+                fi
+                
+                # For remote registry images, allow them even if not locally present (Podman will pull)
+                # For local images, verify they exist
+                if [[ "$is_remote_registry" == "true" ]] || podman image exists "$registry_image" 2>/dev/null; then
+                    image_tag="$registry_image"
+                    if [[ "$is_remote_registry" == "true" ]]; then
+                        log "Found configured remote registry image in config.yaml: $image_tag (will be pulled if needed)"
+                    else
+                        log "Found configured webui image in config.yaml: $image_tag"
+                    fi
+                else
+                    warn "Configured webui image '$registry_image' from config.yaml does not exist. Will check for local image or use base Fedora image."
+                fi
+            fi
+        fi
+        
+        # If no registry image (or it doesn't exist), check for local image
+        if [[ -z "$image_tag" ]]; then
+            local local_tag="ztpbootstrap-webui:local"
+            if podman image exists "$local_tag" 2>/dev/null; then
+                image_tag="$local_tag"
+                log "Found local webui image: $image_tag"
+            fi
+        fi
+        
+        # If we have an image tag, update the container file
+        if [[ -n "$image_tag" ]]; then
+            local sed_cmd="sed"
+            if [[ $EUID -ne 0 ]]; then
+                sed_cmd="sudo sed"
+            fi
+            if $sed_cmd -i.tmp "s|^Image=.*|Image=$image_tag|" "$webui_container_file" 2>/dev/null; then
+                rm -f "${webui_container_file}.tmp" 2>/dev/null || true
+                log "✓ Updated webui container to use image: $image_tag"
+            else
+                warn "Failed to update container file with image tag. Using default from container file."
+            fi
+        else
+            log "No custom webui image found. Container will use base Fedora image and install packages at runtime."
+        fi
+        
         # Copy webui directory to script directory (required for webui container)
         # Get script_dir from config.yaml or use default
         local script_dir_for_webui
@@ -1779,226 +1917,6 @@ create_pod_files_from_config() {
         else
             warn "Web UI source directory not found: ${repo_dir}/webui"
         fi
-        
-        # Manually run quadlet generator to ensure service is created
-        # This is needed because systemd's automatic generator may not always process all files
-        local webui_container_file="${systemd_dir}/ztpbootstrap-webui.container"
-        local webui_service_generated=false
-        if command -v /usr/libexec/podman/quadlet >/dev/null 2>&1; then
-            local quadlet_output
-            local quadlet_exit_code=0
-            if [[ $EUID -eq 0 ]]; then
-                quadlet_output=$(/usr/libexec/podman/quadlet "$webui_container_file" 2>&1) || quadlet_exit_code=$?
-            else
-                quadlet_output=$(sudo /usr/libexec/podman/quadlet "$webui_container_file" 2>&1) || quadlet_exit_code=$?
-            fi
-            if [[ $quadlet_exit_code -eq 0 ]] && [[ -n "$quadlet_output" ]]; then
-                # Check if service file was created in generator directory
-                if [[ -f "/run/systemd/generator/ztpbootstrap-webui.service" ]]; then
-                    log "WebUI service generated successfully by quadlet"
-                    webui_service_generated=true
-                else
-                    # Try to write the output manually
-                    echo "$quadlet_output" | grep -A 1000 "^---ztpbootstrap-webui.service---" | sed '1d' > /tmp/webui.service 2>/dev/null || true
-                    if [[ -s /tmp/webui.service ]]; then
-                        if [[ $EUID -eq 0 ]]; then
-                            mv /tmp/webui.service /run/systemd/generator/ztpbootstrap-webui.service 2>/dev/null && {
-                                log "WebUI service file created manually from quadlet output"
-                                webui_service_generated=true
-                            } || true
-                        else
-                            sudo mv /tmp/webui.service /run/systemd/generator/ztpbootstrap-webui.service 2>/dev/null && {
-                                log "WebUI service file created manually from quadlet output"
-                                webui_service_generated=true
-                            } || true
-                        fi
-                    fi
-                fi
-            fi
-            if [[ "$webui_service_generated" == "false" ]] && [[ -n "$quadlet_output" ]]; then
-                warn "Quadlet generator output: ${quadlet_output:0:200}"
-            fi
-        fi
-        
-        # If quadlet failed, create a basic service file manually
-        if [[ "$webui_service_generated" == "false" ]]; then
-            warn "Quadlet generator did not create webui service, creating manual service file..."
-            local systemd_system_dir="/etc/systemd/system"
-            if [[ $EUID -eq 0 ]]; then
-                mkdir -p "$systemd_system_dir"
-            else
-                sudo mkdir -p "$systemd_system_dir"
-            fi
-            
-            # Get the pod name from config or use default
-            local pod_name="ztpbootstrap"
-            if [[ -f "${systemd_dir}/ztpbootstrap.pod" ]] && command -v yq >/dev/null 2>&1; then
-                local pod_name_from_file
-                pod_name_from_file=$(grep "^PodName=" "${systemd_dir}/ztpbootstrap.pod" 2>/dev/null | cut -d'=' -f2 || echo "")
-                if [[ -n "$pod_name_from_file" ]]; then
-                    pod_name="$pod_name_from_file"
-                fi
-            fi
-            # The pod service name is always ztpbootstrap-pod.service (not ${pod_name}.service)
-            local pod_service_name="ztpbootstrap-pod.service"
-            
-            # Extract volumes and environment from container file
-            # Filter out Fedora-specific systemd library paths on non-Fedora systems
-            local volumes=""
-            local env_vars=""
-            local distro=""
-            # Detect distribution
-            if [[ -f /etc/os-release ]]; then
-                distro=$(grep "^ID=" /etc/os-release | cut -d'=' -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]')
-            fi
-            
-            if [[ -f "$webui_container_file" ]]; then
-                while IFS= read -r line; do
-                    if [[ "$line" =~ ^Volume= ]]; then
-                        local volume_path="${line#Volume=}"
-                        local source_path="${volume_path%%:*}"
-                        
-                        # Skip Fedora-specific systemd library paths on non-Fedora systems
-                        if [[ "$distro" != "fedora" ]] && [[ "$distro" != "rhel" ]] && [[ "$distro" != "centos" ]]; then
-                            if [[ "$source_path" =~ ^/lib64/libsystemd ]] || [[ "$source_path" == "/usr/lib64/systemd" ]]; then
-                                continue
-                            fi
-                        fi
-                        
-                        # Only include volume if source path exists (or is a special path like /run)
-                        if [[ "$source_path" =~ ^/run ]] || [[ "$source_path" =~ ^/opt ]] || [[ -e "$source_path" ]] || ([[ $EUID -ne 0 ]] && sudo test -e "$source_path" 2>/dev/null); then
-                            volumes="${volumes} -v ${volume_path}"
-                        else
-                            warn "Skipping volume mount for non-existent path: $source_path"
-                        fi
-                    elif [[ "$line" =~ ^Environment= ]]; then
-                        env_vars="${env_vars} --env ${line#Environment=}"
-                    fi
-                done < "$webui_container_file"
-            fi
-            
-            if [[ $EUID -eq 0 ]]; then
-                cat > "${systemd_system_dir}/ztpbootstrap-webui.service" << EOFWEBUI
-[Unit]
-Description=ZTP Bootstrap Web UI Container
-SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container
-RequiresMountsFor=%t/containers
-BindsTo=${pod_service_name}
-After=${pod_service_name}
-
-[Service]
-Restart=always
-Environment=PODMAN_SYSTEMD_UNIT=%n
-KillMode=mixed
-ExecStop=/usr/bin/podman rm -v -f -i ztpbootstrap-webui
-ExecStopPost=-/usr/bin/podman rm -v -f -i ztpbootstrap-webui
-Delegate=yes
-Type=notify
-NotifyAccess=all
-SyslogIdentifier=%N
-ExecStart=/usr/bin/podman run --name ztpbootstrap-webui --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes}${env_vars} docker.io/python:alpine /app/start-webui.sh
-EOFWEBUI
-            else
-                # Create file using sudo - write to temp file first, then move
-                local temp_file
-                temp_file=$(mktemp)
-                cat > "$temp_file" << EOFWEBUI
-[Unit]
-Description=ZTP Bootstrap Web UI Container
-SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container
-RequiresMountsFor=%t/containers
-BindsTo=${pod_service_name}
-After=${pod_service_name}
-
-[Service]
-Restart=always
-Environment=PODMAN_SYSTEMD_UNIT=%n
-KillMode=mixed
-ExecStop=/usr/bin/podman rm -v -f -i ztpbootstrap-webui
-ExecStopPost=-/usr/bin/podman rm -v -f -i ztpbootstrap-webui
-Delegate=yes
-Type=notify
-NotifyAccess=all
-SyslogIdentifier=%N
-ExecStart=/usr/bin/podman run --name ztpbootstrap-webui --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes}${env_vars} docker.io/python:alpine /app/start-webui.sh
-EOFWEBUI
-                # Create in /etc/systemd/system/ for permanence
-                if sudo mv "$temp_file" "${systemd_system_dir}/ztpbootstrap-webui.service" 2>&1; then
-                    log "WebUI service file created manually at ${systemd_system_dir}/ztpbootstrap-webui.service"
-                else
-                    warn "Failed to move temp file, trying sudo tee method..."
-                    rm -f "$temp_file"
-                    sudo tee "${systemd_system_dir}/ztpbootstrap-webui.service" > /dev/null << EOFWEBUI2
-[Unit]
-Description=ZTP Bootstrap Web UI Container
-SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container
-RequiresMountsFor=%t/containers
-BindsTo=${pod_service_name}
-After=${pod_service_name}
-
-[Service]
-Restart=always
-Environment=PODMAN_SYSTEMD_UNIT=%n
-KillMode=mixed
-ExecStop=/usr/bin/podman rm -v -f -i ztpbootstrap-webui
-ExecStopPost=-/usr/bin/podman rm -v -f -i ztpbootstrap-webui
-Delegate=yes
-Type=notify
-NotifyAccess=all
-SyslogIdentifier=%N
-ExecStart=/usr/bin/podman run --name ztpbootstrap-webui --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes}${env_vars} docker.io/python:alpine /app/start-webui.sh
-EOFWEBUI2
-                fi
-            fi
-            log "Created manual webui service file"
-        fi
-        
-        # Always ensure the service file includes the start-webui.sh command
-        # Quadlet regenerates the service file, so we use a systemd drop-in to override ExecStart
-        # This is more reliable than modifying the generated file
-        local override_dir="/etc/systemd/system/ztpbootstrap-webui.service.d"
-        local webui_service_file="${systemd_system_dir}/ztpbootstrap-webui.service"
-        # Check both locations
-        if [[ ! -f "$webui_service_file" ]] && [[ -f "/run/systemd/generator/ztpbootstrap-webui.service" ]]; then
-            webui_service_file="/run/systemd/generator/ztpbootstrap-webui.service"
-        fi
-        
-        if [[ -f "$webui_service_file" ]]; then
-            if [[ $EUID -eq 0 ]]; then
-                mkdir -p "$override_dir"
-            else
-                sudo mkdir -p "$override_dir"
-            fi
-            
-            # Extract the ExecStart line from the service file
-            local execstart_line
-            if [[ $EUID -eq 0 ]]; then
-                execstart_line=$(grep "^ExecStart=" "$webui_service_file" | head -1)
-            else
-                execstart_line=$(sudo grep "^ExecStart=" "$webui_service_file" | head -1)
-            fi
-            
-            if [[ -n "$execstart_line" ]] && [[ "$execstart_line" != *"/app/start-webui.sh"* ]]; then
-                log "Creating systemd drop-in to add /app/start-webui.sh command to webui service..."
-                # Append /app/start-webui.sh to the ExecStart line
-                local updated_execstart
-                updated_execstart="${execstart_line} /app/start-webui.sh"
-                if [[ $EUID -eq 0 ]]; then
-                    cat > "${override_dir}/override.conf" << EOF
-[Service]
-ExecStart=
-ExecStart=${updated_execstart#ExecStart=}
-EOF
-                else
-                    sudo tee "${override_dir}/override.conf" > /dev/null << EOF
-[Service]
-ExecStart=
-ExecStart=${updated_execstart#ExecStart=}
-EOF
-                fi
-                log "Created systemd drop-in override for webui service"
-            fi
-        fi
     fi
     
     return 0
@@ -2006,6 +1924,37 @@ EOF
 
 start_services_after_install() {
     log "Starting new services..."
+    
+    # Enable and start podman.socket if not already running
+    # This is required for the webui container to access podman commands
+    local socket_check_cmd="systemctl"
+    local socket_enable_cmd="systemctl"
+    local socket_start_cmd="systemctl"
+    if [[ $EUID -ne 0 ]]; then
+        socket_check_cmd="sudo systemctl"
+        socket_enable_cmd="sudo systemctl"
+        socket_start_cmd="sudo systemctl"
+    fi
+    
+    if $socket_check_cmd is-enabled podman.socket >/dev/null 2>&1; then
+        if ! $socket_check_cmd is-active podman.socket >/dev/null 2>&1; then
+            log "Starting podman.socket..."
+            if $socket_start_cmd start podman.socket 2>&1; then
+                log "✓ podman.socket started"
+            else
+                warn "Failed to start podman.socket (webui container may not be able to access podman commands)"
+            fi
+        else
+            log "✓ podman.socket is already running"
+        fi
+    else
+        log "Enabling and starting podman.socket..."
+        if $socket_enable_cmd enable --now podman.socket 2>&1; then
+            log "✓ podman.socket enabled and started"
+        else
+            warn "Failed to enable/start podman.socket (webui container may not be able to access podman commands)"
+        fi
+    fi
     
     # Reload systemd first
     if [[ $EUID -eq 0 ]]; then
@@ -2016,65 +1965,6 @@ start_services_after_install() {
     
     sleep 2
     
-    # Ensure webui drop-in is created after systemd reload (so generated service file exists)
-    # This is needed because the drop-in creation in create_pod_files_from_config might run
-    # before the generated service file exists
-    if [[ -f "/etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container" ]]; then
-        local override_dir="/etc/systemd/system/ztpbootstrap-webui.service.d"
-        if [[ -f "/run/systemd/generator/ztpbootstrap-webui.service" ]]; then
-            if [[ $EUID -eq 0 ]]; then
-                mkdir -p "$override_dir" 2>/dev/null || true
-            else
-                sudo mkdir -p "$override_dir" 2>/dev/null || true
-            fi
-            
-            # Check if drop-in already exists and has the correct command
-            local dropin_exists=false
-            if [[ -f "${override_dir}/override.conf" ]]; then
-                if grep -q "/app/start-webui.sh" "${override_dir}/override.conf" 2>/dev/null; then
-                    dropin_exists=true
-                fi
-            fi
-            
-            if [[ "$dropin_exists" == "false" ]]; then
-                # Extract the ExecStart line from the generated service file
-                local execstart_line
-                if [[ $EUID -eq 0 ]]; then
-                    execstart_line=$(grep "^ExecStart=" /run/systemd/generator/ztpbootstrap-webui.service | head -1)
-                else
-                    execstart_line=$(sudo grep "^ExecStart=" /run/systemd/generator/ztpbootstrap-webui.service | head -1)
-                fi
-                
-                if [[ -n "$execstart_line" ]]; then
-                    log "Creating systemd drop-in to add /app/start-webui.sh command to webui service..."
-                    # Append /app/start-webui.sh to the ExecStart line
-                    local updated_execstart
-                    updated_execstart="${execstart_line} /app/start-webui.sh"
-                    if [[ $EUID -eq 0 ]]; then
-                        cat > "${override_dir}/override.conf" << EOF
-[Service]
-ExecStart=
-ExecStart=${updated_execstart#ExecStart=}
-EOF
-                    else
-                        sudo tee "${override_dir}/override.conf" > /dev/null << EOF
-[Service]
-ExecStart=
-ExecStart=${updated_execstart#ExecStart=}
-EOF
-                    fi
-                    log "Created systemd drop-in override for webui service"
-                    # Reload systemd again to pick up the drop-in
-                    if [[ $EUID -eq 0 ]]; then
-                        systemctl daemon-reload
-                    else
-                        sudo systemctl daemon-reload
-                    fi
-                    sleep 1
-                fi
-            fi
-        fi
-    fi
     
     # Verify services exist before trying to start them
     # Check both generator directory (temporary) and systemd system directory (permanent)
@@ -2139,12 +2029,163 @@ EOF
             warn "Failed to start ztpbootstrap-nginx.service"
         fi
         
+        # Helper function to diagnose webui startup failures
+        diagnose_webui_failure() {
+            warn "=== WebUI Container Startup Diagnostics ==="
+            
+            # Check service file locations
+            local generator_file="/run/systemd/generator/ztpbootstrap-webui.service"
+            local system_file="/etc/systemd/system/ztpbootstrap-webui.service"
+            
+            warn "Service file locations:"
+            if [[ -f "$generator_file" ]] || ([[ $EUID -ne 0 ]] && sudo test -f "$generator_file" 2>/dev/null); then
+                warn "  ✓ Found: $generator_file"
+            else
+                warn "  ✗ Not found: $generator_file"
+            fi
+            if [[ -f "$system_file" ]] || ([[ $EUID -ne 0 ]] && sudo test -f "$system_file" 2>/dev/null); then
+                warn "  ✓ Found: $system_file"
+            else
+                warn "  ✗ Not found: $system_file"
+            fi
+            
+            # Check service status
+            warn "Service status:"
+            if [[ $EUID -eq 0 ]]; then
+                systemctl status ztpbootstrap-webui.service --no-pager -l 2>&1 | head -20 | sed 's/^/    /' | while IFS= read -r line; do
+                    warn "$line"
+                done || true
+            else
+                sudo systemctl status ztpbootstrap-webui.service --no-pager -l 2>&1 | head -20 | sed 's/^/    /' | while IFS= read -r line; do
+                    warn "$line"
+                done || true
+            fi
+            
+            # Check if container exists
+            if podman ps -a --filter name=ztpbootstrap-webui --format "{{.Names}}" 2>/dev/null | grep -q ztpbootstrap-webui; then
+                warn "Container exists (may be stopped):"
+                podman ps -a --filter name=ztpbootstrap-webui 2>/dev/null | sed 's/^/    /' | while IFS= read -r line; do
+                    warn "$line"
+                done
+                warn "Container logs (last 30 lines):"
+                podman logs ztpbootstrap-webui --tail 30 2>&1 | sed 's/^/    /' | while IFS= read -r line; do
+                    warn "$line"
+                done || true
+            else
+                warn "  ✗ Container does not exist"
+            fi
+            
+            # Check journal logs
+            warn "Systemd journal (last 20 lines):"
+            if [[ $EUID -eq 0 ]]; then
+                journalctl -u ztpbootstrap-webui.service -n 20 --no-pager 2>&1 | sed 's/^/    /' | while IFS= read -r line; do
+                    warn "$line"
+                done || true
+            else
+                sudo journalctl -u ztpbootstrap-webui.service -n 20 --no-pager 2>&1 | sed 's/^/    /' | while IFS= read -r line; do
+                    warn "$line"
+                done || true
+            fi
+            
+            # Check if required files exist
+            warn "Required files:"
+            if [[ -f "/opt/containerdata/ztpbootstrap/webui/start-webui.sh" ]] || ([[ $EUID -ne 0 ]] && sudo test -f "/opt/containerdata/ztpbootstrap/webui/start-webui.sh" 2>/dev/null); then
+                warn "  ✓ /opt/containerdata/ztpbootstrap/webui/start-webui.sh exists"
+                if [[ -x "/opt/containerdata/ztpbootstrap/webui/start-webui.sh" ]] || ([[ $EUID -ne 0 ]] && sudo test -x "/opt/containerdata/ztpbootstrap/webui/start-webui.sh" 2>/dev/null); then
+                    warn "  ✓ start-webui.sh is executable"
+                else
+                    warn "  ✗ start-webui.sh is NOT executable"
+                fi
+            else
+                warn "  ✗ /opt/containerdata/ztpbootstrap/webui/start-webui.sh NOT FOUND"
+            fi
+            if [[ -f "/opt/containerdata/ztpbootstrap/webui/app.py" ]] || ([[ $EUID -ne 0 ]] && sudo test -f "/opt/containerdata/ztpbootstrap/webui/app.py" 2>/dev/null); then
+                warn "  ✓ /opt/containerdata/ztpbootstrap/webui/app.py exists"
+            else
+                warn "  ✗ /opt/containerdata/ztpbootstrap/webui/app.py NOT FOUND"
+            fi
+            
+            warn "=== End Diagnostics ==="
+        }
+        
         # Start webui container if it exists
-        if systemctl list-unit-files | grep -q ztpbootstrap-webui.service; then
-            if systemctl start ztpbootstrap-webui.service 2>/dev/null; then
-                log "✓ Started ztpbootstrap-webui.service"
+        # Check both generator directory and systemd system directory for service file
+        local webui_service_exists=false
+        if [[ -f "${generator_dir}/ztpbootstrap-webui.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-webui.service" ]]; then
+            webui_service_exists=true
+        elif [[ $EUID -ne 0 ]]; then
+            if sudo test -f "${generator_dir}/ztpbootstrap-webui.service" 2>/dev/null || sudo test -f "${systemd_system_dir}/ztpbootstrap-webui.service" 2>/dev/null; then
+                webui_service_exists=true
+            fi
+        fi
+        
+        # Also check via systemctl list-unit-files as fallback
+        if [[ "$webui_service_exists" == "false" ]]; then
+            if systemctl list-unit-files 2>/dev/null | grep -q ztpbootstrap-webui.service; then
+                webui_service_exists=true
+            elif [[ $EUID -ne 0 ]]; then
+                if sudo systemctl list-unit-files 2>/dev/null | grep -q ztpbootstrap-webui.service; then
+                    webui_service_exists=true
+                fi
+            fi
+        fi
+        
+        if [[ "$webui_service_exists" == "true" ]]; then
+            log "Starting webui container..."
+            local start_cmd="systemctl start ztpbootstrap-webui.service"
+            if [[ $EUID -ne 0 ]]; then
+                start_cmd="sudo systemctl start ztpbootstrap-webui.service"
+            fi
+            
+            if $start_cmd 2>&1; then
+                # Wait longer for container to start (containers can take time to initialize)
+                sleep 8
+                
+                # Verify service is actually running
+                local is_active_cmd="systemctl is-active --quiet ztpbootstrap-webui.service"
+                if [[ $EUID -ne 0 ]]; then
+                    is_active_cmd="sudo systemctl is-active --quiet ztpbootstrap-webui.service"
+                fi
+                
+                if $is_active_cmd; then
+                    # Check container status with retries (containers may be in "starting" state)
+                    local container_running=false
+                    local max_retries=5
+                    local retry_count=0
+                    
+                    while [[ $retry_count -lt $max_retries ]]; do
+                        # Check if container exists and is running or starting
+                        local container_status
+                        container_status=$(podman ps -a --filter name=ztpbootstrap-webui --format "{{.Status}}" 2>/dev/null || echo "")
+                        
+                        if [[ -n "$container_status" ]]; then
+                            # Container exists - check if it's running, starting, or healthy
+                            if echo "$container_status" | grep -qE "(Up|starting|healthy)"; then
+                                container_running=true
+                                break
+                            fi
+                        fi
+                        
+                        retry_count=$((retry_count + 1))
+                        if [[ $retry_count -lt $max_retries ]]; then
+                            sleep 2
+                        fi
+                    done
+                    
+                    if [[ "$container_running" == "true" ]]; then
+                        log "✓ Started ztpbootstrap-webui.service and container is running"
+                    else
+                        # Only warn if container truly failed after all retries
+                        warn "⚠️  Webui container did not start successfully after multiple checks"
+                        diagnose_webui_failure
+                    fi
+                else
+                    warn "⚠️  Service start command succeeded but service is not active"
+                    diagnose_webui_failure
+                fi
             else
                 warn "Failed to start ztpbootstrap-webui.service"
+                diagnose_webui_failure
             fi
         fi
     else
@@ -2164,12 +2205,61 @@ EOF
             warn "Failed to start ztpbootstrap-nginx.service"
         fi
         
-        if systemctl list-unit-files | grep -q ztpbootstrap-webui.service; then
-            if sudo systemctl start ztpbootstrap-webui.service 2>/dev/null; then
-                log "✓ Started ztpbootstrap-webui.service"
+        # Check if webui service exists (check both file locations and systemctl)
+        local webui_service_exists=false
+        if [[ -f "${generator_dir}/ztpbootstrap-webui.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-webui.service" ]]; then
+            webui_service_exists=true
+        elif sudo test -f "${generator_dir}/ztpbootstrap-webui.service" 2>/dev/null || sudo test -f "${systemd_system_dir}/ztpbootstrap-webui.service" 2>/dev/null; then
+            webui_service_exists=true
+        elif sudo systemctl list-unit-files 2>/dev/null | grep -q ztpbootstrap-webui.service; then
+            webui_service_exists=true
+        fi
+        
+        if [[ "$webui_service_exists" == "true" ]]; then
+            log "Starting webui container..."
+            if sudo systemctl start ztpbootstrap-webui.service 2>&1; then
+                # Wait longer for container to start (containers can take time to initialize)
+                sleep 8
+                
+                if sudo systemctl is-active --quiet ztpbootstrap-webui.service 2>/dev/null; then
+                    # Check container status with retries (containers may be in "starting" state)
+                    local container_running=false
+                    local max_retries=5
+                    local retry_count=0
+                    
+                    while [[ $retry_count -lt $max_retries ]]; do
+                        # Check if container exists and is running or starting
+                        local container_status
+                        container_status=$(podman ps -a --filter name=ztpbootstrap-webui --format "{{.Status}}" 2>/dev/null || echo "")
+                        
+                        if [[ -n "$container_status" ]]; then
+                            # Container exists - check if it's running, starting, or healthy
+                            if echo "$container_status" | grep -qE "(Up|starting|healthy)"; then
+                                container_running=true
+                                break
+                            fi
+                        fi
+                        
+                        retry_count=$((retry_count + 1))
+                        if [[ $retry_count -lt $max_retries ]]; then
+                            sleep 2
+                        fi
+                    done
+                    
+                    if [[ "$container_running" == "true" ]]; then
+                        log "✓ Started ztpbootstrap-webui.service and container is running"
+                    else
+                        # Only warn if container truly failed after all retries
+                        warn "⚠️  Webui container did not start successfully after multiple checks"
+                    fi
+                else
+                    warn "⚠️  Service start command succeeded but service is not active"
+                fi
             else
                 warn "Failed to start ztpbootstrap-webui.service"
             fi
+        else
+            warn "WebUI service file not found. It may not have been generated yet."
         fi
     fi
     
@@ -2207,189 +2297,7 @@ interactive_config() {
     log "You can press Enter to accept default values (shown in brackets)."
     echo ""
     
-    # Section 1: Directory Paths
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}  Directory Paths${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    prompt_with_default "Main service directory" "${EXISTING_SCRIPT_DIR:-/opt/containerdata/ztpbootstrap}" SCRIPT_DIR
-    # Validate SCRIPT_DIR is a reasonable path (not just a single character or yes/no)
-    if [[ "${#SCRIPT_DIR}" -lt 3 ]] || [[ "$SCRIPT_DIR" =~ ^[yYnN]$ ]]; then
-        warn "Invalid directory path: '$SCRIPT_DIR'. Using default."
-        SCRIPT_DIR="${EXISTING_SCRIPT_DIR:-/opt/containerdata/ztpbootstrap}"
-        log "Using default: $SCRIPT_DIR"
-    fi
-    prompt_with_default "SSL certificate directory" "/opt/containerdata/certs/wild" CERT_DIR
-    # Store CERT_DIR for later use in SSL certificate detection
-    local cert_dir_for_check="$CERT_DIR"
-    prompt_with_default "Environment file path" "${SCRIPT_DIR}/ztpbootstrap.env" ENV_FILE
-    prompt_with_default "Bootstrap script path" "${SCRIPT_DIR}/bootstrap.py" BOOTSTRAP_SCRIPT
-    prompt_with_default "Nginx config file" "${SCRIPT_DIR}/nginx.conf" NGINX_CONF
-    
-    echo ""
-    
-    # Section 2: Network Configuration
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}  Network Configuration${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    # Determine default domain (existing, system FQDN, or example)
-    local default_domain="${EXISTING_DOMAIN:-}"
-    if [[ -z "$default_domain" ]]; then
-        # Try system FQDN as fallback
-        if command -v hostname >/dev/null 2>&1; then
-            # Try -f first (FQDN)
-            default_domain=$(hostname -f 2>/dev/null || echo "")
-            # If that didn't work or returned just hostname, try to get FQDN another way
-            if [[ -z "$default_domain" ]] || [[ "$default_domain" == "$(hostname 2>/dev/null || echo "")" ]]; then
-                # Try using domainname or dnsdomainname
-                local hostname_short
-                hostname_short=$(hostname 2>/dev/null || echo "")
-                local domainname
-                domainname=$(domainname 2>/dev/null || dnsdomainname 2>/dev/null || echo "")
-                if [[ -n "$hostname_short" ]] && [[ -n "$domainname" ]] && [[ "$domainname" != "(none)" ]]; then
-                    default_domain="${hostname_short}.${domainname}"
-                elif [[ -n "$hostname_short" ]]; then
-                    # Fallback to just hostname if no domain available
-                    default_domain="$hostname_short"
-                fi
-            fi
-            if [[ -z "$default_domain" ]] || [[ "$default_domain" == "localhost" ]] || [[ "$default_domain" == "localhost.localdomain" ]]; then
-                default_domain="ztpboot.example.com"
-            fi
-        else
-            default_domain="ztpboot.example.com"
-        fi
-    fi
-    prompt_with_default "Domain name" "$default_domain" DOMAIN
-    
-    # Ask about host network mode FIRST, so user can override detected IP addresses
-    # Determine default host network mode from existing network config
-    local default_host_network="n"
-    if [[ "${EXISTING_NETWORK:-}" == "host" ]]; then
-        default_host_network="y"
-    fi
-    prompt_yes_no "Use host network mode? (overrides IP addresses, useful for testing)" "$default_host_network" HOST_NETWORK
-    
-    # If host network is enabled, clear IP addresses and skip IP prompts
-    if [[ "$HOST_NETWORK" == "true" ]]; then
-        IPV4=""
-        IPV6=""
-        log "Host network mode enabled - IP addresses will be ignored"
-    else
-        # For IPv4, use existing value if set, otherwise default to 10.0.0.10
-        local default_ipv4="10.0.0.10"
-        if [[ -n "${EXISTING_IPV4:-}" ]]; then
-            default_ipv4="$EXISTING_IPV4"
-        fi
-        # Clearer prompt wording: if there's a default, pressing Enter uses it
-        if [[ -n "$default_ipv4" ]]; then
-            prompt_with_default "IPv4 address" "$default_ipv4" IPV4 "false" "true"
-        else
-            prompt_with_default "IPv4 address (leave empty for host network)" "" IPV4 "false" "true"
-        fi
-        
-        # For IPv6, use existing value if set (even if empty), otherwise default to empty
-        local default_ipv6=""
-        if [[ -n "${EXISTING_IPV6:-}" ]]; then
-            default_ipv6="$EXISTING_IPV6"
-        elif [[ -z "${EXISTING_IPV6:-}" ]] && [[ "${EXISTING_IPV6+set}" == "set" ]]; then
-            # IPv6 was explicitly set to empty in existing config
-            default_ipv6=""
-        else
-            # IPv6 was not set at all, use empty as default (to disable)
-            default_ipv6=""
-        fi
-        # Clearer prompt wording: if there's a default, pressing Enter uses it
-        if [[ -n "$default_ipv6" ]]; then
-            prompt_with_default "IPv6 address" "$default_ipv6" IPV6 "false" "true"
-        else
-            prompt_with_default "IPv6 address (leave empty to disable)" "" IPV6 "false" "true"
-        fi
-    fi
-    prompt_with_default "HTTPS port" "${EXISTING_HTTPS_PORT:-443}" HTTPS_PORT
-    prompt_with_default "HTTP port" "80" HTTP_PORT
-    # Determine default for HTTP-only mode
-    local default_http_only="n"
-    if [[ "${EXISTING_HTTP_ONLY:-}" == "true" ]]; then
-        default_http_only="y"
-    fi
-    prompt_yes_no "Use HTTP-only mode (insecure, not recommended)" "$default_http_only" HTTP_ONLY
-    
-    echo ""
-    
-    # Section 3: CVaaS Configuration
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}  CVaaS Configuration${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    log "CVaaS Address options:"
-    log "  - www.arista.io (recommended - works for all clusters)"
-    log "  - www.cv-prod-us-central1-b.arista.io (US 1b)"
-    log "  - www.cv-prod-euwest-2.arista.io (Europe West 2)"
-    log "  - See config.yaml.template for all regional options"
-    echo ""
-    
-    prompt_with_default "CVaaS address" "${EXISTING_CV_ADDR:-www.arista.io}" CV_ADDR
-    prompt_with_default "Enrollment token (from CVaaS Device Registration)" "${EXISTING_ENROLLMENT_TOKEN:-}" ENROLLMENT_TOKEN "true"
-    prompt_with_default "Proxy URL (leave empty if not needed)" "${EXISTING_CV_PROXY:-}" CV_PROXY
-    prompt_with_default "EOS image URL (optional, for upgrades)" "${EXISTING_EOS_URL:-}" EOS_URL
-    prompt_with_default "NTP server" "${EXISTING_NTP_SERVER:-time.nist.gov}" NTP_SERVER
-    
-    echo ""
-    
-    # Section 4: SSL Certificate Configuration
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}  SSL Certificate Configuration${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
-    
-    prompt_with_default "Certificate filename" "fullchain.pem" CERT_FILE
-    prompt_with_default "Private key filename" "privkey.pem" KEY_FILE
-    
-    # Check if certificates already exist (use the cert_dir_for_check variable set earlier)
-    local cert_path="${cert_dir_for_check}/${CERT_FILE}"
-    local key_path="${cert_dir_for_check}/${KEY_FILE}"
-    local certs_exist=false
-    
-    if [[ -f "$cert_path" ]] && [[ -f "$key_path" ]]; then
-        certs_exist=true
-        log "Existing SSL certificates detected at:"
-        log "  Certificate: $cert_path"
-        log "  Private Key: $key_path"
-        log "Skipping Let's Encrypt and self-signed certificate prompts (certificates managed externally)"
-    fi
-    
-    if [[ "$certs_exist" == "false" ]]; then
-        prompt_yes_no "Use Let's Encrypt with certbot?" "n" USE_LETSENCRYPT
-        
-        if [[ "$USE_LETSENCRYPT" == "true" ]]; then
-            prompt_with_default "Email for Let's Encrypt registration" "admin@example.com" LETSENCRYPT_EMAIL
-        else
-            LETSENCRYPT_EMAIL="admin@example.com"
-        fi
-        
-        # Default to creating self-signed certificate if HTTP_ONLY is false (HTTPS mode)
-        # This ensures nginx can start without manual certificate creation
-        local default_self_signed="n"
-        if [[ "${HTTP_ONLY:-false}" == "false" ]]; then
-            default_self_signed="y"
-        fi
-        
-        prompt_yes_no "Create self-signed certificate for testing (if no cert exists)?" "$default_self_signed" CREATE_SELF_SIGNED
-    else
-        # Certificates exist, skip these prompts
-        USE_LETSENCRYPT="false"
-        LETSENCRYPT_EMAIL="admin@example.com"
-        CREATE_SELF_SIGNED="false"
-    fi
-    
-    echo ""
-    
-    # Section 5: Authentication Configuration
+    # Section 1: Authentication Configuration (Web UI) - moved first
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}  Authentication Configuration (Web UI)${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -2566,8 +2474,13 @@ PYTHON_VERIFY
         fi
     fi
     
-    # Session timeout (optional, has reasonable default)
-    prompt_with_default "Session timeout in seconds" "3600" SESSION_TIMEOUT
+    # Session timeout - only prompt in extended mode
+    if [[ "${EXTENDED_MODE:-false}" == "true" ]]; then
+        prompt_with_default "Session timeout in seconds" "3600" SESSION_TIMEOUT
+    else
+        # Use default when not in extended mode
+        SESSION_TIMEOUT="${SESSION_TIMEOUT:-3600}"
+    fi
     
     # Generate session secret
     if command -v python3 >/dev/null 2>&1; then
@@ -2586,6 +2499,270 @@ PYTHON_VERIFY
     
     echo ""
     
+    # Section 2: Directory Paths
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  Directory Paths${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    
+    prompt_with_default "Main service directory" "${EXISTING_SCRIPT_DIR:-/opt/containerdata/ztpbootstrap}" SCRIPT_DIR
+    # Validate SCRIPT_DIR is a reasonable path (not just a single character or yes/no)
+    if [[ "${#SCRIPT_DIR}" -lt 3 ]] || [[ "$SCRIPT_DIR" =~ ^[yYnN]$ ]]; then
+        warn "Invalid directory path: '$SCRIPT_DIR'. Using default."
+        SCRIPT_DIR="${EXISTING_SCRIPT_DIR:-/opt/containerdata/ztpbootstrap}"
+        log "Using default: $SCRIPT_DIR"
+    fi
+    prompt_with_default "SSL certificate directory" "/opt/containerdata/certs/wild" CERT_DIR
+    # Store CERT_DIR for later use in SSL certificate detection
+    local cert_dir_for_check="$CERT_DIR"
+    prompt_with_default "Environment file path" "${SCRIPT_DIR}/ztpbootstrap.env" ENV_FILE
+    prompt_with_default "Bootstrap script path" "${SCRIPT_DIR}/bootstrap.py" BOOTSTRAP_SCRIPT
+    prompt_with_default "Nginx config file" "${SCRIPT_DIR}/nginx.conf" NGINX_CONF
+    
+    echo ""
+    
+    # WebUI Image Registry (ask early if user has pre-built image)
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  WebUI Container Image${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    log "If you have previously built and pushed the webui image to a remote registry,"
+    log "you can specify it here. Otherwise, you can build it locally later in the setup."
+    echo ""
+    
+    # Check if there's an existing registry image in config.yaml
+    local existing_registry_image=""
+    if [[ -f "${SCRIPT_DIR}/config.yaml" ]]; then
+        existing_registry_image=$(yq eval '.webui.registry_image // ""' "${SCRIPT_DIR}/config.yaml" 2>/dev/null || echo "")
+        if [[ -n "$existing_registry_image" ]] && [[ "$existing_registry_image" != "null" ]] && [[ "$existing_registry_image" != "" ]]; then
+            # Only use it if it's a remote registry (not local)
+            if [[ "$existing_registry_image" != "ztpbootstrap-webui:local" ]] && [[ "$existing_registry_image" != *"localhost"* ]]; then
+                # If it's just a registry URL (no / or no image name), append default image name
+                local default_value="$existing_registry_image"
+                if [[ "$existing_registry_image" != *"/"* ]] || [[ "$existing_registry_image" == *"/" ]] || [[ "$existing_registry_image" != *":"* ]]; then
+                    # It's just a registry URL, append the default image name and tag
+                    if [[ "$existing_registry_image" == *"/" ]]; then
+                        # Remove trailing slash if present
+                        default_value="${existing_registry_image%/}"
+                    fi
+                    default_value="${default_value}/ztpbootstrap-webui:latest"
+                fi
+                prompt_with_default "Remote registry image (e.g., registry.example.com/ztpbootstrap-webui:latest)" "$default_value" WEBUI_REGISTRY_IMAGE
+            else
+                prompt_with_default "Remote registry image (e.g., registry.example.com/ztpbootstrap-webui:latest)" "" WEBUI_REGISTRY_IMAGE
+            fi
+        else
+            prompt_with_default "Remote registry image (e.g., registry.example.com/ztpbootstrap-webui:latest)" "" WEBUI_REGISTRY_IMAGE
+        fi
+    else
+        prompt_with_default "Remote registry image (e.g., registry.example.com/ztpbootstrap-webui:latest)" "" WEBUI_REGISTRY_IMAGE
+    fi
+    
+    # If user provided a registry image, extract registry and tag
+    if [[ -n "${WEBUI_REGISTRY_IMAGE:-}" ]] && [[ "${WEBUI_REGISTRY_IMAGE}" != "" ]]; then
+        # If user provided just a registry URL (no / or no image name), append default image name
+        if [[ "$WEBUI_REGISTRY_IMAGE" != *"/"* ]] || [[ "$WEBUI_REGISTRY_IMAGE" == *"/" ]] || [[ "$WEBUI_REGISTRY_IMAGE" != *":"* ]]; then
+            # It's just a registry URL, append the default image name and tag
+            if [[ "$WEBUI_REGISTRY_IMAGE" == *"/" ]]; then
+                # Remove trailing slash if present
+                WEBUI_REGISTRY_IMAGE="${WEBUI_REGISTRY_IMAGE%/}"
+            fi
+            WEBUI_IMAGE_TAG="${WEBUI_REGISTRY_IMAGE}/ztpbootstrap-webui:latest"
+            log "Appended default image name to registry URL: $WEBUI_IMAGE_TAG"
+        else
+            # User provided full image tag
+            WEBUI_IMAGE_TAG="${WEBUI_REGISTRY_IMAGE}"
+        fi
+        
+        # Extract registry URL (everything before the last /)
+        if [[ "$WEBUI_IMAGE_TAG" == *"/"* ]]; then
+            WEBUI_IMAGE_REGISTRY="${WEBUI_IMAGE_TAG%/*}"
+        else
+            WEBUI_IMAGE_REGISTRY=""
+        fi
+        log "Will use remote registry image: $WEBUI_IMAGE_TAG"
+    else
+        WEBUI_IMAGE_TAG=""
+        WEBUI_IMAGE_REGISTRY=""
+        log "No remote registry image specified. Will build locally or use base Fedora image."
+    fi
+    
+    echo ""
+    
+    # Section 3: Network Configuration
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  Network Configuration${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    
+    # Determine default domain (existing, system FQDN, or example)
+    local default_domain="${EXISTING_DOMAIN:-}"
+    if [[ -z "$default_domain" ]]; then
+        # Try system FQDN as fallback
+        if command -v hostname >/dev/null 2>&1; then
+            # Try -f first (FQDN)
+            default_domain=$(hostname -f 2>/dev/null || echo "")
+            # If that didn't work or returned just hostname, try to get FQDN another way
+            if [[ -z "$default_domain" ]] || [[ "$default_domain" == "$(hostname 2>/dev/null || echo "")" ]]; then
+                # Try using domainname or dnsdomainname
+                local hostname_short
+                hostname_short=$(hostname 2>/dev/null || echo "")
+                local domainname
+                domainname=$(domainname 2>/dev/null || dnsdomainname 2>/dev/null || echo "")
+                if [[ -n "$hostname_short" ]] && [[ -n "$domainname" ]] && [[ "$domainname" != "(none)" ]]; then
+                    default_domain="${hostname_short}.${domainname}"
+                elif [[ -n "$hostname_short" ]]; then
+                    # Fallback to just hostname if no domain available
+                    default_domain="$hostname_short"
+                fi
+            fi
+            if [[ -z "$default_domain" ]] || [[ "$default_domain" == "localhost" ]] || [[ "$default_domain" == "localhost.localdomain" ]]; then
+                default_domain="ztpboot.example.com"
+            fi
+        else
+            default_domain="ztpboot.example.com"
+        fi
+    fi
+    prompt_with_default "Domain name" "$default_domain" DOMAIN
+    
+    # Ask about host network mode FIRST, so user can override detected IP addresses
+    # Determine default host network mode from existing network config
+    local default_host_network="n"
+    if [[ "${EXISTING_NETWORK:-}" == "host" ]]; then
+        default_host_network="y"
+    fi
+    prompt_yes_no "Use host network mode? (overrides IP addresses, useful for testing)" "$default_host_network" HOST_NETWORK
+    
+    # If host network is enabled, clear IP addresses and skip IP prompts
+    if [[ "$HOST_NETWORK" == "true" ]]; then
+        IPV4=""
+        IPV6=""
+        log "Host network mode enabled - IP addresses will be ignored"
+    else
+        # For IPv4, use existing value if set, otherwise default to 10.0.0.10
+        local default_ipv4="10.0.0.10"
+        if [[ -n "${EXISTING_IPV4:-}" ]]; then
+            default_ipv4="$EXISTING_IPV4"
+        fi
+        # Clearer prompt wording: if there's a default, pressing Enter uses it
+        if [[ -n "$default_ipv4" ]]; then
+            prompt_with_default "IPv4 address" "$default_ipv4" IPV4 "false" "true"
+        else
+            prompt_with_default "IPv4 address (leave empty for host network)" "" IPV4 "false" "true"
+        fi
+        
+        # For IPv6, use existing value if set (even if empty), otherwise default to empty
+        local default_ipv6=""
+        if [[ -n "${EXISTING_IPV6:-}" ]]; then
+            default_ipv6="$EXISTING_IPV6"
+        elif [[ -z "${EXISTING_IPV6:-}" ]] && [[ "${EXISTING_IPV6+set}" == "set" ]]; then
+            # IPv6 was explicitly set to empty in existing config
+            default_ipv6=""
+        else
+            # IPv6 was not set at all, use empty as default (to disable)
+            default_ipv6=""
+        fi
+        # Clearer prompt wording: if there's a default, pressing Enter uses it
+        if [[ -n "$default_ipv6" ]]; then
+            prompt_with_default "IPv6 address" "$default_ipv6" IPV6 "false" "true"
+        else
+            prompt_with_default "IPv6 address (leave empty to disable)" "" IPV6 "false" "true"
+        fi
+    fi
+    # HTTPS and HTTP ports - only prompt in extended mode
+    if [[ "${EXTENDED_MODE:-false}" == "true" ]]; then
+        prompt_with_default "HTTPS port" "${EXISTING_HTTPS_PORT:-443}" HTTPS_PORT
+        prompt_with_default "HTTP port" "80" HTTP_PORT
+    else
+        # Use defaults when not in extended mode
+        HTTPS_PORT="${HTTPS_PORT:-${EXISTING_HTTPS_PORT:-443}}"
+        HTTP_PORT="${HTTP_PORT:-80}"
+    fi
+    # Determine default for HTTP-only mode
+    local default_http_only="n"
+    if [[ "${EXISTING_HTTP_ONLY:-}" == "true" ]]; then
+        default_http_only="y"
+    fi
+    prompt_yes_no "Use HTTP-only mode (insecure, not recommended)" "$default_http_only" HTTP_ONLY
+    
+    echo ""
+    
+    # Section 4: CVaaS Configuration
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  CVaaS Configuration${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    
+    log "CVaaS Address options:"
+    log "  - www.arista.io (recommended - works for all clusters)"
+    log "  - www.cv-prod-us-central1-b.arista.io (US 1b)"
+    log "  - www.cv-prod-euwest-2.arista.io (Europe West 2)"
+    log "  - See config.yaml.template for all regional options"
+    echo ""
+    
+    prompt_with_default "CVaaS address" "${EXISTING_CV_ADDR:-www.arista.io}" CV_ADDR
+    prompt_with_default "Enrollment token (from CVaaS Device Registration)" "${EXISTING_ENROLLMENT_TOKEN:-}" ENROLLMENT_TOKEN "true"
+    # Proxy URL and EOS image URL - only prompt in extended mode
+    if [[ "${EXTENDED_MODE:-false}" == "true" ]]; then
+        prompt_with_default "Proxy URL (leave empty if not needed)" "${EXISTING_CV_PROXY:-}" CV_PROXY
+        prompt_with_default "EOS image URL (optional, for upgrades)" "${EXISTING_EOS_URL:-}" EOS_URL
+    else
+        # Use defaults when not in extended mode
+        CV_PROXY="${CV_PROXY:-${EXISTING_CV_PROXY:-}}"
+        EOS_URL="${EOS_URL:-${EXISTING_EOS_URL:-}}"
+    fi
+    prompt_with_default "NTP server" "${EXISTING_NTP_SERVER:-time.nist.gov}" NTP_SERVER
+    
+    echo ""
+    
+    # Section 5: SSL Certificate Configuration
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  SSL Certificate Configuration${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    
+    prompt_with_default "Certificate filename" "fullchain.pem" CERT_FILE
+    prompt_with_default "Private key filename" "privkey.pem" KEY_FILE
+    
+    # Check if certificates already exist (use the cert_dir_for_check variable set earlier)
+    local cert_path="${cert_dir_for_check}/${CERT_FILE}"
+    local key_path="${cert_dir_for_check}/${KEY_FILE}"
+    local certs_exist=false
+    
+    if [[ -f "$cert_path" ]] && [[ -f "$key_path" ]]; then
+        certs_exist=true
+        log "Existing SSL certificates detected at:"
+        log "  Certificate: $cert_path"
+        log "  Private Key: $key_path"
+        log "Skipping Let's Encrypt and self-signed certificate prompts (certificates managed externally)"
+    fi
+    
+    if [[ "$certs_exist" == "false" ]]; then
+        prompt_yes_no "Use Let's Encrypt with certbot?" "n" USE_LETSENCRYPT
+        
+        if [[ "$USE_LETSENCRYPT" == "true" ]]; then
+            prompt_with_default "Email for Let's Encrypt registration" "admin@example.com" LETSENCRYPT_EMAIL
+        else
+            LETSENCRYPT_EMAIL="admin@example.com"
+        fi
+        
+        # Default to creating self-signed certificate if HTTP_ONLY is false (HTTPS mode)
+        # This ensures nginx can start without manual certificate creation
+        local default_self_signed="n"
+        if [[ "${HTTP_ONLY:-false}" == "false" ]]; then
+            default_self_signed="y"
+        fi
+        
+        prompt_yes_no "Create self-signed certificate for testing (if no cert exists)?" "$default_self_signed" CREATE_SELF_SIGNED
+    else
+        # Certificates exist, skip these prompts
+        USE_LETSENCRYPT="false"
+        LETSENCRYPT_EMAIL="admin@example.com"
+        CREATE_SELF_SIGNED="false"
+    fi
+    
+    echo ""
+    
     # Section 6: Container Configuration
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}  Container Configuration${NC}"
@@ -2593,8 +2770,16 @@ PYTHON_VERIFY
     echo ""
     
     prompt_with_default "Container name" "ztpbootstrap" CONTAINER_NAME
-    prompt_with_default "Container image" "docker.io/nginx:alpine" CONTAINER_IMAGE
-    prompt_with_default "Timezone" "${EXISTING_TIMEZONE:-UTC}" TIMEZONE
+    # Container image is not prompted - nginx uses alpine, webui uses fedora (or built image)
+    # Set default value for config generation
+    CONTAINER_IMAGE="${CONTAINER_IMAGE:-docker.io/nginx:alpine}"
+    # Timezone - only prompt in extended mode
+    if [[ "${EXTENDED_MODE:-false}" == "true" ]]; then
+        prompt_with_default "Timezone" "${EXISTING_TIMEZONE:-UTC}" TIMEZONE
+    else
+        # Use default when not in extended mode
+        TIMEZONE="${TIMEZONE:-${EXISTING_TIMEZONE:-UTC}}"
+    fi
     # Note: Host network mode is now asked in the Network Configuration section above
     # This ensures it can override detected IP addresses
     prompt_with_default "DNS server 1" "${EXISTING_DNS1:-8.8.8.8}" DNS1
@@ -2602,19 +2787,319 @@ PYTHON_VERIFY
     
     echo ""
     
-    # Section 7: Service Configuration
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}  Service Configuration${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
+    # Section 7: WebUI Image Configuration (only shown if Containerfile exists and no registry image was provided)
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local containerfile="${repo_dir}/webui/Containerfile"
     
-    prompt_with_default "Health check interval" "30s" HEALTH_INTERVAL
-    prompt_with_default "Health check timeout" "10s" HEALTH_TIMEOUT
-    prompt_with_default "Health check retries" "3" HEALTH_RETRIES
-    prompt_with_default "Health check start period" "60s" HEALTH_START_PERIOD
-    prompt_with_default "Restart policy" "on-failure" RESTART_POLICY
+    # Skip image build section if user already provided a registry image
+    if [[ -z "${WEBUI_IMAGE_TAG:-}" ]] || [[ "${WEBUI_IMAGE_TAG}" == "" ]]; then
+        if [[ -f "$containerfile" ]]; then
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "${CYAN}  WebUI Container Image Build${NC}"
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo ""
+            
+            log "A Containerfile is available to build an optimized webui image."
+            log "Building the image will pre-install Python, podman, and systemd,"
+            log "resulting in much faster container startup times (no package installation)."
+            echo ""
+            
+            if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
+                BUILD_WEBUI_IMAGE="true"
+                log "Non-interactive mode: Will build webui image from Containerfile"
+            else
+                prompt_yes_no "Build optimized webui image from Containerfile? (recommended)" "y" BUILD_WEBUI_IMAGE
+            fi
+        
+        # Build the image now if requested
+        if [[ "${BUILD_WEBUI_IMAGE:-false}" == "true" ]]; then
+            if build_webui_image; then
+                # Image built successfully, ask about registry
+                if [[ "${NON_INTERACTIVE:-false}" != "true" ]]; then
+                    echo ""
+                    log "Image built successfully. You can push it to a remote registry for use on other hosts."
+                    prompt_yes_no "Push image to a remote registry?" "n" PUSH_TO_REGISTRY
+                    
+                    if [[ "${PUSH_TO_REGISTRY:-false}" == "true" ]]; then
+                        prompt_with_default "Registry URL (e.g., registry.example.com or quay.io/username)" "" WEBUI_REGISTRY
+                        
+                        if [[ -n "${WEBUI_REGISTRY:-}" ]]; then
+                            # Build and push multi-arch image
+                            local local_tag="ztpbootstrap-webui:local"
+                            local remote_tag="${WEBUI_REGISTRY}/ztpbootstrap-webui:latest"
+                            
+                            log "Building and pushing multi-arch image to $remote_tag..."
+                            log "This will build for both amd64 (x86_64) and arm64 (aarch64) architectures..."
+                            log "Note: Cross-platform builds may take longer and require emulation for non-native architectures."
+                            
+                            local repo_dir
+                            repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+                            local containerfile="${repo_dir}/webui/Containerfile"
+                            local current_arch=$(uname -m)
+                            local amd64_built=false
+                            local arm64_built=false
+                            local amd64_tag="${remote_tag}-amd64"
+                            local arm64_tag="${remote_tag}-arm64"
+                            
+                            # Check if we can build multi-arch (requires buildah or podman with cross-platform support)
+                            if command -v buildah >/dev/null 2>&1; then
+                                # Use buildah for multi-arch builds (supports cross-platform via qemu)
+                                
+                                # Build for amd64 (x86_64) - needed for production servers
+                                log "Building for amd64 (x86_64)..."
+                                if buildah build --arch amd64 --tag "$amd64_tag" -f "$containerfile" "$repo_dir" 2>&1; then
+                                    log "✓ Built amd64 image"
+                                    if podman push "$amd64_tag" 2>&1; then
+                                        log "✓ Pushed amd64 image to registry"
+                                        amd64_built=true
+                                    else
+                                        warn "Failed to push amd64 image"
+                                    fi
+                                else
+                                    warn "Failed to build amd64 image (may need qemu-user-static for cross-platform builds)"
+                                fi
+                                
+                                # Build for arm64 (aarch64) - needed for ARM-based dev machines
+                                log "Building for arm64 (aarch64)..."
+                                if buildah build --arch arm64 --tag "$arm64_tag" -f "$containerfile" "$repo_dir" 2>&1; then
+                                    log "✓ Built arm64 image"
+                                    if podman push "$arm64_tag" 2>&1; then
+                                        log "✓ Pushed arm64 image to registry"
+                                        arm64_built=true
+                                    else
+                                        warn "Failed to push arm64 image"
+                                    fi
+                                else
+                                    warn "Failed to build arm64 image"
+                                fi
+                                
+                                # Create and push multi-arch manifest if at least one arch succeeded
+                                if [[ "$amd64_built" == "true" ]] || [[ "$arm64_built" == "true" ]]; then
+                                    log "Creating multi-arch manifest..."
+                                    # Remove existing manifest if it exists (both local and remote)
+                                    podman manifest rm "$remote_tag" 2>/dev/null || true
+                                    
+                                    if podman manifest create "$remote_tag" 2>/dev/null; then
+                                        # Add remote registry images to the manifest (not local images)
+                                        if [[ "$amd64_built" == "true" ]]; then
+                                            if podman manifest add "$remote_tag" "docker://$amd64_tag" 2>&1; then
+                                                log "✓ Added amd64 image to manifest"
+                                            else
+                                                warn "Failed to add amd64 image to manifest"
+                                            fi
+                                        fi
+                                        if [[ "$arm64_built" == "true" ]]; then
+                                            if podman manifest add "$remote_tag" "docker://$arm64_tag" 2>&1; then
+                                                log "✓ Added arm64 image to manifest"
+                                            else
+                                                warn "Failed to add arm64 image to manifest"
+                                            fi
+                                        fi
+                                        
+                                        if podman manifest push --all "$remote_tag" "docker://$remote_tag" 2>&1; then
+                                            log "✓ Successfully created and pushed multi-arch manifest"
+                                            WEBUI_IMAGE_REGISTRY="$WEBUI_REGISTRY"
+                                            WEBUI_IMAGE_TAG="$remote_tag"
+                                        else
+                                            warn "Failed to push multi-arch manifest. Will use local image only."
+                                            WEBUI_IMAGE_REGISTRY=""
+                                            WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
+                                        fi
+                                    else
+                                        warn "Failed to create manifest. Will use local image only."
+                                        WEBUI_IMAGE_REGISTRY=""
+                                        WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
+                                    fi
+                                else
+                                    warn "Failed to build images for any architecture. Will use local image only."
+                                    WEBUI_IMAGE_REGISTRY=""
+                                    WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
+                                fi
+                            else
+                                # Fallback: buildah not available - prompt to install or build single-arch
+                                warn "buildah not found. Multi-arch builds require buildah."
+                                warn "To build multi-arch images, install buildah: sudo dnf install buildah"
+                                warn "For cross-platform builds, also install: sudo dnf install qemu-user-static"
+                                
+                                if [[ "${NON_INTERACTIVE:-false}" != "true" ]]; then
+                                    prompt_yes_no "Install buildah now to enable multi-arch builds?" "y" INSTALL_BUILDAH
+                                    if [[ "${INSTALL_BUILDAH:-false}" == "true" ]]; then
+                                        log "Installing buildah..."
+                                        if sudo dnf install -y -q buildah 2>&1; then
+                                            log "✓ buildah installed. Retrying multi-arch build..."
+                                            # Now that buildah is installed, re-check and use it
+                                            if command -v buildah >/dev/null 2>&1; then
+                                                # Re-execute the multi-arch build logic (jump back to buildah section)
+                                                log "Building and pushing multi-arch image to $remote_tag..."
+                                                log "This will build for both amd64 (x86_64) and arm64 (aarch64) architectures..."
+                                                
+                                                local amd64_built=false
+                                                local arm64_built=false
+                                                local amd64_tag="${remote_tag}-amd64"
+                                                local arm64_tag="${remote_tag}-arm64"
+                                                
+                                                # Build for amd64 (x86_64) - needed for production servers
+                                                log "Building for amd64 (x86_64)..."
+                                                if buildah build --arch amd64 --tag "$amd64_tag" -f "$containerfile" "$repo_dir" 2>&1; then
+                                                    log "✓ Built amd64 image"
+                                                    if podman push "$amd64_tag" 2>&1; then
+                                                        log "✓ Pushed amd64 image to registry"
+                                                        amd64_built=true
+                                                    else
+                                                        warn "Failed to push amd64 image"
+                                                    fi
+                                                else
+                                                    warn "Failed to build amd64 image (may need qemu-user-static for cross-platform builds)"
+                                                fi
+                                                
+                                                # Build for arm64 (aarch64) - needed for ARM-based dev machines
+                                                log "Building for arm64 (aarch64)..."
+                                                if buildah build --arch arm64 --tag "$arm64_tag" -f "$containerfile" "$repo_dir" 2>&1; then
+                                                    log "✓ Built arm64 image"
+                                                    if podman push "$arm64_tag" 2>&1; then
+                                                        log "✓ Pushed arm64 image to registry"
+                                                        arm64_built=true
+                                                    else
+                                                        warn "Failed to push arm64 image"
+                                                    fi
+                                                else
+                                                    warn "Failed to build arm64 image"
+                                                fi
+                                                
+                                                # Create and push multi-arch manifest if at least one arch succeeded
+                                                if [[ "$amd64_built" == "true" ]] || [[ "$arm64_built" == "true" ]]; then
+                                                    log "Creating multi-arch manifest..."
+                                                    podman manifest rm "$remote_tag" 2>/dev/null || true
+                                                    
+                                                    if podman manifest create "$remote_tag" 2>/dev/null; then
+                                                        if [[ "$amd64_built" == "true" ]]; then
+                                                            if podman manifest add "$remote_tag" "docker://$amd64_tag" 2>&1; then
+                                                                log "✓ Added amd64 image to manifest"
+                                                            fi
+                                                        fi
+                                                        if [[ "$arm64_built" == "true" ]]; then
+                                                            if podman manifest add "$remote_tag" "docker://$arm64_tag" 2>&1; then
+                                                                log "✓ Added arm64 image to manifest"
+                                                            fi
+                                                        fi
+                                                        
+                                                        if podman manifest push --all "$remote_tag" "docker://$remote_tag" 2>&1; then
+                                                            log "✓ Successfully created and pushed multi-arch manifest"
+                                                            WEBUI_IMAGE_REGISTRY="$WEBUI_REGISTRY"
+                                                            WEBUI_IMAGE_TAG="$remote_tag"
+                                                        else
+                                                            warn "Failed to push multi-arch manifest. Will use local image only."
+                                                            WEBUI_IMAGE_REGISTRY=""
+                                                            WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
+                                                        fi
+                                                    else
+                                                        warn "Failed to create manifest. Will use local image only."
+                                                        WEBUI_IMAGE_REGISTRY=""
+                                                        WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
+                                                    fi
+                                                else
+                                                    warn "Failed to build images for any architecture. Will use local image only."
+                                                    WEBUI_IMAGE_REGISTRY=""
+                                                    WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
+                                                fi
+                                                
+                                                # Skip single-arch build since we just did multi-arch
+                                                MULTI_ARCH_BUILT=true
+                                            else
+                                                warn "buildah installed but not found in PATH. Continuing with single-arch build."
+                                            fi
+                                        else
+                                            warn "Failed to install buildah. Continuing with single-arch build."
+                                        fi
+                                    fi
+                                fi
+                                
+                                # Build and push single-arch (current architecture) - only if multi-arch wasn't built
+                                if [[ "${MULTI_ARCH_BUILT:-false}" != "true" ]]; then
+                                    log "Building single-arch image for current platform only..."
+                                    if [[ "$current_arch" == "aarch64" ]] || [[ "$current_arch" == "arm64" ]]; then
+                                    current_arch="arm64"
+                                    warn "Building arm64 only. Production x86_64 servers will need amd64 image."
+                                else
+                                    current_arch="amd64"
+                                    warn "Building amd64 only. ARM64 dev machines will need arm64 image."
+                                fi
+                                
+                                if podman tag "$local_tag" "$remote_tag" 2>/dev/null; then
+                                    log "Pushing $current_arch image to $remote_tag..."
+                                    if podman push "$remote_tag" 2>&1; then
+                                        log "✓ Successfully pushed $current_arch image to $remote_tag"
+                                        warn "Note: This is a single-arch image. To create multi-arch:"
+                                        warn "  1. Install buildah: sudo dnf install buildah qemu-user-static"
+                                        warn "  2. Re-run setup and choose to push to registry again"
+                                        WEBUI_IMAGE_REGISTRY="$WEBUI_REGISTRY"
+                                        WEBUI_IMAGE_TAG="$remote_tag"
+                                    else
+                                        warn "Failed to push image to registry. Will use local image only."
+                                        WEBUI_IMAGE_REGISTRY=""
+                                        WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
+                                    fi
+                                else
+                                    warn "Failed to tag image. Will use local image only."
+                                    WEBUI_IMAGE_REGISTRY=""
+                                    WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
+                                fi
+                                fi
+                            fi
+                        else
+                            log "No registry provided. Will use local image only."
+                            WEBUI_IMAGE_REGISTRY=""
+                            WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
+                        fi
+                    else
+                        WEBUI_IMAGE_REGISTRY=""
+                        WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
+                    fi
+                else
+                    # Non-interactive: use local image
+                    WEBUI_IMAGE_REGISTRY=""
+                    WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
+                fi
+            else
+                # Build failed, use base image
+                WEBUI_IMAGE_REGISTRY=""
+                WEBUI_IMAGE_TAG=""
+            fi
+        else
+            WEBUI_IMAGE_REGISTRY=""
+            WEBUI_IMAGE_TAG=""
+        fi
+        
+        echo ""
+        fi
+    else
+        # User already provided a registry image earlier, skip build section
+        log "Using previously specified registry image: ${WEBUI_IMAGE_TAG}"
+    fi
     
-    echo ""
+    # Section 8: Service Configuration (only shown in extended mode)
+    if [[ "${EXTENDED_MODE:-false}" == "true" ]]; then
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${CYAN}  Service Configuration${NC}"
+        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+        
+        prompt_with_default "Health check interval" "30s" HEALTH_INTERVAL
+        prompt_with_default "Health check timeout" "10s" HEALTH_TIMEOUT
+        prompt_with_default "Health check retries" "3" HEALTH_RETRIES
+        prompt_with_default "Health check start period" "60s" HEALTH_START_PERIOD
+        prompt_with_default "Restart policy" "on-failure" RESTART_POLICY
+        
+        echo ""
+    else
+        # Use defaults when not in extended mode
+        HEALTH_INTERVAL="${HEALTH_INTERVAL:-30s}"
+        HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-10s}"
+        HEALTH_RETRIES="${HEALTH_RETRIES:-3}"
+        HEALTH_START_PERIOD="${HEALTH_START_PERIOD:-60s}"
+        RESTART_POLICY="${RESTART_POLICY:-on-failure}"
+    fi
 }
 
 # Copy source files to target directory
@@ -2914,6 +3399,18 @@ auth:
   # Session secret key for signing session tokens
   # Auto-generated during setup
   session_secret: "${SESSION_SECRET:-}"
+
+# ============================================================================
+# WebUI Container Image Configuration
+# ============================================================================
+webui:
+  # Registry image (if pushed to remote registry)
+  # Format: registry.example.com/ztpbootstrap-webui:latest
+  registry_image: "${WEBUI_IMAGE_TAG:-}"
+  
+  # Registry URL (without image name/tag)
+  # Format: registry.example.com or quay.io/username
+  registry: "${WEBUI_IMAGE_REGISTRY:-}"
 EOF
     
     log "Configuration saved to: $CONFIG_FILE"
@@ -3008,6 +3505,9 @@ EOF
             # But that's complex due to dependencies. Instead, let's just run setup.sh
             # which should be mostly idempotent. However, setup.sh requires root and
             # does full setup. Let's create a simpler function that just does the pod setup.
+            
+            # Note: WebUI image build happens in Section 7 (interactive_config) if requested
+            
             create_pod_files_from_config
             
             # Manually run quadlet generator for pod and container files to ensure services are created
@@ -3237,8 +3737,9 @@ EOFPOD2
                                         local volume_path="${line#Volume=}"
                                         local source_path="${volume_path%%:*}"
                                         
-                                        # Skip Fedora-specific systemd library paths on non-Fedora systems
-                                        if [[ "$distro" != "fedora" ]] && [[ "$distro" != "rhel" ]] && [[ "$distro" != "centos" ]]; then
+                                        # Skip Fedora-specific systemd library paths on non-RHEL-based systems
+                                        # RHEL-based distros (Fedora, RHEL, CentOS, CentOS Stream, Rocky, AlmaLinux) have these paths
+                                        if [[ "$distro" != "fedora" ]] && [[ "$distro" != "rhel" ]] && [[ "$distro" != "centos" ]] && [[ "$distro" != "centos-stream" ]] && [[ "$distro" != "almalinux" ]] && [[ "$distro" != "rocky" ]]; then
                                             if [[ "$source_path" =~ ^/lib64/libsystemd ]] || [[ "$source_path" == "/usr/lib64/systemd" ]]; then
                                                 continue
                                             fi
@@ -3328,8 +3829,13 @@ EOFNGINX
                                                 local volume_path_tee="${line#Volume=}"
                                                 local source_path_tee="${volume_path_tee%%:*}"
                                                 
-                                                # Skip Fedora-specific paths on non-Fedora systems
-                                                if [[ "$distro_tee" != "fedora" ]] && [[ "$distro_tee" != "rhel" ]] && [[ "$distro_tee" != "centos" ]]; then
+                                                # Skip Fedora-specific systemd library paths on non-RHEL-based systems
+                                                # RHEL-based distros (Fedora, RHEL, CentOS, Rocky, AlmaLinux) have these paths
+                                                local is_dnf_distro_tee=false
+                                                if [[ "$distro_tee" == "fedora" ]] || [[ "$distro_tee" == "rhel" ]] || [[ "$distro_tee" == "centos" ]] || [[ "$distro_tee" == "centos-stream" ]] || [[ "$distro_tee" == "almalinux" ]] || [[ "$distro_tee" == "rocky" ]]; then
+                                                    is_dnf_distro_tee=true
+                                                fi
+                                                if [[ "$is_dnf_distro_tee" == "false" ]]; then
                                                     if [[ "$source_path_tee" =~ ^/lib64/libsystemd ]] || [[ "$source_path_tee" == "/usr/lib64/systemd" ]]; then
                                                         continue
                                                     fi
@@ -3527,6 +4033,30 @@ check_and_install_dependencies() {
         distro="${ID:-}"
     fi
     
+    # Helper: Check if distro uses dnf (RHEL-based)
+    is_dnf_distro() {
+        [[ "$distro" == "fedora" ]] || \
+        [[ "$distro" == "rhel" ]] || \
+        [[ "$distro" == "centos" ]] || \
+        [[ "$distro" == "centos-stream" ]] || \
+        [[ "$distro" == "almalinux" ]] || \
+        [[ "$distro" == "rocky" ]]
+    }
+    
+    # Helper: Check if distro uses apt (Debian-based)
+    is_apt_distro() {
+        [[ "$distro" == "ubuntu" ]] || \
+        [[ "$distro" == "debian" ]]
+    }
+    
+    # Helper: Check if distro uses zypper (SUSE-based)
+    is_zypper_distro() {
+        [[ "$distro" == "opensuse-leap" ]] || \
+        [[ "$distro" == "opensuse" ]] || \
+        [[ "$distro" == "sles" ]] || \
+        [[ "$distro" == "opensuse-tumbleweed" ]]
+    }
+    
     log "Checking dependencies..."
     
     # Check for yq (required for YAML parsing)
@@ -3563,10 +4093,12 @@ check_and_install_dependencies() {
             log "✓ Installed yq"
         else
             missing_deps+=("yq")
-            if [[ "$distro" == "fedora" ]] || [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
+            if is_dnf_distro; then
                 auto_installable+=("yq (sudo dnf install -y yq)")
-            elif [[ "$distro" == "ubuntu" ]] || [[ "$distro" == "debian" ]]; then
+            elif is_apt_distro; then
                 manual_install+=("yq (must install mikefarah/yq from GitHub, apt package is wrong version)")
+            elif is_zypper_distro; then
+                auto_installable+=("yq (sudo zypper install -y yq)")
             else
                 manual_install+=("yq (install from https://github.com/mikefarah/yq)")
             fi
@@ -3576,10 +4108,12 @@ check_and_install_dependencies() {
     # Check for podman
     if ! command -v podman >/dev/null 2>&1; then
         missing_deps+=("podman")
-        if [[ "$distro" == "fedora" ]] || [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
+        if is_dnf_distro; then
             auto_installable+=("podman (sudo dnf install -y podman)")
-        elif [[ "$distro" == "ubuntu" ]] || [[ "$distro" == "debian" ]]; then
+        elif is_apt_distro; then
             auto_installable+=("podman (sudo apt-get update && sudo apt-get install -y podman)")
+        elif is_zypper_distro; then
+            auto_installable+=("podman (sudo zypper install -y podman)")
         else
             manual_install+=("podman")
         fi
@@ -3590,10 +4124,12 @@ check_and_install_dependencies() {
     # Check for openssl (needed for certificate generation)
     if ! command -v openssl >/dev/null 2>&1; then
         missing_deps+=("openssl")
-        if [[ "$distro" == "fedora" ]] || [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
+        if is_dnf_distro; then
             auto_installable+=("openssl (sudo dnf install -y openssl)")
-        elif [[ "$distro" == "ubuntu" ]] || [[ "$distro" == "debian" ]]; then
+        elif is_apt_distro; then
             auto_installable+=("openssl (sudo apt-get install -y openssl)")
+        elif is_zypper_distro; then
+            auto_installable+=("openssl (sudo zypper install -y openssl)")
         else
             manual_install+=("openssl")
         fi
@@ -3604,10 +4140,12 @@ check_and_install_dependencies() {
     # Check for wget or curl (needed for downloads)
     if ! command -v wget >/dev/null 2>&1 && ! command -v curl >/dev/null 2>&1; then
         missing_deps+=("wget or curl")
-        if [[ "$distro" == "fedora" ]] || [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
+        if is_dnf_distro; then
             auto_installable+=("wget (sudo dnf install -y wget)")
-        elif [[ "$distro" == "ubuntu" ]] || [[ "$distro" == "debian" ]]; then
+        elif is_apt_distro; then
             auto_installable+=("wget (sudo apt-get install -y wget)")
+        elif is_zypper_distro; then
+            auto_installable+=("wget (sudo zypper install -y wget)")
         else
             manual_install+=("wget or curl")
         fi
@@ -3622,10 +4160,12 @@ check_and_install_dependencies() {
     # Check for git (optional but recommended)
     if ! command -v git >/dev/null 2>&1; then
         warn "git not found (optional, but recommended for repository management)"
-        if [[ "$distro" == "fedora" ]] || [[ "$distro" == "rhel" ]] || [[ "$distro" == "centos" ]]; then
+        if is_dnf_distro; then
             auto_installable+=("git (sudo dnf install -y git)")
-        elif [[ "$distro" == "ubuntu" ]] || [[ "$distro" == "debian" ]]; then
+        elif is_apt_distro; then
             auto_installable+=("git (sudo apt-get install -y git)")
+        elif is_zypper_distro; then
+            auto_installable+=("git (sudo zypper install -y git)")
         fi
     else
         log "✓ git found: $(command -v git)"
@@ -3659,7 +4199,33 @@ check_and_install_dependencies() {
             echo "  - $dep"
         done
         echo ""
-        if [[ "${NON_INTERACTIVE:-false}" != "true" ]]; then
+        if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
+            # Non-interactive mode: auto-install dependencies
+            log "Non-interactive mode: Auto-installing dependencies..."
+            for dep_cmd in "${auto_installable[@]}"; do
+                # Extract the command from the description
+                local install_cmd
+                install_cmd=$(echo "$dep_cmd" | sed -n 's/.*(\(.*\))/\1/p')
+                if [[ -n "$install_cmd" ]]; then
+                    log "Running: $install_cmd"
+                    if eval "$install_cmd" 2>&1; then
+                        # Verify the dependency is actually available after installation
+                        local dep_name
+                        dep_name=$(echo "$dep_cmd" | sed -n 's/^\([^ ]*\).*/\1/p')
+                        if command -v "$dep_name" >/dev/null 2>&1; then
+                            log "✓ Successfully installed dependency: $dep_name"
+                        else
+                            warn "Installation command succeeded but $dep_name is still not found in PATH"
+                            manual_install+=("$dep_cmd")
+                        fi
+                    else
+                        warn "Failed to install dependency: $dep_cmd"
+                        manual_install+=("$dep_cmd")
+                    fi
+                fi
+            done
+        else
+            # Interactive mode: ask user
             echo -n -e "${CYAN}Would you like to install them now? [Y/n]: ${NC}"
             read -r response
             if [[ ! "$response" =~ ^[Nn]$ ]]; then
@@ -3670,7 +4236,15 @@ check_and_install_dependencies() {
                     if [[ -n "$install_cmd" ]]; then
                         log "Running: $install_cmd"
                         if eval "$install_cmd" 2>&1; then
-                            log "✓ Successfully installed dependency"
+                            # Verify the dependency is actually available after installation
+                            local dep_name
+                            dep_name=$(echo "$dep_cmd" | sed -n 's/^\([^ ]*\).*/\1/p')
+                            if command -v "$dep_name" >/dev/null 2>&1; then
+                                log "✓ Successfully installed dependency: $dep_name"
+                            else
+                                warn "Installation command succeeded but $dep_name is still not found in PATH"
+                                manual_install+=("$dep_cmd")
+                            fi
                         else
                             warn "Failed to install dependency: $dep_cmd"
                             manual_install+=("$dep_cmd")
@@ -3692,7 +4266,9 @@ check_and_install_dependencies() {
         echo ""
         error "The following dependencies require manual installation:"
         for dep in "${manual_install[@]}"; do
-            echo "  - $dep"
+            if [[ -n "$dep" ]]; then
+                echo "  - $dep"
+            fi
         done
         echo ""
         return 1
@@ -3780,6 +4356,7 @@ parse_args() {
     RESTORE_TIMESTAMP=""
     NON_INTERACTIVE=false
     RESET_PASSWORD=""
+    EXTENDED_MODE=false
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -3798,6 +4375,10 @@ parse_args() {
             --upgrade)
                 UPGRADE_MODE=true
                 NON_INTERACTIVE=true
+                shift
+                ;;
+            --extended)
+                EXTENDED_MODE=true
                 shift
                 ;;
             --reset-pass)
@@ -3832,6 +4413,8 @@ Options:
     --upgrade                Upgrade existing installation (requires previous install)
                             Strict upgrade mode: requires existing install, requires successful backup,
                             uses all previous values, runs non-interactively. Use for upgrades only.
+    --extended               Show extended configuration options (health checks, restart policy, etc.)
+                            By default, these options use sensible defaults and are not prompted.
     --reset-pass [PASSWORD] Set/reset admin password for Web UI (can be used with --upgrade)
                             If PASSWORD is not provided, defaults to "ztpboot123"
                             Password can be quoted: --reset-pass 'password' or --reset-pass "password"
@@ -3842,6 +4425,7 @@ Examples:
     $0                      # Run interactive setup
     $0 --non-interactive    # Run automated setup (works for fresh installs or upgrades)
     $0 --auto               # Same as --non-interactive
+    $0 --extended           # Run interactive setup with extended options
     $0 --upgrade            # Upgrade existing installation (non-interactive, preserves all values)
     $0 --upgrade --reset-pass 'newpassword'  # Upgrade and reset password
     $0 --upgrade --reset-pass  # Upgrade and reset to default password "ztpboot123"

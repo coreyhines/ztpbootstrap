@@ -43,6 +43,5 @@ SANITIZATION_NOTES.md
 !docs/*.jpg
 !docs/*.jpeg
 
-# Test-specific scripts (not needed by end users)
-restore-backup-from-fedora1.sh
-run-full-e2e-test.sh
+# Test reports (dev use only, can be recreated)
+tests/test-reports/

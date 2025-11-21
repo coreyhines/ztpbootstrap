@@ -374,28 +374,41 @@
                             <h2 class="text-lg font-semibold text-gray-900 mb-2">Configuration</h2>
                             <p class="text-sm text-gray-600">View and manage service configuration</p>
                         </div>
-                        <div class="flex items-center space-x-2">
-                            <label for="theme-select" class="text-sm font-medium text-gray-700 whitespace-nowrap">Syntax Theme:</label>
-                            <select id="theme-select" x-model="theme" @change="applyTheme()" class="px-3 py-2 text-sm border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm">
-                                <option value="tomorrow">Tomorrow (Dark)</option>
-                                <option value="okaidia">Okaidia (Dark)</option>
-                                <option value="twilight">Twilight (Dark)</option>
-                                <option value="dark">Dark (Dark)</option>
-                                <option value="solarizedlight">Solarized Light</option>
-                                <option value="coy">Coy (Light)</option>
-                                <option value="one-light">One Light</option>
-                                <option value="prism">Prism (Light)</option>
-                            </select>
+                        <div class="flex items-center space-x-2 flex-wrap">
+                            <div class="relative">
+                                <input type="text" 
+                                       x-model="configSearchTerm" 
+                                       @input="highlightConfig()"
+                                       placeholder="Search config..." 
+                                       class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-48">
+                                <button x-show="configSearchTerm" 
+                                        @click="configSearchTerm = ''; highlightConfig()" 
+                                        class="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            <div class="flex flex-col">
+                                <label for="theme-select" class="text-xs font-medium text-gray-700 mb-0.5">Syntax Theme:</label>
+                                <select id="theme-select" x-model="theme" @change="applyTheme()" class="px-3 py-2 text-sm border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm">
+                                    <option value="tomorrow">Tomorrow (Dark)</option>
+                                    <option value="okaidia">Okaidia (Dark)</option>
+                                    <option value="twilight">Twilight (Dark)</option>
+                                    <option value="dark">Dark (Dark)</option>
+                                    <option value="solarizedlight">Solarized Light</option>
+                                    <option value="coy">Coy (Light)</option>
+                                    <option value="one-light">One Light</option>
+                                    <option value="prism">Prism (Light)</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     
                     <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
                         <div x-show="config.error" class="text-red-600" x-text="config.error"></div>
-                        <div x-show="config.raw && !config.error" class="overflow-x-auto">
-                            <pre class="language-yaml"><code class="language-yaml" x-html="escapeHtml(config.raw)" x-ref="yamlCode"></code></pre>
-                        </div>
-                        <div x-show="config.parsed && !config.error" class="overflow-x-auto">
-                            <pre class="language-json"><code class="language-json" x-html="escapeHtml(JSON.stringify(config.parsed, null, 2))" x-ref="jsonCode"></code></pre>
+                        <div x-show="config.raw && !config.error" class="overflow-x-auto overflow-y-auto max-h-[600px]">
+                            <pre class="language-yaml"><code class="language-yaml" x-text="config.raw" x-ref="yamlCode"></code></pre>
                         </div>
                     </div>
                 </div>
@@ -407,7 +420,21 @@
                             <h2 class="text-lg font-semibold text-gray-900 mb-2">Service Logs</h2>
                             <p class="text-sm text-gray-600">View logs from different sources</p>
                         </div>
-                        <div class="flex items-center space-x-2">
+                        <div class="flex items-center space-x-2 flex-wrap">
+                            <div class="relative">
+                                <input type="text" 
+                                       x-model="logSearchTerm" 
+                                       @input="highlightLogs()"
+                                       placeholder="Search logs..." 
+                                       class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-48">
+                                <button x-show="logSearchTerm" 
+                                        @click="logSearchTerm = ''; highlightLogs()" 
+                                        class="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </button>
+                            </div>
                             <select x-model="logSource" @change="loadLogs()" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                                 <option value="container">Container Logs</option>
                                 <option value="nginx_access">Nginx Access Log</option>
@@ -422,33 +449,48 @@
                             <button @click="markLogs()" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm font-medium transition-colors">
                                 Mark Logs
                             </button>
-                            <button @click="loadLogs()" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium transition-colors">
-                                Refresh
-                            </button>
+                            <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
+                                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                </svg>
+                                <span>New entries</span>
+                            </div>
                         </div>
                     </div>
                     
                     <!-- Multi-column layout for wide screens -->
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4" x-show="showMultiColumn && logSource === 'container'">
-                        <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto">
-                            <div class="text-xs text-gray-400 mb-2 font-semibold">Pod Service</div>
-                            <pre class="text-sm text-green-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="formatLogsWithMarks(logsPod)"></pre>
+                        <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto" x-ref="logsNginxContainer">
+                            <div class="text-xs text-gray-400 mb-2 font-semibold flex items-center justify-between">
+                                <span>Nginx Service</span>
+                                <span x-show="logNewEntriesNginx" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-500 text-white animate-pulse">
+                                    New
+                                </span>
+                            </div>
+                            <pre class="text-sm text-blue-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="highlightSearch(formatLogsWithMarks(reverseLogLines(logsNginx)))"></pre>
                         </div>
-                        <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto">
-                            <div class="text-xs text-gray-400 mb-2 font-semibold">Nginx Service</div>
-                            <pre class="text-sm text-blue-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="formatLogsWithMarks(logsNginx)"></pre>
-                        </div>
-                        <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto lg:col-span-2">
-                            <div class="text-xs text-gray-400 mb-2 font-semibold">WebUI Service</div>
-                            <pre class="text-sm text-yellow-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="formatLogsWithMarks(logsWebUI)"></pre>
+                        <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto" x-ref="logsWebUIContainer">
+                            <div class="text-xs text-gray-400 mb-2 font-semibold flex items-center justify-between">
+                                <span>WebUI Service</span>
+                                <span x-show="logNewEntriesWebUI" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-500 text-white animate-pulse">
+                                    New
+                                </span>
+                            </div>
+                            <pre class="text-sm text-yellow-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="highlightSearch(formatLogsWithMarks(reverseLogLines(logsWebUI)))"></pre>
                         </div>
                     </div>
                     
                     <!-- Single column layout for other sources or narrow screens -->
                     <div x-show="!showMultiColumn || logSource !== 'container'" class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto" x-ref="logsContainer">
+                        <div class="text-xs text-gray-400 mb-2 font-semibold flex items-center justify-between" x-show="logSource !== 'container'">
+                            <span>Logs</span>
+                            <span x-show="logNewEntriesIndicator" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-500 text-white animate-pulse">
+                                New entries
+                            </span>
+                        </div>
                         <pre class="text-sm font-mono overflow-x-auto whitespace-pre-wrap" 
                              :class="logSource === 'nginx_error' ? 'text-red-400' : 'text-green-400'"
-                             x-html="formatLogsWithMarks(logs)"></pre>
+                             x-html="highlightSearch(formatLogsWithMarks(reverseLogLines(logs)))"></pre>
                     </div>
                 </div>
             </div>
@@ -669,11 +711,19 @@
                 backups: [],
                 config: {},
                 logs: 'Loading...',
-                logsPod: '',
                 logsNginx: '',
                 logsWebUI: '',
                 logSource: 'nginx_access',
                 logLines: 100,
+                logSearchTerm: '',
+                configSearchTerm: '',
+                logRefreshInterval: null,
+                logNewEntriesIndicator: false,
+                logNewEntriesNginx: false,
+                logNewEntriesWebUI: false,
+                lastLogHash: '',
+                lastLogNginxHash: '',
+                lastLogWebUIHash: '',
                 showMultiColumn: false,
                 devices: [],
                 showScriptModal: false,
@@ -707,6 +757,23 @@
                 },
                 
                 async init() {
+                    // Cleanup auto-refresh on page unload
+                    window.addEventListener('beforeunload', () => {
+                        if (this.logRefreshInterval) {
+                            clearInterval(this.logRefreshInterval);
+                        }
+                    });
+                    
+                    // Watch for tab changes to start/stop auto-refresh
+                    this.$watch('activeTab', (newTab) => {
+                        if (newTab === 'logs') {
+                            // Start auto-refresh when entering logs tab
+                            this.startAutoRefresh();
+                        } else {
+                            // Stop auto-refresh when leaving logs tab
+                            this.stopAutoRefresh();
+                        }
+                    });
                     // Ensure modal is hidden on initial load
                     this.showLoginModal = false;
                     
@@ -732,6 +799,11 @@
                     // Config will be loaded when user clicks Configuration tab
                     await this.loadLogs();
                     await this.loadDeviceConnections();
+                    
+                    // Start auto-refresh if we're on the logs tab
+                    if (this.activeTab === 'logs') {
+                        this.startAutoRefresh();
+                    }
                     
                     // Check if we should show multi-column layout
                     this.showMultiColumn = window.innerWidth >= 1024;
@@ -1339,13 +1411,16 @@
                         console.log('Config API response:', data);
                         // Update config object for Alpine.js reactivity
                         this.config = data;
-                        // Highlight syntax after config loads
+                        // Highlight syntax after config loads, then apply search highlighting if needed
                         this.$nextTick(() => {
                             if (window.Prism && this.$refs.yamlCode) {
                                 window.Prism.highlightElement(this.$refs.yamlCode);
-                            }
-                            if (window.Prism && this.$refs.jsonCode) {
-                                window.Prism.highlightElement(this.$refs.jsonCode);
+                                // Apply search highlighting after Prism
+                                if (this.configSearchTerm) {
+                                    this.$refs.yamlCode.innerHTML = this.highlightConfigSearch(this.$refs.yamlCode.innerHTML);
+                                    // Scroll to first match
+                                    this.scrollToFirstMatch(this.$refs.yamlCode);
+                                }
                             }
                         });
                     } catch (error) {
@@ -1391,15 +1466,88 @@
                     
                     // Re-highlight code after theme change
                     this.$nextTick(() => {
-                        if (window.Prism) {
-                            if (this.$refs.yamlCode) {
-                                window.Prism.highlightElement(this.$refs.yamlCode);
-                            }
-                            if (this.$refs.jsonCode) {
-                                window.Prism.highlightElement(this.$refs.jsonCode);
+                        if (window.Prism && this.$refs.yamlCode) {
+                            window.Prism.highlightElement(this.$refs.yamlCode);
+                            // Apply search highlighting after Prism
+                            if (this.configSearchTerm) {
+                                this.$refs.yamlCode.innerHTML = this.highlightConfigSearch(this.$refs.yamlCode.innerHTML);
+                                // Scroll to first match
+                                this.scrollToFirstMatch(this.$refs.yamlCode);
                             }
                         }
                     });
+                },
+                
+                highlightConfig() {
+                    // Re-apply Prism highlighting and then search highlighting
+                    this.$nextTick(() => {
+                        if (window.Prism && this.$refs.yamlCode && this.config.raw) {
+                            // Reset to original content, apply Prism, then search highlighting
+                            this.$refs.yamlCode.textContent = this.config.raw;
+                            window.Prism.highlightElement(this.$refs.yamlCode);
+                            // Apply search highlighting after Prism
+                            if (this.configSearchTerm) {
+                                this.$refs.yamlCode.innerHTML = this.highlightConfigSearch(this.$refs.yamlCode.innerHTML);
+                                // Scroll to first match
+                                this.scrollToFirstMatch(this.$refs.yamlCode);
+                            }
+                        }
+                    });
+                },
+                
+                scrollToFirstMatch(element) {
+                    if (!element || !this.configSearchTerm) return;
+                    
+                    // Wait a bit for DOM to update after highlighting
+                    setTimeout(() => {
+                        // Find the first highlighted mark element
+                        const firstMatch = element.querySelector('mark');
+                        if (firstMatch) {
+                            // Get the scrollable container - it's the div with overflow classes
+                            let scrollContainer = element.closest('.overflow-x-auto');
+                            if (!scrollContainer) {
+                                scrollContainer = element.closest('pre');
+                            }
+                            if (!scrollContainer) {
+                                scrollContainer = element.parentElement;
+                            }
+                            
+                            if (scrollContainer) {
+                                // Get the position of the match relative to the scroll container
+                                const containerRect = scrollContainer.getBoundingClientRect();
+                                const matchRect = firstMatch.getBoundingClientRect();
+                                
+                                // Calculate how far the match is from the top of the visible container
+                                const matchOffsetFromContainerTop = matchRect.top - containerRect.top;
+                                
+                                // If the match is already visible (within the container viewport), don't scroll
+                                // Only scroll if the match is above or below the visible area
+                                if (matchOffsetFromContainerTop < 0) {
+                                    // Match is above the visible area - scroll up to show it
+                                    const scrollAmount = scrollContainer.scrollTop + matchOffsetFromContainerTop - 50;
+                                    scrollContainer.scrollTo({
+                                        top: Math.max(0, scrollAmount),
+                                        behavior: 'smooth'
+                                    });
+                                } else if (matchOffsetFromContainerTop > containerRect.height - 50) {
+                                    // Match is below the visible area - scroll down to show it
+                                    const scrollAmount = scrollContainer.scrollTop + matchOffsetFromContainerTop - containerRect.height + 100;
+                                    scrollContainer.scrollTo({
+                                        top: Math.max(0, scrollAmount),
+                                        behavior: 'smooth'
+                                    });
+                                }
+                                // If match is already visible, don't scroll
+                                
+                                // Also highlight the match briefly for better visibility
+                                firstMatch.style.transition = 'background-color 0.3s';
+                                firstMatch.style.backgroundColor = '#fbbf24'; // yellow-400
+                                setTimeout(() => {
+                                    firstMatch.style.backgroundColor = '';
+                                }, 1000);
+                            }
+                        }
+                    }, 100);
                 },
                 
                 async loadLogs() {
@@ -1411,21 +1559,59 @@
                         if (this.logSource === 'container' && this.showMultiColumn) {
                             // Split container logs by service
                             const logText = data.logs || '';
-                            const podMatch = logText.match(/=== ztpbootstrap\.service ===([\s\S]*?)(?=== |$)/);
+                            // Service names (excluding pod service)
                             const nginxMatch = logText.match(/=== ztpbootstrap-nginx\.service ===([\s\S]*?)(?=== |$)/);
                             const webuiMatch = logText.match(/=== ztpbootstrap-webui\.service ===([\s\S]*?)(?=== |$)/);
                             
+                            const newNginxLogs = nginxMatch ? nginxMatch[1].trim() : 'No nginx logs available';
+                            const newWebUILogs = webuiMatch ? webuiMatch[1].trim() : 'No webui logs available';
+                            
+                            // Check for new entries
+                            const nginxHash = this.simpleHash(newNginxLogs.substring(0, 500));
+                            const webuiHash = this.simpleHash(newWebUILogs.substring(0, 500));
+                            
+                            if (this.lastLogNginxHash && nginxHash !== this.lastLogNginxHash && newNginxLogs !== 'No nginx logs available') {
+                                this.logNewEntriesNginx = true;
+                                setTimeout(() => { this.logNewEntriesNginx = false; }, 3000);
+                            }
+                            if (this.lastLogWebUIHash && webuiHash !== this.lastLogWebUIHash && newWebUILogs !== 'No webui logs available') {
+                                this.logNewEntriesWebUI = true;
+                                setTimeout(() => { this.logNewEntriesWebUI = false; }, 3000);
+                            }
+                            
+                            this.lastLogNginxHash = nginxHash;
+                            this.lastLogWebUIHash = webuiHash;
+                            
                             // Update individual properties for Alpine.js reactivity
-                            this.logsPod = podMatch ? podMatch[1].trim() : 'No pod logs available';
-                            this.logsNginx = nginxMatch ? nginxMatch[1].trim() : 'No nginx logs available';
-                            this.logsWebUI = webuiMatch ? webuiMatch[1].trim() : 'No webui logs available';
+                            this.logsNginx = newNginxLogs;
+                            this.logsWebUI = newWebUILogs;
+                            
+                            // Auto-scroll to top (newest first)
+                            this.$nextTick(() => {
+                                if (this.$refs.logsNginxContainer) {
+                                    this.$refs.logsNginxContainer.scrollTop = 0;
+                                }
+                                if (this.$refs.logsWebUIContainer) {
+                                    this.$refs.logsWebUIContainer.scrollTop = 0;
+                                }
+                            });
                         } else {
                             // Ensure logs is a string and update directly for reactivity
-                            this.logs = typeof data.logs === 'string' ? data.logs : (data.logs || 'No logs available');
-                            // Auto-scroll to bottom
+                            const newLogs = typeof data.logs === 'string' ? data.logs : (data.logs || 'No logs available');
+                            
+                            // Check for new entries
+                            const logHash = this.simpleHash(newLogs.substring(0, 500));
+                            if (this.lastLogHash && logHash !== this.lastLogHash && newLogs !== 'No logs available') {
+                                this.logNewEntriesIndicator = true;
+                                setTimeout(() => { this.logNewEntriesIndicator = false; }, 3000);
+                            }
+                            this.lastLogHash = logHash;
+                            
+                            this.logs = newLogs;
+                            // Auto-scroll to top (newest first)
                             this.$nextTick(() => {
                                 if (this.$refs.logsContainer) {
-                                    this.$refs.logsContainer.scrollTop = this.$refs.logsContainer.scrollHeight;
+                                    this.$refs.logsContainer.scrollTop = 0;
                                 }
                             });
                         }
@@ -1435,6 +1621,42 @@
                     } finally {
                         this.loadingStates.logs = false;
                     }
+                },
+                
+                startAutoRefresh() {
+                    // Clear any existing interval first
+                    if (this.logRefreshInterval) {
+                        clearInterval(this.logRefreshInterval);
+                    }
+                    // Start auto-refresh every 2 seconds
+                    this.logRefreshInterval = setInterval(() => {
+                        if (this.activeTab === 'logs') {
+                            this.loadLogs();
+                        }
+                    }, 2000);
+                },
+                
+                stopAutoRefresh() {
+                    if (this.logRefreshInterval) {
+                        clearInterval(this.logRefreshInterval);
+                        this.logRefreshInterval = null;
+                    }
+                },
+                
+                reverseLogLines(logText) {
+                    if (!logText) return '';
+                    const lines = logText.split('\n');
+                    return lines.reverse().join('\n');
+                },
+                
+                simpleHash(str) {
+                    let hash = 0;
+                    for (let i = 0; i < str.length; i++) {
+                        const char = str.charCodeAt(i);
+                        hash = ((hash << 5) - hash) + char;
+                        hash = hash & hash; // Convert to 32bit integer
+                    }
+                    return hash.toString();
                 },
                 
                 async loadDeviceConnections() {
@@ -1513,6 +1735,37 @@
                         /(===== MARK: .*? =====)/g,
                         '<span class="bg-yellow-600 text-yellow-100 font-bold px-1 rounded">$1</span>'
                     );
+                },
+                
+                highlightSearch(htmlText) {
+                    if (!htmlText || !this.logSearchTerm) return htmlText;
+                    // Escape special regex characters in search term
+                    const escapedSearch = this.logSearchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    // Create regex for case-insensitive matching
+                    const regex = new RegExp(`(${escapedSearch})`, 'gi');
+                    // Highlight matches with a distinct background that contrasts with all text colors
+                    // Use a bright cyan background with dark text that will show on blue, yellow, green, and red text
+                    return htmlText.replace(regex, '<mark class="bg-cyan-400 text-gray-900 font-semibold px-0.5 rounded">$1</mark>');
+                },
+                
+                highlightConfigSearch(htmlText) {
+                    if (!htmlText || !this.configSearchTerm) return htmlText;
+                    // Escape special regex characters in search term
+                    const escapedSearch = this.configSearchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    // Create regex for case-insensitive matching
+                    const regex = new RegExp(`(${escapedSearch})`, 'gi');
+                    // Highlight matches with a distinct background that contrasts with syntax highlighting
+                    // Use a bright cyan background with dark text
+                    return htmlText.replace(regex, '<mark class="bg-cyan-400 text-gray-900 font-semibold px-0.5 rounded">$1</mark>');
+                },
+                
+                highlightLogs() {
+                    // This function triggers reactivity for highlighting
+                    // The actual highlighting is done in the template via highlightSearch()
+                    // Force a re-render by toggling a dummy property
+                    this.$nextTick(() => {
+                        // Highlighting happens automatically via x-html binding
+                    });
                 },
                 
                 async markLogs() {

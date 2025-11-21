@@ -2,6 +2,11 @@
 
 This document describes the development workflow for testing and iterating on the ZTP Bootstrap Service, particularly for testing the interactive setup script with upgrade scenarios.
 
+**Note:** Development tools and test scripts are located in the `dev/` directory:
+- `dev/scripts/` - Development utility scripts (VM creation, SSH utilities, etc.)
+- `dev/tests/` - Test scripts (CI tests, integration tests, E2E tests)
+- `dev/docs/` - Development documentation
+
 ## Overview
 
 The development workflow uses a test VM to safely test changes to `setup-interactive.sh` and related scripts. The workflow simulates an upgrade scenario by:
@@ -61,7 +66,7 @@ The standard development iteration follows these steps:
 
 ### Step 1: Create Test VM
 
-The `test-interactive-setup.sh` script automates VM creation, but you can also create it manually.
+The `dev/tests/test-interactive-setup.sh` script automates VM creation, but you can also create it manually.
 
 #### Automated VM Creation
 
@@ -70,10 +75,10 @@ The `test-interactive-setup.sh` script automates VM creation, but you can also c
 cd ~/path/to/ztpbootstrap
 
 # Create a new VM and restore backup
-./test-interactive-setup.sh
+./dev/tests/test-interactive-setup.sh
 
 # Or skip VM creation if you already have one running
-./test-interactive-setup.sh --skip-vm
+./dev/tests/test-interactive-setup.sh --skip-vm
 ```
 
 **What happens:**
@@ -97,14 +102,14 @@ If you prefer to create the VM manually:
 
 ```bash
 # Use vm-create-native.sh directly
-./vm-create-native.sh --download fedora --type cloud --arch aarch64 --version 43 --headless
+./dev/scripts/vm-create-native.sh --download fedora --type cloud --arch aarch64 --version 43 --headless
 ```
 
-**Note:** The VM creation scripts (`vm-create-native.sh`, `test-interactive-setup.sh`) are in `.gitignore` and are development tools, not part of the standard deployment.
+**Note:** The VM creation scripts are in `dev/scripts/` and `dev/tests/` directories. These are development tools, not part of the standard deployment.
 
 #### Tested Distributions and Architecture
 
-The `vm-create-native.sh` script can download and create VMs for the following distributions:
+The `dev/scripts/vm-create-native.sh` script can download and create VMs for the following distributions:
 
 | Distribution | Version | Architecture | Type | Tested | Notes |
 |--------------|---------|--------------|------|--------|-------|
@@ -122,11 +127,11 @@ The `vm-create-native.sh` script can download and create VMs for the following d
 
 **Notes:**
 - **Tested**: Distribution/architecture combination has been verified to work with the ZTP Bootstrap Service. Only Fedora 43 and Ubuntu 24.04 have been tested.
-- **Script Support**: The `vm-create-native.sh` script can download cloud images and create VMs for these distributions. However, they have **not been tested** with the ZTP Bootstrap Service. These are opportunities for contributors to expand testing coverage by following the testing workflow described in this document.
+- **Script Support**: The `dev/scripts/vm-create-native.sh` script can download cloud images and create VMs for these distributions. However, they have **not been tested** with the ZTP Bootstrap Service. These are opportunities for contributors to expand testing coverage by following the testing workflow described in this document.
 - **Type**: `cloud` = pre-built disk image (boots directly, cloud-init ready), `iso` = installer image (requires installation)
 - **Architecture**: `aarch64` = ARM64 (native on Apple Silicon), `x86_64` = Intel/AMD (emulated on Apple Silicon)
 - Cloud images are recommended for development/testing as they boot faster and have cloud-init pre-configured
-- To add support for additional distributions in the script, modify `vm-create-native.sh`'s `download_iso()` function
+- To add support for additional distributions in the script, modify `dev/scripts/vm-create-native.sh`'s `download_iso()` function
 
 ---
 
@@ -136,7 +141,7 @@ The test script automatically fetches and restores a backup from your production
 
 #### Automated Restore (via test script)
 
-The `test-interactive-setup.sh` script automatically:
+The `dev/tests/test-interactive-setup.sh` script automatically:
 1. Fetches the latest backup from your production server (configured in the script)
 2. Copies it to the VM
 3. Extracts and restores:
@@ -154,10 +159,10 @@ ssh user@localhost -p 2222
 
 # Run the restore script (it detects it's running inside the VM)
 cd ~/ztpbootstrap
-./restore-backup-from-fedora1.sh
+./dev/scripts/restore-backup-from-fedora1.sh
 ```
 
-**Note:** The restore script (`restore-backup-from-fedora1.sh`) references a production server hostname. Update the script or set environment variables to point to your production server.
+**Note:** The restore script (`dev/scripts/restore-backup-from-fedora1.sh`) references a production server hostname. Update the script or set environment variables to point to your production server.
 
 **What gets restored:**
 - All configuration files (`nginx.conf`, `ztpbootstrap.env`, etc.)
@@ -165,7 +170,7 @@ cd ~/ztpbootstrap
 - SSL certificates (if present)
 - Any custom scripts or configurations
 
-**Note:** The restore script (`restore-backup-from-fedora1.sh`) is in `.gitignore` and is a development tool.
+**Note:** The restore script is in `dev/scripts/` and is a development tool.
 
 ---
 
@@ -268,10 +273,10 @@ cd ~/ztpbootstrap
 
 ```bash
 # Create new VM (from scratch)
-./test-interactive-setup.sh
+./dev/tests/test-interactive-setup.sh
 
 # Use existing VM (skip creation)
-./test-interactive-setup.sh --skip-vm
+./dev/tests/test-interactive-setup.sh --skip-vm
 
 # Stop VM (kill QEMU process)
 pkill -f qemu-system-aarch64
@@ -291,10 +296,10 @@ ssh user@production-server
 sudo bash -c 'BACKUP_DIR="/tmp/ztpbootstrap-backup-$(date +%Y%m%d_%H%M%S)"; mkdir -p "$BACKUP_DIR"; cp -r /opt/containerdata/ztpbootstrap "$BACKUP_DIR/containerdata_ztpbootstrap" && cp -r /etc/containers/systemd/ztpbootstrap "$BACKUP_DIR/etc_containers_systemd_ztpbootstrap" && cp -r /opt/containerdata/certs/wild "$BACKUP_DIR/certs_wild" && cd /tmp && tar -czf ~user/ztpbootstrap-backup-$(date +%Y%m%d_%H%M%S).tar.gz -C "$BACKUP_DIR" . && rm -rf "$BACKUP_DIR" && echo "Backup: ~user/ztpbootstrap-backup-$(date +%Y%m%d_%H%M%S).tar.gz"'
 
 # Restore backup in VM (from inside VM)
-./restore-backup-from-fedora1.sh
+./dev/scripts/restore-backup-from-fedora1.sh
 
 # Restore backup in VM (from host, replace 'user' with your username)
-ssh -p 2222 user@localhost './restore-backup-from-fedora1.sh'
+ssh -p 2222 user@localhost './dev/scripts/restore-backup-from-fedora1.sh'
 ```
 
 ### Testing Commands
@@ -335,7 +340,7 @@ curl -k https://localhost:8443/ui/
 
 ```bash
 # 1. Create fresh VM
-./test-interactive-setup.sh
+./dev/tests/test-interactive-setup.sh
 
 # 2. Wait for VM to be ready (script does this automatically)
 
@@ -365,7 +370,7 @@ curl -k https://localhost/health
 
 ```bash
 # 1. Use existing VM
-./test-interactive-setup.sh --skip-vm
+./dev/tests/test-interactive-setup.sh --skip-vm
 
 # 2. Copy your changes to VM (replace 'user' with your username)
 scp -P 2222 setup-interactive.sh user@localhost:~/ztpbootstrap/
@@ -382,7 +387,7 @@ cd ~/ztpbootstrap
 
 ```bash
 # 1. Create VM and restore backup (simulates existing installation)
-./test-interactive-setup.sh
+./dev/tests/test-interactive-setup.sh
 
 # 2. SSH into VM (replace 'user' with your username)
 ssh user@localhost -p 2222
@@ -419,7 +424,7 @@ curl -k https://localhost/health
 
 ```bash
 # 1. Create VM and restore backup
-./test-interactive-setup.sh
+./dev/tests/test-interactive-setup.sh
 
 # 2. SSH into VM (replace 'user' with your username)
 ssh user@localhost -p 2222
@@ -541,10 +546,10 @@ sudo systemctl restart ztpbootstrap
 
 The following scripts are development tools and are not part of the standard deployment:
 
-- `test-interactive-setup.sh` - Automated VM creation and backup restore
-- `restore-backup-from-fedora1.sh` - Backup restore utility
-- `vm-create-native.sh` - VM creation script
-- `wait-for-ssh.sh` - SSH readiness checker
+- `dev/tests/test-interactive-setup.sh` - Automated VM creation and backup restore
+- `dev/scripts/restore-backup-from-fedora1.sh` - Backup restore utility
+- `dev/scripts/vm-create-native.sh` - VM creation script
+- `dev/scripts/wait-for-ssh.sh` - SSH readiness checker
 - `run-full-e2e-test.sh` - End-to-end test runner
 
 These scripts are available locally but not tracked in git, allowing each developer to customize them for their environment.
@@ -599,7 +604,7 @@ make clean
 
 After completing development and testing:
 
-1. **Run full test suite** - Use `ci-test.sh` and `integration-test.sh`
+1. **Run full test suite** - Use `dev/tests/ci-test.sh` and `dev/tests/integration-test.sh`
 2. **Update documentation** - Update README.md if user-facing behavior changed
 3. **Create pull request** - Submit changes for review
 4. **Test in CI** - Verify CI pipeline passes with your changes

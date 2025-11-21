@@ -622,9 +622,9 @@ update_setup_sh() {
 
 # Show configuration diff
 show_diff() {
-    if [[ -f "config-diff.sh" ]]; then
+    if [[ -f "dev/scripts/config-diff.sh" ]]; then
         log "Showing configuration diff..."
-        bash config-diff.sh "$CONFIG_FILE"
+        bash dev/scripts/config-diff.sh "$CONFIG_FILE"
         echo ""
     fi
 }

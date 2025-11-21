@@ -6,7 +6,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# If running from /opt/containerdata/ztpbootstrap (CI), use current dir
+# Otherwise use repo root
+if [[ "$SCRIPT_DIR" == "/opt/containerdata/ztpbootstrap" ]]; then
+    WORK_DIR="$SCRIPT_DIR"
+else
+    WORK_DIR="$REPO_ROOT"
+fi
+cd "$WORK_DIR"
 
 # Colors
 GREEN='\033[0;32m'
@@ -60,9 +68,20 @@ EXECUTABLE_SCRIPTS=(
     "setup.sh"
     "setup-interactive.sh"
     "update-config.sh"
-    "integration-test.sh"
-    "test-service.sh"
 )
+# Add dev test scripts if in repo root
+if [[ "$WORK_DIR" == "$REPO_ROOT" ]]; then
+    EXECUTABLE_SCRIPTS+=(
+        "dev/tests/integration-test.sh"
+        "dev/tests/test-service.sh"
+    )
+else
+    # In CI, scripts are copied to current directory
+    EXECUTABLE_SCRIPTS+=(
+        "integration-test.sh"
+        "test-service.sh"
+    )
+fi
 
 for script in "${EXECUTABLE_SCRIPTS[@]}"; do
     if [ -f "$script" ]; then
@@ -124,9 +143,20 @@ SHELL_SCRIPTS=(
     "setup.sh"
     "setup-interactive.sh"
     "update-config.sh"
-    "integration-test.sh"
-    "test-service.sh"
 )
+# Add dev test scripts if in repo root
+if [[ "$WORK_DIR" == "$REPO_ROOT" ]]; then
+    SHELL_SCRIPTS+=(
+        "dev/tests/integration-test.sh"
+        "dev/tests/test-service.sh"
+    )
+else
+    # In CI, scripts are copied to current directory
+    SHELL_SCRIPTS+=(
+        "integration-test.sh"
+        "test-service.sh"
+    )
+fi
 
 for script in "${SHELL_SCRIPTS[@]}"; do
     if [ -f "$script" ]; then
@@ -190,11 +220,10 @@ SYSTEMD_FILES=(
 )
 
 for config_file in "${SYSTEMD_FILES[@]}"; do
-    # Check in systemd subdirectory (where CI copies them)
-    if [ -f "systemd/$config_file" ]; then
+    # Check in systemd subdirectory (where CI copies them or in repo)
+    if [ -f "$WORK_DIR/systemd/$config_file" ]; then
         pass "Systemd file exists: systemd/$config_file"
-    # Check in repo root systemd directory (if running from repo)
-    elif [ -f "$SCRIPT_DIR/../systemd/$config_file" ]; then
+    elif [ -f "$REPO_ROOT/systemd/$config_file" ]; then
         pass "Systemd file exists: systemd/$config_file (in repo)"
     else
         warn "Systemd file not found: systemd/$config_file (may be in different location)"

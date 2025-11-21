@@ -1,0 +1,411 @@
+# Test Matrix for Automated Testing
+# Comprehensive coverage of all code paths
+
+tests:
+  # ============================================
+  # Certificate Configuration Tests
+  # ============================================
+  
+  - name: "fresh_install_http_only_host_network"
+    description: "Fresh install with HTTP-only mode and host networking"
+    scenario: "fresh"
+    setup_interactive_args: ["--non-interactive"]
+    environment:
+      HTTP_ONLY: "true"
+      HOST_NETWORK: "true"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - service_running: "ztpbootstrap-nginx"
+      - file_exists: "/opt/containerdata/ztpbootstrap/ztpbootstrap.env"
+      - config_contains: "HTTP_ONLY=true"
+      - config_contains: "HOST_NETWORK=true"
+
+  - name: "fresh_install_http_only_macvlan"
+    description: "Fresh install with HTTP-only mode and macvlan networking"
+    scenario: "fresh"
+    setup_interactive_args: ["--non-interactive"]
+    environment:
+      HTTP_ONLY: "true"
+      HOST_NETWORK: "false"
+      IPV4: "10.0.0.10"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - service_running: "ztpbootstrap-nginx"
+      - config_contains: "HTTP_ONLY=true"
+      - config_contains: "HOST_NETWORK=false"
+
+  - name: "fresh_install_self_signed_host_network"
+    description: "Fresh install with self-signed certificate and host networking"
+    scenario: "fresh"
+    setup_interactive_args: ["--non-interactive"]
+    environment:
+      HTTP_ONLY: "false"
+      HOST_NETWORK: "true"
+      USE_LETSENCRYPT: "false"
+      CREATE_SELF_SIGNED: "true"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - service_running: "ztpbootstrap-nginx"
+      - file_exists: "/opt/containerdata/certs/wild/fullchain.pem"
+      - file_exists: "/opt/containerdata/certs/wild/privkey.pem"
+      - config_contains: "HTTP_ONLY=false"
+      - config_contains: "HOST_NETWORK=true"
+
+  - name: "fresh_install_self_signed_macvlan"
+    description: "Fresh install with self-signed certificate and macvlan networking"
+    scenario: "fresh"
+    setup_interactive_args: ["--non-interactive"]
+    environment:
+      HTTP_ONLY: "false"
+      HOST_NETWORK: "false"
+      IPV4: "10.0.0.10"
+      USE_LETSENCRYPT: "false"
+      CREATE_SELF_SIGNED: "true"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - service_running: "ztpbootstrap-nginx"
+      - file_exists: "/opt/containerdata/certs/wild/fullchain.pem"
+      - file_exists: "/opt/containerdata/certs/wild/privkey.pem"
+      - config_contains: "HTTP_ONLY=false"
+      - config_contains: "HOST_NETWORK=false"
+
+  - name: "fresh_install_letsencrypt_host_network"
+    description: "Fresh install with Let's Encrypt and host networking"
+    scenario: "fresh"
+    setup_interactive_args: ["--non-interactive"]
+    environment:
+      HTTP_ONLY: "false"
+      HOST_NETWORK: "true"
+      USE_LETSENCRYPT: "true"
+      LETSENCRYPT_EMAIL: "test@example.com"
+      CREATE_SELF_SIGNED: "false"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - service_running: "ztpbootstrap-nginx"
+      - config_contains: "USE_LETSENCRYPT=true"
+      - config_contains: "HOST_NETWORK=true"
+
+  - name: "fresh_install_letsencrypt_macvlan"
+    description: "Fresh install with Let's Encrypt and macvlan networking"
+    scenario: "fresh"
+    setup_interactive_args: ["--non-interactive"]
+    environment:
+      HTTP_ONLY: "false"
+      HOST_NETWORK: "false"
+      IPV4: "10.0.0.10"
+      USE_LETSENCRYPT: "true"
+      LETSENCRYPT_EMAIL: "test@example.com"
+      CREATE_SELF_SIGNED: "false"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - service_running: "ztpbootstrap-nginx"
+      - config_contains: "USE_LETSENCRYPT=true"
+      - config_contains: "HOST_NETWORK=false"
+
+  # ============================================
+  # Upgrade Tests (with existing installation)
+  # ============================================
+  
+  - name: "upgrade_http_only_host_network"
+    description: "Upgrade existing installation with HTTP-only and host networking"
+    scenario: "upgrade"
+    requires_existing_install: true
+    setup_interactive_args: ["--upgrade"]
+    environment:
+      HTTP_ONLY: "true"
+      HOST_NETWORK: "true"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - config_preserved: true
+
+  - name: "upgrade_self_signed_macvlan"
+    description: "Upgrade existing installation with self-signed cert and macvlan"
+    scenario: "upgrade"
+    requires_existing_install: true
+    setup_interactive_args: ["--upgrade"]
+    environment:
+      HTTP_ONLY: "false"
+      HOST_NETWORK: "false"
+      IPV4: "10.0.0.10"
+      USE_LETSENCRYPT: "false"
+      CREATE_SELF_SIGNED: "true"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - config_preserved: true
+
+  - name: "upgrade_with_password_reset"
+    description: "Upgrade and reset password"
+    scenario: "upgrade"
+    requires_existing_install: true
+    setup_interactive_args: ["--upgrade", "--reset-pass", "testpass123"]
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - password_reset: true
+
+  # ============================================
+  # Backup Creation Tests
+  # ============================================
+  
+  - name: "fresh_install_with_backup_creation"
+    description: "Fresh install with backup creation enabled"
+    scenario: "fresh"
+    setup_interactive_args: ["--non-interactive"]
+    environment:
+      CREATE_BACKUP: "true"
+      HTTP_ONLY: "false"
+      HOST_NETWORK: "false"
+      IPV4: "10.0.0.10"
+      CREATE_SELF_SIGNED: "true"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - backup_exists: true
+
+  - name: "upgrade_with_backup_creation"
+    description: "Upgrade with backup creation"
+    scenario: "upgrade"
+    requires_existing_install: true
+    setup_interactive_args: ["--upgrade"]
+    environment:
+      CREATE_BACKUP: "true"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - backup_exists: true
+
+  # ============================================
+  # Interactive Mode Tests (with canned responses)
+  # ============================================
+  
+  - name: "interactive_http_only_host_network"
+    description: "Interactive mode: HTTP-only with host networking"
+    scenario: "fresh"
+    setup_interactive_args: []
+    interactive_responses:
+      - "n"  # Don't create backup
+      - "ztpboot.example.com"  # Domain
+      - "y"  # Use host network
+      - "443"  # HTTPS port
+      - "80"  # HTTP port
+      - "y"  # HTTP-only mode
+      - "www.arista.io"  # CVaaS address
+      - "test_token"  # Enrollment token
+      - ""  # Proxy (empty)
+      - ""  # EOS URL (empty)
+      - "time.nist.gov"  # NTP server
+      - "fullchain.pem"  # Cert filename
+      - "privkey.pem"  # Key filename
+      - "n"  # Don't use Let's Encrypt
+      - "n"  # Don't create self-signed (HTTP-only)
+      - "n"  # Don't set admin password
+      - "y"  # Apply now
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - config_contains: "HTTP_ONLY=true"
+      - config_contains: "HOST_NETWORK=true"
+
+  - name: "interactive_self_signed_macvlan"
+    description: "Interactive mode: Self-signed cert with macvlan"
+    scenario: "fresh"
+    setup_interactive_args: []
+    interactive_responses:
+      - "n"  # Don't create backup
+      - "ztpboot.example.com"  # Domain
+      - "n"  # Don't use host network
+      - "10.0.0.10"  # IPv4
+      - ""  # IPv6 (empty)
+      - "443"  # HTTPS port
+      - "80"  # HTTP port
+      - "n"  # Don't use HTTP-only
+      - "www.arista.io"  # CVaaS address
+      - "test_token"  # Enrollment token
+      - ""  # Proxy (empty)
+      - ""  # EOS URL (empty)
+      - "time.nist.gov"  # NTP server
+      - "fullchain.pem"  # Cert filename
+      - "privkey.pem"  # Key filename
+      - "n"  # Don't use Let's Encrypt
+      - "y"  # Create self-signed
+      - "n"  # Don't set admin password
+      - "y"  # Apply now
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - config_contains: "HTTP_ONLY=false"
+      - config_contains: "HOST_NETWORK=false"
+      - file_exists: "/opt/containerdata/certs/wild/fullchain.pem"
+
+  - name: "interactive_letsencrypt_macvlan"
+    description: "Interactive mode: Let's Encrypt with macvlan"
+    scenario: "fresh"
+    setup_interactive_args: []
+    interactive_responses:
+      - "n"  # Don't create backup
+      - "ztpboot.example.com"  # Domain
+      - "n"  # Don't use host network
+      - "10.0.0.10"  # IPv4
+      - ""  # IPv6 (empty)
+      - "443"  # HTTPS port
+      - "80"  # HTTP port
+      - "n"  # Don't use HTTP-only
+      - "www.arista.io"  # CVaaS address
+      - "test_token"  # Enrollment token
+      - ""  # Proxy (empty)
+      - ""  # EOS URL (empty)
+      - "time.nist.gov"  # NTP server
+      - "fullchain.pem"  # Cert filename
+      - "privkey.pem"  # Key filename
+      - "y"  # Use Let's Encrypt
+      - "test@example.com"  # Let's Encrypt email
+      - "n"  # Don't create self-signed
+      - "n"  # Don't set admin password
+      - "y"  # Apply now
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - config_contains: "USE_LETSENCRYPT=true"
+      - config_contains: "HOST_NETWORK=false"
+
+  # ============================================
+  # Admin Password Tests
+  # ============================================
+  
+  - name: "fresh_install_with_admin_password"
+    description: "Fresh install with admin password set"
+    scenario: "fresh"
+    setup_interactive_args: ["--reset-pass", "testpass123"]
+    environment:
+      HTTP_ONLY: "false"
+      HOST_NETWORK: "true"
+      CREATE_SELF_SIGNED: "true"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - password_reset: true
+
+  # ============================================
+  # Error Handling Tests
+  # ============================================
+  
+  - name: "upgrade_without_existing_install"
+    description: "Attempt upgrade without existing installation (should fail gracefully)"
+    scenario: "fresh"
+    setup_interactive_args: ["--upgrade"]
+    expected_exit_code: 1
+    verify:
+      - error_message: "existing installation"
+
+  # ============================================
+  # IPv6 Configuration Tests
+  # ============================================
+  
+  - name: "fresh_install_macvlan_with_ipv6"
+    description: "Fresh install with macvlan and IPv6 address"
+    scenario: "fresh"
+    setup_interactive_args: ["--non-interactive"]
+    environment:
+      HTTP_ONLY: "false"
+      HOST_NETWORK: "false"
+      IPV4: "10.0.0.10"
+      IPV6: "2001:db8::10"
+      CREATE_SELF_SIGNED: "true"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - config_contains: "IPV6=2001:db8::10"
+
+  # ============================================
+  # Network Transition Tests
+  # ============================================
+  
+  - name: "upgrade_host_to_macvlan"
+    description: "Upgrade from host network to macvlan"
+    scenario: "upgrade"
+    requires_existing_install: true
+    # First setup with host network
+    initial_setup_env:
+      HOST_NETWORK: "true"
+      HTTP_ONLY: "true"
+    setup_interactive_args: ["--upgrade"]
+    environment:
+      HOST_NETWORK: "false"
+      IPV4: "10.0.0.10"
+      HTTP_ONLY: "true"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - config_contains: "HOST_NETWORK=false"
+
+  - name: "upgrade_macvlan_to_host"
+    description: "Upgrade from macvlan to host network"
+    scenario: "upgrade"
+    requires_existing_install: true
+    # First setup with macvlan
+    initial_setup_env:
+      HOST_NETWORK: "false"
+      IPV4: "10.0.0.10"
+      HTTP_ONLY: "true"
+    setup_interactive_args: ["--upgrade"]
+    environment:
+      HOST_NETWORK: "true"
+      HTTP_ONLY: "true"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - config_contains: "HOST_NETWORK=true"
+
+  # ============================================
+  # Certificate Transition Tests
+  # ============================================
+  
+  - name: "upgrade_http_to_https_self_signed"
+    description: "Upgrade from HTTP-only to HTTPS with self-signed cert"
+    scenario: "upgrade"
+    requires_existing_install: true
+    # First setup with HTTP-only
+    initial_setup_env:
+      HTTP_ONLY: "true"
+      HOST_NETWORK: "true"
+    setup_interactive_args: ["--upgrade"]
+    environment:
+      HTTP_ONLY: "false"
+      HOST_NETWORK: "true"
+      USE_LETSENCRYPT: "false"
+      CREATE_SELF_SIGNED: "true"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - config_contains: "HTTP_ONLY=false"
+      - file_exists: "/opt/containerdata/certs/wild/fullchain.pem"
+
+  - name: "upgrade_self_signed_to_letsencrypt"
+    description: "Upgrade from self-signed to Let's Encrypt"
+    scenario: "upgrade"
+    requires_existing_install: true
+    # First setup with self-signed
+    initial_setup_env:
+      HTTP_ONLY: "false"
+      HOST_NETWORK: "true"
+      USE_LETSENCRYPT: "false"
+      CREATE_SELF_SIGNED: "true"
+    setup_interactive_args: ["--upgrade"]
+    environment:
+      HTTP_ONLY: "false"
+      HOST_NETWORK: "true"
+      USE_LETSENCRYPT: "true"
+      LETSENCRYPT_EMAIL: "test@example.com"
+      CREATE_SELF_SIGNED: "false"
+    expected_exit_code: 0
+    verify:
+      - service_running: "ztpbootstrap"
+      - config_contains: "USE_LETSENCRYPT=true"
