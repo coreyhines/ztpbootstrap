@@ -11,6 +11,7 @@ import secrets
 import subprocess
 import time
 import yaml
+import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 from functools import wraps
@@ -1786,8 +1787,8 @@ def get_logs():
                                 container_logs = journal_result.stdout.strip()
                                 method_used = 'journalctl'
                         except Exception as e:
-                            diagnostics.append(f"journalctl for {service} failed: {str(e)}")
-                    
+                            logging.exception(f"Exception while retrieving logs via journalctl for {service}")
+                            diagnostics.append(f"journalctl for {service} failed")
                     if container_logs:
                         log_parts.append(container_logs)
                         logs_retrieved = True
