@@ -1205,16 +1205,16 @@ def get_status():
             pass
         
         # Method 2: Check if we can reach nginx health endpoint (indicates service is running)
+        # This is the most reliable method when systemctl is not available in containers
         if not container_running:
             try:
                 import urllib.request
                 response = urllib.request.urlopen('http://127.0.0.1/health', timeout=2)
-                if response.getcode() == 200:
+                status_code = response.getcode()
+                if status_code == 200:
                     container_running = True
             except Exception as e:
-                # Log error for debugging (only in development)
-                if os.environ.get('FLASK_ENV') == 'development':
-                    print(f"Health endpoint check failed: {e}", flush=True)
+                # Health endpoint not reachable - service may not be running
                 pass
         
         # Method 3: Check if podman is available and can see the pod
