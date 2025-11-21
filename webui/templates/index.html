@@ -406,10 +406,10 @@
                     <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
                         <div x-show="config.error" class="text-red-600" x-text="config.error"></div>
                         <div x-show="config.raw && !config.error" class="overflow-x-auto">
-                            <pre class="language-yaml"><code class="language-yaml" x-html="highlightConfigSearch(escapeHtml(config.raw))" x-ref="yamlCode"></code></pre>
+                            <pre class="language-yaml"><code class="language-yaml" x-text="config.raw" x-ref="yamlCode"></code></pre>
                         </div>
                         <div x-show="config.parsed && !config.error" class="overflow-x-auto">
-                            <pre class="language-json"><code class="language-json" x-html="highlightConfigSearch(escapeHtml(JSON.stringify(config.parsed, null, 2)))" x-ref="jsonCode"></code></pre>
+                            <pre class="language-json"><code class="language-json" x-text="JSON.stringify(config.parsed, null, 2)" x-ref="jsonCode"></code></pre>
                         </div>
                     </div>
                 </div>
