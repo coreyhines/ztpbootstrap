@@ -1815,10 +1815,21 @@ create_pod_files_from_config() {
             local registry_image
             registry_image=$(yq eval '.webui.registry_image // ""' "$config_file" 2>/dev/null || echo "")
             if [[ -n "$registry_image" ]] && [[ "$registry_image" != "null" ]] && [[ "$registry_image" != "" ]]; then
-                # Verify the image actually exists before using it
-                if podman image exists "$registry_image" 2>/dev/null; then
+                # Check if it's a remote registry image (contains / and not localhost)
+                local is_remote_registry=false
+                if [[ "$registry_image" == *"/"* ]] && [[ "$registry_image" != "localhost"* ]] && [[ "$registry_image" != "ztpbootstrap-webui:local" ]]; then
+                    is_remote_registry=true
+                fi
+                
+                # For remote registry images, allow them even if not locally present (Podman will pull)
+                # For local images, verify they exist
+                if [[ "$is_remote_registry" == "true" ]] || podman image exists "$registry_image" 2>/dev/null; then
                     image_tag="$registry_image"
-                    log "Found configured webui image in config.yaml: $image_tag"
+                    if [[ "$is_remote_registry" == "true" ]]; then
+                        log "Found configured remote registry image in config.yaml: $image_tag (will be pulled if needed)"
+                    else
+                        log "Found configured webui image in config.yaml: $image_tag"
+                    fi
                 else
                     warn "Configured webui image '$registry_image' from config.yaml does not exist. Will check for local image or use base Fedora image."
                 fi
@@ -2497,6 +2508,51 @@ PYTHON_VERIFY
     
     echo ""
     
+    # WebUI Image Registry (ask early if user has pre-built image)
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}  WebUI Container Image${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    log "If you have previously built and pushed the webui image to a remote registry,"
+    log "you can specify it here. Otherwise, you can build it locally later in the setup."
+    echo ""
+    
+    # Check if there's an existing registry image in config.yaml
+    local existing_registry_image=""
+    if [[ -f "${SCRIPT_DIR}/config.yaml" ]]; then
+        existing_registry_image=$(yq eval '.webui.registry_image // ""' "${SCRIPT_DIR}/config.yaml" 2>/dev/null || echo "")
+        if [[ -n "$existing_registry_image" ]] && [[ "$existing_registry_image" != "null" ]] && [[ "$existing_registry_image" != "" ]]; then
+            # Only use it if it's a remote registry (not local)
+            if [[ "$existing_registry_image" != "ztpbootstrap-webui:local" ]] && [[ "$existing_registry_image" != *"localhost"* ]]; then
+                prompt_with_default "Remote registry image (e.g., registry.example.com/ztpbootstrap-webui:latest)" "$existing_registry_image" WEBUI_REGISTRY_IMAGE
+            else
+                prompt_with_default "Remote registry image (e.g., registry.example.com/ztpbootstrap-webui:latest)" "" WEBUI_REGISTRY_IMAGE
+            fi
+        else
+            prompt_with_default "Remote registry image (e.g., registry.example.com/ztpbootstrap-webui:latest)" "" WEBUI_REGISTRY_IMAGE
+        fi
+    else
+        prompt_with_default "Remote registry image (e.g., registry.example.com/ztpbootstrap-webui:latest)" "" WEBUI_REGISTRY_IMAGE
+    fi
+    
+    # If user provided a registry image, extract registry and tag
+    if [[ -n "${WEBUI_REGISTRY_IMAGE:-}" ]] && [[ "${WEBUI_REGISTRY_IMAGE}" != "" ]]; then
+        WEBUI_IMAGE_TAG="${WEBUI_REGISTRY_IMAGE}"
+        # Extract registry URL (everything before the last /)
+        if [[ "$WEBUI_REGISTRY_IMAGE" == *"/"* ]]; then
+            WEBUI_IMAGE_REGISTRY="${WEBUI_REGISTRY_IMAGE%/*}"
+        else
+            WEBUI_IMAGE_REGISTRY=""
+        fi
+        log "Will use remote registry image: $WEBUI_IMAGE_TAG"
+    else
+        WEBUI_IMAGE_TAG=""
+        WEBUI_IMAGE_REGISTRY=""
+        log "No remote registry image specified. Will build locally or use base Fedora image."
+    fi
+    
+    echo ""
+    
     # Section 3: Network Configuration
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}  Network Configuration${NC}"
@@ -2695,28 +2751,30 @@ PYTHON_VERIFY
     
     echo ""
     
-    # Section 7: WebUI Image Configuration (only shown if Containerfile exists)
+    # Section 7: WebUI Image Configuration (only shown if Containerfile exists and no registry image was provided)
     local repo_dir
     repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local containerfile="${repo_dir}/webui/Containerfile"
     
-    if [[ -f "$containerfile" ]]; then
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo -e "${CYAN}  WebUI Container Image${NC}"
-        echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-        echo ""
-        
-        log "A Containerfile is available to build an optimized webui image."
-        log "Building the image will pre-install Python, podman, and systemd,"
-        log "resulting in much faster container startup times (no package installation)."
-        echo ""
-        
-        if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
-            BUILD_WEBUI_IMAGE="true"
-            log "Non-interactive mode: Will build webui image from Containerfile"
-        else
-            prompt_yes_no "Build optimized webui image from Containerfile? (recommended)" "y" BUILD_WEBUI_IMAGE
-        fi
+    # Skip image build section if user already provided a registry image
+    if [[ -z "${WEBUI_IMAGE_TAG:-}" ]] || [[ "${WEBUI_IMAGE_TAG}" == "" ]]; then
+        if [[ -f "$containerfile" ]]; then
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo -e "${CYAN}  WebUI Container Image Build${NC}"
+            echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+            echo ""
+            
+            log "A Containerfile is available to build an optimized webui image."
+            log "Building the image will pre-install Python, podman, and systemd,"
+            log "resulting in much faster container startup times (no package installation)."
+            echo ""
+            
+            if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
+                BUILD_WEBUI_IMAGE="true"
+                log "Non-interactive mode: Will build webui image from Containerfile"
+            else
+                prompt_yes_no "Build optimized webui image from Containerfile? (recommended)" "y" BUILD_WEBUI_IMAGE
+            fi
         
         # Build the image now if requested
         if [[ "${BUILD_WEBUI_IMAGE:-false}" == "true" ]]; then
@@ -2978,6 +3036,10 @@ PYTHON_VERIFY
         fi
         
         echo ""
+        fi
+    else
+        # User already provided a registry image earlier, skip build section
+        log "Using previously specified registry image: ${WEBUI_IMAGE_TAG}"
     fi
     
     # Section 8: Service Configuration (only shown in extended mode)
