@@ -2816,7 +2816,7 @@ PYTHON_VERIFY
                                                 fi
                                                 
                                                 # Skip single-arch build since we just did multi-arch
-                                                continue
+                                                MULTI_ARCH_BUILT=true
                                             else
                                                 warn "buildah installed but not found in PATH. Continuing with single-arch build."
                                             fi
@@ -2826,9 +2826,10 @@ PYTHON_VERIFY
                                     fi
                                 fi
                                 
-                                # Build and push single-arch (current architecture)
-                                log "Building single-arch image for current platform only..."
-                                if [[ "$current_arch" == "aarch64" ]] || [[ "$current_arch" == "arm64" ]]; then
+                                # Build and push single-arch (current architecture) - only if multi-arch wasn't built
+                                if [[ "${MULTI_ARCH_BUILT:-false}" != "true" ]]; then
+                                    log "Building single-arch image for current platform only..."
+                                    if [[ "$current_arch" == "aarch64" ]] || [[ "$current_arch" == "arm64" ]]; then
                                     current_arch="arm64"
                                     warn "Building arm64 only. Production x86_64 servers will need amd64 image."
                                 else
