@@ -1412,8 +1412,7 @@
                             // Split container logs by service
                             const logText = data.logs || '';
                             // Pod-based service names
-                            const podMatch = logText.match(/=== ztpbootstrap-pod\.service ===([\s\S]*?)(?=== |$)/) || 
-                                           logText.match(/=== ztpbootstrap\.service ===([\s\S]*?)(?=== |$)/);
+                            const podMatch = logText.match(/=== ztpbootstrap-pod\.service ===([\s\S]*?)(?=== |$)/);
                             const nginxMatch = logText.match(/=== ztpbootstrap-nginx\.service ===([\s\S]*?)(?=== |$)/);
                             const webuiMatch = logText.match(/=== ztpbootstrap-webui\.service ===([\s\S]*?)(?=== |$)/);
                             
