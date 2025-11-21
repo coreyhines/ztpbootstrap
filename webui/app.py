@@ -1799,14 +1799,11 @@ def get_logs():
                 # Method 2: Try journalctl (works if journal is accessible)
                 if not container_logs and journalctl_available:
                     try:
-                        # Set LD_LIBRARY_PATH for journalctl execution
-                        env = os.environ.copy()
-                        env['LD_LIBRARY_PATH'] = '/lib64:/usr/lib64:/usr/lib64/systemd'
-                            journal_result = subprocess.run(
-                                ['/usr/bin/journalctl', '-D', '/var/log/journal', '--system', '-u', service, '-n', str(lines // max(len(containers), 1)), '--no-pager', '--no-hostname'],
-                                capture_output=True,
-                                text=True,
-                                timeout=3,
+                        journal_result = subprocess.run(
+                            ['/usr/bin/journalctl', '-D', '/var/log/journal', '--system', '-u', service, '-n', str(lines // max(len(containers), 1)), '--no-pager', '--no-hostname'],
+                            capture_output=True,
+                            text=True,
+                            timeout=3,
                                 env=env
                             )
                         if journal_result.returncode == 0 and journal_result.stdout.strip():
