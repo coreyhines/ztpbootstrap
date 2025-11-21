@@ -1272,13 +1272,13 @@ def parse_nginx_access_log():
                             line_timestamp = dt.timestamp()
                             if line_timestamp > cutoff_time:
                                 processed_lines.add(line)
-                        except:
+                        except Exception:
                             # If we can't parse timestamp, keep the line (conservative approach)
                             processed_lines.add(line)
                     else:
                         # If it doesn't match log format, it might be a MARK line, keep it
                         processed_lines.add(line)
-        except:
+        except Exception:
             pass
     
     # Nginx log format: IP - - [timestamp] "method path protocol" status size "referer" "user-agent"
