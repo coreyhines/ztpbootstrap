@@ -1419,6 +1419,8 @@
                                 // Apply search highlighting after Prism
                                 if (this.configSearchTerm) {
                                     this.$refs.yamlCode.innerHTML = this.highlightConfigSearch(this.$refs.yamlCode.innerHTML);
+                                    // Scroll to first match
+                                    this.scrollToFirstMatch(this.$refs.yamlCode);
                                 }
                             }
                             if (window.Prism && this.$refs.jsonCode) {
@@ -1426,6 +1428,8 @@
                                 // Apply search highlighting after Prism
                                 if (this.configSearchTerm) {
                                     this.$refs.jsonCode.innerHTML = this.highlightConfigSearch(this.$refs.jsonCode.innerHTML);
+                                    // Scroll to first match
+                                    this.scrollToFirstMatch(this.$refs.jsonCode);
                                 }
                             }
                         });
@@ -1478,6 +1482,8 @@
                                 // Apply search highlighting after Prism
                                 if (this.configSearchTerm) {
                                     this.$refs.yamlCode.innerHTML = this.highlightConfigSearch(this.$refs.yamlCode.innerHTML);
+                                    // Scroll to first match
+                                    this.scrollToFirstMatch(this.$refs.yamlCode);
                                 }
                             }
                             if (this.$refs.jsonCode) {
@@ -1485,6 +1491,8 @@
                                 // Apply search highlighting after Prism
                                 if (this.configSearchTerm) {
                                     this.$refs.jsonCode.innerHTML = this.highlightConfigSearch(this.$refs.jsonCode.innerHTML);
+                                    // Scroll to first match
+                                    this.scrollToFirstMatch(this.$refs.jsonCode);
                                 }
                             }
                         }
@@ -1501,6 +1509,8 @@
                             // Apply search highlighting after Prism
                             if (this.configSearchTerm) {
                                 this.$refs.yamlCode.innerHTML = this.highlightConfigSearch(this.$refs.yamlCode.innerHTML);
+                                // Scroll to first match
+                                this.scrollToFirstMatch(this.$refs.yamlCode);
                             }
                         }
                         if (window.Prism && this.$refs.jsonCode && this.config.parsed) {
@@ -1511,9 +1521,48 @@
                             // Apply search highlighting after Prism
                             if (this.configSearchTerm) {
                                 this.$refs.jsonCode.innerHTML = this.highlightConfigSearch(this.$refs.jsonCode.innerHTML);
+                                // Scroll to first match
+                                this.scrollToFirstMatch(this.$refs.jsonCode);
                             }
                         }
                     });
+                },
+                
+                scrollToFirstMatch(element) {
+                    if (!element || !this.configSearchTerm) return;
+                    
+                    // Find the first highlighted mark element
+                    const firstMatch = element.querySelector('mark');
+                    if (firstMatch) {
+                        // Get the scrollable container (the pre element or its parent)
+                        let scrollContainer = element.closest('pre');
+                        if (!scrollContainer) {
+                            scrollContainer = element.closest('.overflow-x-auto');
+                        }
+                        if (!scrollContainer) {
+                            scrollContainer = element.parentElement;
+                        }
+                        
+                        if (scrollContainer) {
+                            // Calculate the position relative to the scroll container
+                            const containerRect = scrollContainer.getBoundingClientRect();
+                            const matchRect = firstMatch.getBoundingClientRect();
+                            
+                            // Scroll to make the match visible with some padding
+                            const scrollTop = scrollContainer.scrollTop + (matchRect.top - containerRect.top) - 50;
+                            scrollContainer.scrollTo({
+                                top: Math.max(0, scrollTop),
+                                behavior: 'smooth'
+                            });
+                            
+                            // Also highlight the match briefly for better visibility
+                            firstMatch.style.transition = 'background-color 0.3s';
+                            firstMatch.style.backgroundColor = '#fbbf24'; // yellow-400
+                            setTimeout(() => {
+                                firstMatch.style.backgroundColor = '';
+                            }, 1000);
+                        }
+                    }
                 },
                 
                 async loadLogs() {
