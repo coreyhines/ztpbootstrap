@@ -1513,19 +1513,31 @@
                             }
                             
                             if (scrollContainer) {
-                                // Get the position of the match relative to the code element
-                                const codeRect = element.getBoundingClientRect();
+                                // Get the position of the match relative to the scroll container
+                                const containerRect = scrollContainer.getBoundingClientRect();
                                 const matchRect = firstMatch.getBoundingClientRect();
                                 
-                                // Calculate scroll position
-                                // The match position relative to the code element
-                                const matchOffsetTop = matchRect.top - codeRect.top + scrollContainer.scrollTop;
+                                // Calculate how far the match is from the top of the visible container
+                                const matchOffsetFromContainerTop = matchRect.top - containerRect.top;
                                 
-                                // Scroll to make the match visible with some padding
-                                scrollContainer.scrollTo({
-                                    top: Math.max(0, matchOffsetTop - 50),
-                                    behavior: 'smooth'
-                                });
+                                // If the match is already visible (within the container viewport), don't scroll
+                                // Only scroll if the match is above or below the visible area
+                                if (matchOffsetFromContainerTop < 0) {
+                                    // Match is above the visible area - scroll up to show it
+                                    const scrollAmount = scrollContainer.scrollTop + matchOffsetFromContainerTop - 50;
+                                    scrollContainer.scrollTo({
+                                        top: Math.max(0, scrollAmount),
+                                        behavior: 'smooth'
+                                    });
+                                } else if (matchOffsetFromContainerTop > containerRect.height - 50) {
+                                    // Match is below the visible area - scroll down to show it
+                                    const scrollAmount = scrollContainer.scrollTop + matchOffsetFromContainerTop - containerRect.height + 100;
+                                    scrollContainer.scrollTo({
+                                        top: Math.max(0, scrollAmount),
+                                        behavior: 'smooth'
+                                    });
+                                }
+                                // If match is already visible, don't scroll
                                 
                                 // Also highlight the match briefly for better visibility
                                 firstMatch.style.transition = 'background-color 0.3s';
