@@ -49,7 +49,8 @@ paths = [
     '''node_modules/''',
     '''\.env\.example''',
     '''\.env\.template''',
-    # Dev scripts that create test data
+    # Dev scripts that create test data (both old and new paths)
+    '''vm-create-native\.sh''',
     '''dev/scripts/vm-create-native\.sh''',
 ]
 
