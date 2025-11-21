@@ -410,9 +410,6 @@
                         <div x-show="config.raw && !config.error" class="overflow-x-auto overflow-y-auto max-h-96">
                             <pre class="language-yaml"><code class="language-yaml" x-text="config.raw" x-ref="yamlCode"></code></pre>
                         </div>
-                        <div x-show="config.parsed && !config.error" class="overflow-x-auto overflow-y-auto max-h-96">
-                            <pre class="language-json"><code class="language-json" x-text="JSON.stringify(config.parsed, null, 2)" x-ref="jsonCode"></code></pre>
-                        </div>
                     </div>
                 </div>
 
@@ -1425,15 +1422,6 @@
                                     this.scrollToFirstMatch(this.$refs.yamlCode);
                                 }
                             }
-                            if (window.Prism && this.$refs.jsonCode) {
-                                window.Prism.highlightElement(this.$refs.jsonCode);
-                                // Apply search highlighting after Prism
-                                if (this.configSearchTerm) {
-                                    this.$refs.jsonCode.innerHTML = this.highlightConfigSearch(this.$refs.jsonCode.innerHTML);
-                                    // Scroll to first match
-                                    this.scrollToFirstMatch(this.$refs.jsonCode);
-                                }
-                            }
                         });
                     } catch (error) {
                         console.error('Failed to load config:', error);
@@ -1478,24 +1466,13 @@
                     
                     // Re-highlight code after theme change
                     this.$nextTick(() => {
-                        if (window.Prism) {
-                            if (this.$refs.yamlCode) {
-                                window.Prism.highlightElement(this.$refs.yamlCode);
-                                // Apply search highlighting after Prism
-                                if (this.configSearchTerm) {
-                                    this.$refs.yamlCode.innerHTML = this.highlightConfigSearch(this.$refs.yamlCode.innerHTML);
-                                    // Scroll to first match
-                                    this.scrollToFirstMatch(this.$refs.yamlCode);
-                                }
-                            }
-                            if (this.$refs.jsonCode) {
-                                window.Prism.highlightElement(this.$refs.jsonCode);
-                                // Apply search highlighting after Prism
-                                if (this.configSearchTerm) {
-                                    this.$refs.jsonCode.innerHTML = this.highlightConfigSearch(this.$refs.jsonCode.innerHTML);
-                                    // Scroll to first match
-                                    this.scrollToFirstMatch(this.$refs.jsonCode);
-                                }
+                        if (window.Prism && this.$refs.yamlCode) {
+                            window.Prism.highlightElement(this.$refs.yamlCode);
+                            // Apply search highlighting after Prism
+                            if (this.configSearchTerm) {
+                                this.$refs.yamlCode.innerHTML = this.highlightConfigSearch(this.$refs.yamlCode.innerHTML);
+                                // Scroll to first match
+                                this.scrollToFirstMatch(this.$refs.yamlCode);
                             }
                         }
                     });
@@ -1513,18 +1490,6 @@
                                 this.$refs.yamlCode.innerHTML = this.highlightConfigSearch(this.$refs.yamlCode.innerHTML);
                                 // Scroll to first match
                                 this.scrollToFirstMatch(this.$refs.yamlCode);
-                            }
-                        }
-                        if (window.Prism && this.$refs.jsonCode && this.config.parsed) {
-                            // Reset to original content, apply Prism, then search highlighting
-                            const jsonContent = JSON.stringify(this.config.parsed, null, 2);
-                            this.$refs.jsonCode.textContent = jsonContent;
-                            window.Prism.highlightElement(this.$refs.jsonCode);
-                            // Apply search highlighting after Prism
-                            if (this.configSearchTerm) {
-                                this.$refs.jsonCode.innerHTML = this.highlightConfigSearch(this.$refs.jsonCode.innerHTML);
-                                // Scroll to first match
-                                this.scrollToFirstMatch(this.$refs.jsonCode);
                             }
                         }
                     });
