@@ -1898,10 +1898,19 @@ start_services_after_install() {
     
     # Enable and start podman.socket if not already running
     # This is required for the webui container to access podman commands
-    if systemctl is-enabled podman.socket >/dev/null 2>&1; then
-        if ! systemctl is-active podman.socket >/dev/null 2>&1; then
+    local socket_check_cmd="systemctl"
+    local socket_enable_cmd="systemctl"
+    local socket_start_cmd="systemctl"
+    if [[ $EUID -ne 0 ]]; then
+        socket_check_cmd="sudo systemctl"
+        socket_enable_cmd="sudo systemctl"
+        socket_start_cmd="sudo systemctl"
+    fi
+    
+    if $socket_check_cmd is-enabled podman.socket >/dev/null 2>&1; then
+        if ! $socket_check_cmd is-active podman.socket >/dev/null 2>&1; then
             log "Starting podman.socket..."
-            if systemctl start podman.socket 2>&1; then
+            if $socket_start_cmd start podman.socket 2>&1; then
                 log "✓ podman.socket started"
             else
                 warn "Failed to start podman.socket (webui container may not be able to access podman commands)"
@@ -1911,7 +1920,7 @@ start_services_after_install() {
         fi
     else
         log "Enabling and starting podman.socket..."
-        if systemctl enable --now podman.socket 2>&1; then
+        if $socket_enable_cmd enable --now podman.socket 2>&1; then
             log "✓ podman.socket enabled and started"
         else
             warn "Failed to enable/start podman.socket (webui container may not be able to access podman commands)"
