@@ -49,6 +49,8 @@ paths = [
     '''node_modules/''',
     '''\.env\.example''',
     '''\.env\.template''',
+    # Dev scripts that create test data
+    '''dev/scripts/vm-create-native\.sh''',
 ]
 
 commits = [
@@ -56,4 +58,11 @@ commits = [
     '''example\.com''',
     '''your_.*_here''',
     '''placeholder''',
+]
+
+# Allowlist regex patterns for known test/example values
+regexes = [
+    # Allow test tokens used in automated testing (clearly test values)
+    '''test_token_for_automated_testing''',
+    '''test.*token.*for.*automated.*testing''',
 ]
