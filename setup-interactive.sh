@@ -2856,6 +2856,7 @@ PYTHON_VERIFY
                                     WEBUI_IMAGE_REGISTRY=""
                                     WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
                                 fi
+                                fi
                             fi
                         else
                             log "No registry provided. Will use local image only."
