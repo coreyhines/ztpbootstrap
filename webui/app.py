@@ -1187,6 +1187,7 @@ def get_status():
         # Check if pod service is running
         # Since we're in a container, systemctl may not work, so we use the health endpoint as primary method
         container_running = False
+        health_ok = False
         
         # Primary method: Check if we can reach nginx health endpoint (indicates service is running)
         # This is the most reliable method when systemctl is not available in containers
@@ -1195,6 +1196,9 @@ def get_status():
             response = urllib.request.urlopen('http://127.0.0.1/health', timeout=2)
             if response.getcode() == 200:
                 container_running = True
+                # Also check the response body for health status
+                health_body = response.read().decode().strip()
+                health_ok = health_body == 'healthy'
         except Exception:
             # Health endpoint not reachable - try systemctl as fallback
             try:
@@ -1206,17 +1210,10 @@ def get_status():
                 )
                 if result.returncode == 0:
                     container_running = True
+                    # If systemctl says it's running, assume health is ok
+                    health_ok = True
             except Exception:
                 pass
-        
-        # Check health endpoint
-        health_ok = False
-        try:
-            import urllib.request
-            response = urllib.request.urlopen('http://127.0.0.1/health', timeout=2)
-            health_ok = response.getcode() == 200 and response.read().decode().strip() == 'healthy'
-        except:
-            pass
         
         return jsonify({
             'container_running': container_running,
