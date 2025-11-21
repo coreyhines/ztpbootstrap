@@ -1209,10 +1209,13 @@ def get_status():
         if not container_running:
             try:
                 import urllib.request
+                print(f"DEBUG: Attempting health endpoint check, container_running={container_running}", flush=True)
                 response = urllib.request.urlopen('http://127.0.0.1/health', timeout=2)
                 status_code = response.getcode()
+                print(f"DEBUG: Health endpoint returned status {status_code}", flush=True)
                 if status_code == 200:
                     container_running = True
+                    print(f"DEBUG: Set container_running=True", flush=True)
             except Exception as e:
                 # Health endpoint not reachable - service may not be running
                 # Log for debugging
