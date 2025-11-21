@@ -1184,9 +1184,11 @@ def upload_bootstrap_script():
 def get_status():
     """Get service status"""
     try:
-        # Check if pod service is running via systemd
-        # Try pod-based service first (most common), then legacy service
+        # Check if pod service is running
+        # Since we're in a container, systemctl may not work, so we use multiple methods
         container_running = False
+        
+        # Method 1: Try systemctl (works if container has systemd access)
         try:
             # Check pod-based service first
             result = subprocess.run(
@@ -1205,14 +1207,37 @@ def get_status():
                     text=True,
                     timeout=2
                 )
-                container_running = result.returncode == 0
-        except:
-            # Fallback: check if we can reach nginx
+                if result.returncode == 0:
+                    container_running = True
+        except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as e:
+            # systemctl not available or failed - this is expected in containers
+            # We'll use other methods below
+            pass
+        
+        # Method 2: Check if we can reach nginx health endpoint (indicates service is running)
+        if not container_running:
             try:
                 import urllib.request
-                urllib.request.urlopen('http://127.0.0.1/health', timeout=1)
-                container_running = True
-            except:
+                response = urllib.request.urlopen('http://127.0.0.1/health', timeout=2)
+                if response.status == 200:
+                    container_running = True
+            except Exception:
+                pass
+        
+        # Method 3: Check if podman is available and can see the pod
+        if not container_running:
+            try:
+                podman_path = Path('/usr/bin/podman')
+                if podman_path.exists() and os.access(podman_path, os.X_OK):
+                    result = subprocess.run(
+                        ['/usr/bin/podman', 'pod', 'exists', 'ztpbootstrap'],
+                        capture_output=True,
+                        text=True,
+                        timeout=2
+                    )
+                    if result.returncode == 0:
+                        container_running = True
+            except Exception:
                 pass
         
         # Check health endpoint
