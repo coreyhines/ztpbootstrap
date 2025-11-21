@@ -407,7 +407,7 @@
                             <h2 class="text-lg font-semibold text-gray-900 mb-2">Service Logs</h2>
                             <p class="text-sm text-gray-600">View logs from different sources</p>
                         </div>
-                        <div class="flex items-center space-x-2">
+                        <div class="flex items-center space-x-2 flex-wrap">
                             <select x-model="logSource" @change="loadLogs()" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                                 <option value="container">Container Logs</option>
                                 <option value="nginx_access">Nginx Access Log</option>
@@ -419,6 +419,20 @@
                                 <option value="200">Last 200 lines</option>
                                 <option value="500">Last 500 lines</option>
                             </select>
+                            <div class="relative">
+                                <input type="text" 
+                                       x-model="logSearchTerm" 
+                                       @input="highlightLogs()"
+                                       placeholder="Search logs..." 
+                                       class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-48">
+                                <button x-show="logSearchTerm" 
+                                        @click="logSearchTerm = ''; highlightLogs()" 
+                                        class="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </button>
+                            </div>
                             <button @click="markLogs()" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm font-medium transition-colors">
                                 Mark Logs
                             </button>
@@ -432,11 +446,11 @@
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4" x-show="showMultiColumn && logSource === 'container'">
                         <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto">
                             <div class="text-xs text-gray-400 mb-2 font-semibold">Nginx Service</div>
-                            <pre class="text-sm text-blue-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="formatLogsWithMarks(logsNginx)"></pre>
+                            <pre class="text-sm text-blue-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="highlightSearch(formatLogsWithMarks(logsNginx))"></pre>
                         </div>
                         <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto">
                             <div class="text-xs text-gray-400 mb-2 font-semibold">WebUI Service</div>
-                            <pre class="text-sm text-yellow-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="formatLogsWithMarks(logsWebUI)"></pre>
+                            <pre class="text-sm text-yellow-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="highlightSearch(formatLogsWithMarks(logsWebUI))"></pre>
                         </div>
                     </div>
                     
@@ -444,7 +458,7 @@
                     <div x-show="!showMultiColumn || logSource !== 'container'" class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto" x-ref="logsContainer">
                         <pre class="text-sm font-mono overflow-x-auto whitespace-pre-wrap" 
                              :class="logSource === 'nginx_error' ? 'text-red-400' : 'text-green-400'"
-                             x-html="formatLogsWithMarks(logs)"></pre>
+                             x-html="highlightSearch(formatLogsWithMarks(logs))"></pre>
                     </div>
                 </div>
             </div>
@@ -669,6 +683,7 @@
                 logsWebUI: '',
                 logSource: 'nginx_access',
                 logLines: 100,
+                logSearchTerm: '',
                 showMultiColumn: false,
                 devices: [],
                 showScriptModal: false,
