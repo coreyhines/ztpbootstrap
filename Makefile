@@ -1,7 +1,7 @@
 # Makefile for ZTP Bootstrap Service
 # Provides common development tasks
 
-.PHONY: help test lint format check install-deps clean
+.PHONY: help test test-quick test-unit test-integration test-all lint format check install-deps clean test-ci test-integration-dev security-check
 
 help: ## Show this help message
 	@echo "Available targets:"
@@ -34,28 +34,26 @@ install-deps: ## Install development dependencies
 	@echo "Dependencies installed!"
 
 lint: ## Run linting checks
-	@echo "Running shellcheck..."
+	@echo "Running shellcheck on root scripts..."
 	@shellcheck -S error *.sh || true
+	@echo "Running shellcheck on dev scripts..."
+	@shellcheck -S error dev/scripts/*.sh dev/tests/*.sh 2>/dev/null || true
 	@echo "Running yamllint..."
-	@yamllint *.yaml *.yml config.yaml.template 2>/dev/null || echo "yamllint: No YAML files to check or yamllint not installed"
+	@yamllint *.yaml *.yml config.yaml.template dev/tests/*.yaml 2>/dev/null || echo "yamllint: No YAML files to check or yamllint not installed"
 
 format: ## Format code
 	@echo "Formatting Python code with black..."
 	@black bootstrap.py 2>/dev/null || echo "black not installed, skipping Python formatting"
 	@echo "Formatting complete. Note: Shell scripts should be formatted manually."
 
-test: ## Run all tests
+test: test-quick ## Run quick tests (suitable for pre-commit)
+
+test-quick: ## Run quick tests (syntax, unit tests - no running services required)
 	@echo "Running unit tests..."
 	@if command -v bats >/dev/null 2>&1; then \
 		bats tests/unit/*.bats || echo "Some unit tests failed or bats not installed"; \
 	else \
 		echo "bats not installed, skipping unit tests"; \
-	fi
-	@echo "Running integration tests..."
-	@if command -v bats >/dev/null 2>&1; then \
-		bats tests/integration/*.bats || echo "Some integration tests failed or bats not installed"; \
-	else \
-		echo "bats not installed, skipping integration tests"; \
 	fi
 
 test-unit: ## Run unit tests only
@@ -65,14 +63,16 @@ test-unit: ## Run unit tests only
 		echo "bats not installed"; exit 1; \
 	fi
 
-test-integration: ## Run integration tests only
+test-integration: ## Run integration tests only (BATS - requires running service)
 	@if command -v bats >/dev/null 2>&1; then \
 		bats tests/integration/*.bats; \
 	else \
 		echo "bats not installed"; exit 1; \
 	fi
 
-check: lint test ## Run linting and tests
+test-all: test-quick test-integration ## Run all tests (quick + integration)
+
+check: lint test-quick test-ci security-check ## Run linting, quick tests, and security checks (suitable for pre-commit)
 
 validate-config: ## Validate config.yaml
 	@if [ -f config.yaml ]; then \
@@ -88,4 +88,26 @@ clean: ## Clean up test artifacts
 	@rm -rf .pytest_cache
 	@find . -name "*.pyc" -delete
 	@find . -name ".pytest_cache" -type d -exec rm -rf {} + 2>/dev/null || true
+	@echo "Note: tests/test-reports/ directory is for dev use only and is gitignored"
 	@echo "Cleanup complete"
+
+test-ci: ## Run CI validation tests
+	@if [ -f dev/tests/ci-test.sh ]; then \
+		./dev/tests/ci-test.sh; \
+	else \
+		echo "ci-test.sh not found"; exit 1; \
+	fi
+
+security-check: ## Run security checks (container access, etc.)
+	@if [ -f dev/scripts/security-check-container-access.sh ]; then \
+		./dev/scripts/security-check-container-access.sh; \
+	else \
+		echo "security-check-container-access.sh not found"; exit 1; \
+	fi
+
+test-integration-dev: ## Run integration tests (dev container-based)
+	@if [ -f dev/tests/integration-test.sh ]; then \
+		./dev/tests/integration-test.sh; \
+	else \
+		echo "integration-test.sh not found"; exit 1; \
+	fi

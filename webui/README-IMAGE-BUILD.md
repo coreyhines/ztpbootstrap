@@ -1,4 +1,4 @@
-# Building a Custom WebUI Container Image
+image.png# Building a Custom WebUI Container Image
 
 To avoid installing packages on every container start, you can build a local image with all dependencies pre-installed.
 

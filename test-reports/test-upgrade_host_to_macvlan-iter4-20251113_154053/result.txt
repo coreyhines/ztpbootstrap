@@ -1,1 +1,0 @@
-FAILED: Could not find ztpbootstrap directory

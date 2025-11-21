@@ -1,14 +1,21 @@
 # Pre-commit hooks configuration
-# Install with: pip install pre-commit && pre-commit install
+# Install with: pip3 install pre-commit && python3 -m pre_commit install
+# Or if binary is in PATH: pip3 install pre-commit && pre-commit install
 
 repos:
   # Shell script linting
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.9.0.6
+  # Note: If pre-commit has environment issues, use `make check` instead
+  # This hook will gracefully skip if shellcheck isn't available
+  - repo: local
     hooks:
       - id: shellcheck
+        name: shellcheck
+        entry: bash -c 'if command -v shellcheck >/dev/null 2>&1; then shellcheck -S error "$@"; else exit 0; fi' --
+        language: system
         args: ['-S', 'error']
         files: \.(sh|bash)$
+        pass_filenames: true
+        always_run: false
 
   # YAML linting
   - repo: https://github.com/adrienverge/yamllint

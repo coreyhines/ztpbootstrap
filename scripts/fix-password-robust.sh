@@ -1,11 +1,34 @@
 #!/bin/bash
 # Robust password fix that ensures hash is written correctly
 # This script uses Python to write the hash to avoid shell/yq escaping issues
+# Usage: ./fix-password-robust.sh [new_password]
+# If no password is provided, will prompt for it
 
 set -euo pipefail
 
 CONFIG_FILE="${ZTP_CONFIG_DIR:-/opt/containerdata/ztpbootstrap}/config.yaml"
-PASSWORD="${1:-ztpboot123}"
+
+# Get password from argument or prompt
+if [ $# -ge 1 ]; then
+    PASSWORD="$1"
+else
+    echo "Enter new admin password:"
+    read -s PASSWORD
+    echo ""
+    echo "Confirm new admin password:"
+    read -s CONFIRM_PASSWORD
+    echo ""
+    if [ "$PASSWORD" != "$CONFIRM_PASSWORD" ]; then
+        echo "Error: Passwords do not match"
+        exit 1
+    fi
+fi
+
+# Validate password length
+if [ ${#PASSWORD} -lt 8 ]; then
+    echo "Error: Password must be at least 8 characters long"
+    exit 1
+fi
 
 if [[ ! -f "$CONFIG_FILE" ]]; then
     echo "ERROR: Config file not found: $CONFIG_FILE"

@@ -70,8 +70,7 @@ jobs:
           --failOnCVSS 7
           --enableRetired
           --enableExperimental
-        # Only scan files that might have dependencies
-        scan-arguments: '--scan ./setup.sh ./test-service.sh ./integration-test.sh ./ci-test.sh'
+          --scan ./setup.sh ./dev/tests/test-service.sh ./dev/tests/integration-test.sh ./dev/tests/ci-test.sh
     
     - name: Upload Dependency-Check results
       uses: actions/upload-artifact@v4
@@ -127,10 +126,11 @@ jobs:
     - name: Run shellcheck
       run: |
         shellcheck -S error *.sh || true
+        shellcheck -S error dev/scripts/*.sh dev/tests/*.sh 2>/dev/null || true
     
     - name: Run yamllint
       run: |
-        yamllint *.yaml *.yml config.yaml.template 2>/dev/null || echo "No YAML files to lint"
+        yamllint *.yaml *.yml config.yaml.template dev/tests/*.yaml 2>/dev/null || echo "No YAML files to lint"
     
     - name: Check Python formatting with black
       run: |
@@ -139,6 +139,11 @@ jobs:
     - name: Check Python imports with isort
       run: |
         isort --check-only bootstrap.py || echo "Python import sorting check (install isort to auto-fix)"
+    
+    - name: Run container security checks
+      run: |
+        chmod +x dev/scripts/security-check-container-access.sh
+        ./dev/scripts/security-check-container-access.sh
 
   test:
     name: Run Tests
@@ -162,10 +167,12 @@ jobs:
     
     - name: Make test scripts executable
       run: |
-        chmod +x ci-test.sh
-        chmod +x integration-test.sh
-        chmod +x test-service.sh
+        chmod +x dev/tests/ci-test.sh
+        chmod +x dev/tests/integration-test.sh
+        chmod +x dev/tests/test-service.sh
         chmod +x setup.sh
+        chmod +x setup-interactive.sh
+        chmod +x update-config.sh
     
     - name: Create test directories
       run: |
@@ -177,9 +184,9 @@ jobs:
         sudo cp setup.sh /opt/containerdata/ztpbootstrap/
         sudo cp setup-interactive.sh /opt/containerdata/ztpbootstrap/
         sudo cp update-config.sh /opt/containerdata/ztpbootstrap/
-        sudo cp test-service.sh /opt/containerdata/ztpbootstrap/
-        sudo cp integration-test.sh /opt/containerdata/ztpbootstrap/
-        sudo cp ci-test.sh /opt/containerdata/ztpbootstrap/
+        sudo cp dev/tests/test-service.sh /opt/containerdata/ztpbootstrap/
+        sudo cp dev/tests/integration-test.sh /opt/containerdata/ztpbootstrap/
+        sudo cp dev/tests/ci-test.sh /opt/containerdata/ztpbootstrap/
         sudo cp README.md /opt/containerdata/ztpbootstrap/
         sudo cp config.yaml.template /opt/containerdata/ztpbootstrap/
         sudo cp systemd/*.pod /opt/containerdata/ztpbootstrap/systemd/ 2>/dev/null || true
@@ -187,7 +194,8 @@ jobs:
     
     - name: Run CI validation tests
       run: |
-        /opt/containerdata/ztpbootstrap/ci-test.sh
+        cd /opt/containerdata/ztpbootstrap
+        sudo ./ci-test.sh
     
     - name: Create test SSL certificate (for HTTPS tests)
       run: |
@@ -199,6 +207,7 @@ jobs:
     
     - name: Run integration test (HTTP-only mode)
       run: |
+        cd /opt/containerdata/ztpbootstrap
         sudo ./integration-test.sh --http-only
     
     - name: Check for test artifacts

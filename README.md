@@ -16,6 +16,7 @@ A containerized service that provides a secure HTTPS endpoint for serving Arista
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development workflow, VM testing, and upgrade scenarios
 - **[docs/ARCHITECTURE_COMPARISON.md](docs/ARCHITECTURE_COMPARISON.md)** - Detailed architecture and design decisions
 - **[docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md)** - Known issues and implementation notes
+- **Development tools** are located in the `dev/` directory (scripts, tests, and docs)
 
 ## Quick Start
 

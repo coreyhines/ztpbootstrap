@@ -376,7 +376,7 @@ show logging | grep -i bootstrap
 ./validate-config.sh config.yaml
 
 # Check config diff
-./config-diff.sh config.yaml
+./dev/scripts/config-diff.sh config.yaml
 
 # Verify file contents
 grep -r "cvAddr" /opt/containerdata/ztpbootstrap/
