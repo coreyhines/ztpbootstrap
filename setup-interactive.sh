@@ -1819,47 +1819,46 @@ create_pod_files_from_config() {
         fi
         log "Web UI container configuration installed"
         
-        # Check if we should build a custom image from Containerfile
-        local containerfile="${repo_dir}/webui/Containerfile"
+        # Determine which image to use for webui container
         local webui_container_file="${systemd_dir}/ztpbootstrap-webui.container"
-        local image_tag="ztpbootstrap-webui:local"
-        local should_build=false
+        local script_dir
+        script_dir=$(yq eval '.paths.script_dir // "/opt/containerdata/ztpbootstrap"' "${repo_dir}/config.yaml" 2>/dev/null || echo "/opt/containerdata/ztpbootstrap")
+        local config_file="${script_dir}/config.yaml"
+        local image_tag=""
         
-        if [[ -f "$containerfile" ]]; then
-            # Containerfile exists - prompt to build (default yes)
-            if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
-                # Non-interactive: default to building
-                should_build=true
-                log "Non-interactive mode: Will attempt to build webui image from Containerfile"
+        # First, check if a registry image was configured (from previous setup)
+        if [[ -f "$config_file" ]]; then
+            local registry_image
+            registry_image=$(yq eval '.webui.registry_image // ""' "$config_file" 2>/dev/null || echo "")
+            if [[ -n "$registry_image" ]] && [[ "$registry_image" != "null" ]] && [[ "$registry_image" != "" ]]; then
+                image_tag="$registry_image"
+                log "Found configured webui image in config.yaml: $image_tag"
             fi
-            
-            # Build happens earlier in Section 7, just check if we should update the container file
-            if [[ "${BUILD_WEBUI_IMAGE:-false}" == "true" ]]; then
-                should_build=true
+        fi
+        
+        # If no registry image, check for local image
+        if [[ -z "$image_tag" ]]; then
+            local local_tag="ztpbootstrap-webui:local"
+            if podman image exists "$local_tag" 2>/dev/null; then
+                image_tag="$local_tag"
+                log "Found local webui image: $image_tag"
             fi
-            
-            if [[ "$should_build" == "true" ]]; then
-                # Check if image was already built (it should be if BUILD_WEBUI_IMAGE is true)
-                if podman image exists "$image_tag" 2>/dev/null; then
-                    # Update container file to use the built image
-                    local sed_cmd="sed"
-                    if [[ $EUID -ne 0 ]]; then
-                        sed_cmd="sudo sed"
-                    fi
-                    if $sed_cmd -i.tmp "s|^Image=.*|Image=$image_tag|" "$webui_container_file" 2>/dev/null; then
-                        rm -f "${webui_container_file}.tmp" 2>/dev/null || true
-                        log "✓ Updated webui container to use built image: $image_tag"
-                    else
-                        warn "Failed to update container file with built image. Using base Fedora image."
-                    fi
-                else
-                    log "Image build failed or skipped. Container will use base Fedora image and install packages at runtime."
-                fi
+        fi
+        
+        # If we have an image tag, update the container file
+        if [[ -n "$image_tag" ]]; then
+            local sed_cmd="sed"
+            if [[ $EUID -ne 0 ]]; then
+                sed_cmd="sudo sed"
+            fi
+            if $sed_cmd -i.tmp "s|^Image=.*|Image=$image_tag|" "$webui_container_file" 2>/dev/null; then
+                rm -f "${webui_container_file}.tmp" 2>/dev/null || true
+                log "✓ Updated webui container to use image: $image_tag"
             else
-                log "Skipping image build. Container will use base Fedora image and install packages at runtime."
+                warn "Failed to update container file with image tag. Using default from container file."
             fi
         else
-            log "Containerfile not found. Container will use base Fedora image and install packages at runtime."
+            log "No custom webui image found. Container will use base Fedora image and install packages at runtime."
         fi
         
         # Copy webui directory to script directory (required for webui container)
