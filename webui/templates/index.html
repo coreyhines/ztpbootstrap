@@ -1524,6 +1524,25 @@
                     );
                 },
                 
+                highlightSearch(htmlText) {
+                    if (!htmlText || !this.logSearchTerm) return htmlText;
+                    // Escape special regex characters in search term
+                    const escapedSearch = this.logSearchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    // Create regex for case-insensitive matching
+                    const regex = new RegExp(`(${escapedSearch})`, 'gi');
+                    // Highlight matches with a distinct background
+                    return htmlText.replace(regex, '<mark class="bg-yellow-500 text-gray-900 font-semibold px-0.5 rounded">$1</mark>');
+                },
+                
+                highlightLogs() {
+                    // This function triggers reactivity for highlighting
+                    // The actual highlighting is done in the template via highlightSearch()
+                    // Force a re-render by toggling a dummy property
+                    this.$nextTick(() => {
+                        // Highlighting happens automatically via x-html binding
+                    });
+                },
+                
                 async markLogs() {
                     console.log('markLogs called, authenticated:', this.authenticated);
                     
