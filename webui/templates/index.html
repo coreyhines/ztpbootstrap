@@ -374,7 +374,21 @@
                             <h2 class="text-lg font-semibold text-gray-900 mb-2">Configuration</h2>
                             <p class="text-sm text-gray-600">View and manage service configuration</p>
                         </div>
-                        <div class="flex items-center space-x-2">
+                        <div class="flex items-center space-x-2 flex-wrap">
+                            <div class="relative">
+                                <input type="text" 
+                                       x-model="configSearchTerm" 
+                                       @input="highlightConfig()"
+                                       placeholder="Search config..." 
+                                       class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-48">
+                                <button x-show="configSearchTerm" 
+                                        @click="configSearchTerm = ''; highlightConfig()" 
+                                        class="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                    </svg>
+                                </button>
+                            </div>
                             <label for="theme-select" class="text-sm font-medium text-gray-700 whitespace-nowrap">Syntax Theme:</label>
                             <select id="theme-select" x-model="theme" @change="applyTheme()" class="px-3 py-2 text-sm border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm">
                                 <option value="tomorrow">Tomorrow (Dark)</option>
@@ -392,10 +406,10 @@
                     <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
                         <div x-show="config.error" class="text-red-600" x-text="config.error"></div>
                         <div x-show="config.raw && !config.error" class="overflow-x-auto">
-                            <pre class="language-yaml"><code class="language-yaml" x-html="escapeHtml(config.raw)" x-ref="yamlCode"></code></pre>
+                            <pre class="language-yaml"><code class="language-yaml" x-html="highlightConfigSearch(escapeHtml(config.raw))" x-ref="yamlCode"></code></pre>
                         </div>
                         <div x-show="config.parsed && !config.error" class="overflow-x-auto">
-                            <pre class="language-json"><code class="language-json" x-html="escapeHtml(JSON.stringify(config.parsed, null, 2))" x-ref="jsonCode"></code></pre>
+                            <pre class="language-json"><code class="language-json" x-html="highlightConfigSearch(escapeHtml(JSON.stringify(config.parsed, null, 2)))" x-ref="jsonCode"></code></pre>
                         </div>
                     </div>
                 </div>
@@ -703,6 +717,7 @@
                 logSource: 'nginx_access',
                 logLines: 100,
                 logSearchTerm: '',
+                configSearchTerm: '',
                 logRefreshInterval: null,
                 logNewEntriesIndicator: false,
                 logNewEntriesNginx: false,
@@ -1397,13 +1412,21 @@
                         console.log('Config API response:', data);
                         // Update config object for Alpine.js reactivity
                         this.config = data;
-                        // Highlight syntax after config loads
+                        // Highlight syntax after config loads, then apply search highlighting if needed
                         this.$nextTick(() => {
                             if (window.Prism && this.$refs.yamlCode) {
                                 window.Prism.highlightElement(this.$refs.yamlCode);
+                                // Apply search highlighting after Prism
+                                if (this.configSearchTerm) {
+                                    this.$refs.yamlCode.innerHTML = this.highlightConfigSearch(this.$refs.yamlCode.innerHTML);
+                                }
                             }
                             if (window.Prism && this.$refs.jsonCode) {
                                 window.Prism.highlightElement(this.$refs.jsonCode);
+                                // Apply search highlighting after Prism
+                                if (this.configSearchTerm) {
+                                    this.$refs.jsonCode.innerHTML = this.highlightConfigSearch(this.$refs.jsonCode.innerHTML);
+                                }
                             }
                         });
                     } catch (error) {
