@@ -1185,15 +1185,27 @@ def get_status():
     """Get service status"""
     try:
         # Check if pod service is running via systemd
+        # Try pod-based service first (most common), then legacy service
         container_running = False
         try:
+            # Check pod-based service first
             result = subprocess.run(
-                ['systemctl', 'is-active', '--quiet', 'ztpbootstrap.service'],
+                ['systemctl', 'is-active', '--quiet', 'ztpbootstrap-pod.service'],
                 capture_output=True,
                 text=True,
                 timeout=2
             )
-            container_running = result.returncode == 0
+            if result.returncode == 0:
+                container_running = True
+            else:
+                # Fallback to legacy service name
+                result = subprocess.run(
+                    ['systemctl', 'is-active', '--quiet', 'ztpbootstrap.service'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                container_running = result.returncode == 0
         except:
             # Fallback: check if we can reach nginx
             try:
@@ -1486,61 +1498,366 @@ def get_logs():
         
         # Handle container logs (default) - only if not nginx_access or nginx_error
         if log_source not in ['nginx_access', 'nginx_error']:
+            # Helper function to check if a systemd service exists
+            # Note: systemctl may not be available in containers, so we try multiple methods
+            def check_service_exists(service_name):
+                """Check if a systemd service exists and is available"""
+                # First check if systemctl is available
+                try:
+                    subprocess.run(['systemctl', '--version'], capture_output=True, timeout=1, check=False)
+                    systemctl_available = True
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    systemctl_available = False
+                
+                if systemctl_available:
+                    try:
+                        # Use list-unit-files and grep for the service name
+                        result = subprocess.run(
+                            ['systemctl', 'list-unit-files', '--type=service', '--no-legend'],
+                            capture_output=True,
+                            text=True,
+                            timeout=2
+                        )
+                        if result.returncode == 0:
+                            # Check if service name appears in the output
+                            for line in result.stdout.split('\n'):
+                                if line.strip().startswith(service_name):
+                                    return True
+                        # Fallback: try is-active (returns 0 for active, 3 for inactive, 1 for not found)
+                        result2 = subprocess.run(
+                            ['systemctl', 'is-active', service_name],
+                            capture_output=True,
+                            text=True,
+                            timeout=2
+                        )
+                        # is-active returns 0 for active, 3 for inactive, 1 for not found
+                        # So return code 0 or 3 means service exists
+                        if result2.returncode == 0 or result2.returncode == 3:
+                            return True
+                    except Exception as e:
+                        # Log error for debugging but don't fail
+                        print(f"Error checking service {service_name} with systemctl: {e}", flush=True)
+                
+                # If systemctl not available, try to verify via journalctl
+                # If we can query the journal for this service, it exists
+                try:
+                    journalctl_path = Path('/usr/bin/journalctl')
+                    if journalctl_path.exists() and os.access(journalctl_path, os.X_OK):
+                        result = subprocess.run(
+                            ['journalctl', '-u', service_name, '-n', '1', '--no-pager'],
+                            capture_output=True,
+                            text=True,
+                            timeout=2
+                        )
+                        # If journalctl returns 0 or can query it, service likely exists
+                        # Return code 1 might mean no logs yet, but service could still exist
+                        if result.returncode == 0:
+                            return True
+                        # If stderr says "No entries" that means service exists but no logs
+                        if result.returncode == 1 and 'no entries' in result.stderr.lower():
+                            return True
+                except Exception:
+                    pass
+                
+                return False
+            
+            # Detect deployment mode by checking which services exist
+            # If systemctl is not available, assume pod-based deployment (most common)
+            pod_service_exists = check_service_exists('ztpbootstrap-pod.service')
+            legacy_service_exists = check_service_exists('ztpbootstrap.service')
+            nginx_service_exists = check_service_exists('ztpbootstrap-nginx.service')
+            webui_service_exists = check_service_exists('ztpbootstrap-webui.service')
+            
+            # Build container mappings based on detected deployment mode
+            containers = {}
+            if pod_service_exists or (not legacy_service_exists and not pod_service_exists):
+                # Pod-based setup (new default) or assume pod-based if we can't detect
+                # Pod service itself doesn't have a direct container, but we can get its logs via journalctl
+                if nginx_service_exists:
+                    containers['ztpbootstrap-nginx.service'] = 'ztpbootstrap-nginx'
+                else:
+                    # Try anyway - container might exist even if service detection failed
+                    containers['ztpbootstrap-nginx.service'] = 'ztpbootstrap-nginx'
+                if webui_service_exists:
+                    containers['ztpbootstrap-webui.service'] = 'ztpbootstrap-webui'
+                else:
+                    # Try anyway - container might exist even if service detection failed
+                    containers['ztpbootstrap-webui.service'] = 'ztpbootstrap-webui'
+                # Optionally include pod service for pod lifecycle logs
+                if pod_service_exists:
+                    containers['ztpbootstrap-pod.service'] = None  # Pod itself, no direct container
+            elif legacy_service_exists:
+                # Legacy single-container setup
+                containers['ztpbootstrap.service'] = 'ztpbootstrap'
+            
+            # If no containers detected, use default mappings (pod-based)
+            if not containers:
+                containers = {
+                    'ztpbootstrap-pod.service': None,
+                    'ztpbootstrap-nginx.service': 'ztpbootstrap-nginx',
+                    'ztpbootstrap-webui.service': 'ztpbootstrap-webui'
+                }
+            
+            # Check if podman binary is available and can actually execute
+            podman_available = False
+            podman_socket_accessible = False
+            podman_binary_path = Path('/usr/bin/podman')
+            if podman_binary_path.exists() and os.access(podman_binary_path, os.X_OK):
+                # Actually try to execute it to see if it works (might fail due to missing libraries)
+                try:
+                    # Set LD_LIBRARY_PATH to help find libraries
+                    env = os.environ.copy()
+                    env['LD_LIBRARY_PATH'] = '/lib64:/usr/lib64:/usr/lib64/systemd'
+                    podman_check = subprocess.run(
+                        ['/usr/bin/podman', '--version'],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                        env=env
+                    )
+                    podman_available = podman_check.returncode == 0
+                except:
+                    # Try without LD_LIBRARY_PATH
+                    try:
+                        podman_check = subprocess.run(
+                            ['/usr/bin/podman', '--version'],
+                            capture_output=True,
+                            text=True,
+                            timeout=2
+                        )
+                        podman_available = podman_check.returncode == 0
+                    except:
+                        pass
+            else:
+                # Fallback: try to run podman to see if it's in PATH
+                try:
+                    podman_check = subprocess.run(
+                        ['podman', '--version'],
+                        capture_output=True,
+                        text=True,
+                        timeout=1
+                    )
+                    podman_available = podman_check.returncode == 0
+                except:
+                    pass
+            
+            # Check podman socket accessibility
+            # Try multiple possible socket locations
+            socket_paths = [
+                Path('/run/podman/podman.sock'),
+                Path('/run/user/0/podman/podman.sock'),
+                Path('/var/run/podman/podman.sock'),
+            ]
+            podman_socket_accessible = False
+            for socket_path in socket_paths:
+                if socket_path.exists():
+                    try:
+                        if os.access(socket_path, os.R_OK):
+                            podman_socket_accessible = True
+                            break
+                    except:
+                        pass
+            
+            # Also try to test podman connectivity directly
+            if podman_available and not podman_socket_accessible:
+                try:
+                    # Try a simple podman command to see if it can connect
+                    test_result = subprocess.run(
+                        ['podman', 'ps', '--format', '{{.Names}}'],
+                        capture_output=True,
+                        text=True,
+                        timeout=2
+                    )
+                    if test_result.returncode == 0:
+                        podman_socket_accessible = True
+                except:
+                    pass
+            
+            # Check journalctl availability and ability to actually execute
+            journalctl_available = False
+            journal_accessible = False
+            journalctl_binary_path = Path('/usr/bin/journalctl')
+            if journalctl_binary_path.exists() and os.access(journalctl_binary_path, os.X_OK):
+                # Actually try to execute it to see if it works (might fail due to missing libraries)
+                try:
+                    # Set LD_LIBRARY_PATH to help find systemd libraries
+                    env = os.environ.copy()
+                    env['LD_LIBRARY_PATH'] = '/lib64:/usr/lib64:/usr/lib64/systemd'
+                    journalctl_check = subprocess.run(
+                        ['/usr/bin/journalctl', '--version'],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                        env=env
+                    )
+                    journalctl_available = journalctl_check.returncode == 0
+                except:
+                    # Try without LD_LIBRARY_PATH
+                    try:
+                        journalctl_check = subprocess.run(
+                            ['/usr/bin/journalctl', '--version'],
+                            capture_output=True,
+                            text=True,
+                            timeout=2
+                        )
+                        journalctl_available = journalctl_check.returncode == 0
+                    except:
+                        pass
+            else:
+                # Fallback: try to run journalctl to see if it's in PATH
+                try:
+                    journalctl_check = subprocess.run(
+                        ['journalctl', '--version'],
+                        capture_output=True,
+                        text=True,
+                        timeout=1
+                    )
+                    journalctl_available = journalctl_check.returncode == 0
+                except:
+                    pass
+            
+            # Check journal directory accessibility
+            journal_paths = [
+                Path('/run/systemd/journal'),
+                Path('/run/log/journal'),
+                Path('/var/log/journal')
+            ]
+            for journal_path in journal_paths:
+                if journal_path.exists():
+                    try:
+                        if os.access(journal_path, os.R_OK):
+                            journal_accessible = True
+                            break
+                    except:
+                        pass
+            
+            # Collect diagnostic information
+            diagnostics = []
+            diagnostics.append(f"Deployment mode: {'Pod-based' if pod_service_exists else 'Legacy' if legacy_service_exists else 'Unknown (assuming pod-based)'}")
+            diagnostics.append(f"Services detected: {', '.join(containers.keys())}")
+            diagnostics.append(f"Podman binary exists: {podman_binary_path.exists() if 'podman_binary_path' in locals() else 'Unknown'}")
+            diagnostics.append(f"Podman executable: {podman_available}")
+            diagnostics.append(f"Podman socket accessible: {podman_socket_accessible}")
+            diagnostics.append(f"Journalctl binary exists: {journalctl_binary_path.exists() if 'journalctl_binary_path' in locals() else 'Unknown'}")
+            diagnostics.append(f"Journalctl executable: {journalctl_available}")
+            diagnostics.append(f"Journal accessible: {journal_accessible}")
+            diagnostics.append(f"Note: Container uses Fedora-based image with podman and journalctl installed via dnf.")
+            
             # Try to get container logs using multiple methods
-            # Works with both host networking and macvlan approaches
             log_parts = []
-            containers = {
-                'ztpbootstrap.service': 'ztpbootstrap-infra',
-                'ztpbootstrap-nginx.service': 'ztpbootstrap-nginx',
-                'ztpbootstrap-webui.service': 'ztpbootstrap-webui'
-            }
+            logs_retrieved = False
             
             for service, container_name in containers.items():
                 log_parts.append(f"=== {service} ===")
                 container_logs = None
+                method_used = None
+                
+                # Skip pod service if it has no direct container (we'll get its logs via journalctl only)
+                if container_name is None:
+                    # For pod service, only try journalctl
+                    if journalctl_available:
+                        try:
+                            # Set LD_LIBRARY_PATH for journalctl execution
+                            env = os.environ.copy()
+                            env['LD_LIBRARY_PATH'] = '/lib64:/usr/lib64:/usr/lib64/systemd'
+                            journal_result = subprocess.run(
+                                ['/usr/bin/journalctl', '-D', '/var/log/journal', '--system', '-u', service, '-n', str(lines // max(len(containers), 1)), '--no-pager', '--no-hostname'],
+                                capture_output=True,
+                                text=True,
+                                timeout=3,
+                                env=env
+                            )
+                            if journal_result.returncode == 0 and journal_result.stdout.strip():
+                                container_logs = journal_result.stdout.strip()
+                                method_used = 'journalctl'
+                        except Exception as e:
+                            diagnostics.append(f"journalctl for {service} failed: {str(e)}")
+                    
+                    if container_logs:
+                        log_parts.append(container_logs)
+                        logs_retrieved = True
+                    else:
+                        log_parts.append("Pod service logs (lifecycle events only)")
+                        log_parts.append("No recent pod lifecycle events.")
+                    log_parts.append("")
+                    continue
                 
                 # Method 1: Try podman logs (works if podman socket is accessible)
-                try:
-                    result = subprocess.run(
-                        ['podman', 'logs', '--tail', str(lines // len(containers)), container_name],
-                        capture_output=True,
-                        text=True,
-                        timeout=3
-                    )
-                    if result.returncode == 0 and result.stdout.strip():
-                        container_logs = result.stdout.strip()
-                except (FileNotFoundError, subprocess.TimeoutExpired):
-                    pass
-                except Exception:
-                    pass
-                
-                # Method 2: Try journalctl (works if journal is accessible)
-                if not container_logs:
+                if podman_available and podman_socket_accessible:
                     try:
-                        journal_result = subprocess.run(
-                            ['journalctl', '-u', service, '-n', str(lines // len(containers)), '--no-pager', '--no-hostname'],
+                        # Set LD_LIBRARY_PATH for podman execution
+                        env = os.environ.copy()
+                        env['LD_LIBRARY_PATH'] = '/lib64:/usr/lib64:/usr/lib64/systemd'
+                        result = subprocess.run(
+                            ['/usr/bin/podman', 'logs', '--tail', str(lines // max(len(containers), 1)), container_name],
                             capture_output=True,
                             text=True,
-                            timeout=3
+                            timeout=3,
+                            env=env
                         )
+                        if result.returncode == 0 and result.stdout.strip():
+                            container_logs = result.stdout.strip()
+                            method_used = 'podman'
+                        elif result.returncode != 0:
+                            diagnostics.append(f"podman logs {container_name} returned code {result.returncode}: {result.stderr}")
+                    except FileNotFoundError:
+                        diagnostics.append(f"podman binary not found")
+                    except subprocess.TimeoutExpired:
+                        diagnostics.append(f"podman logs {container_name} timed out")
+                    except Exception as e:
+                        diagnostics.append(f"podman logs {container_name} failed: {str(e)}")
+                
+                # Method 2: Try journalctl (works if journal is accessible)
+                if not container_logs and journalctl_available:
+                    try:
+                        # Set LD_LIBRARY_PATH for journalctl execution
+                        env = os.environ.copy()
+                        env['LD_LIBRARY_PATH'] = '/lib64:/usr/lib64:/usr/lib64/systemd'
+                            journal_result = subprocess.run(
+                                ['/usr/bin/journalctl', '-D', '/var/log/journal', '--system', '-u', service, '-n', str(lines // max(len(containers), 1)), '--no-pager', '--no-hostname'],
+                                capture_output=True,
+                                text=True,
+                                timeout=3,
+                                env=env
+                            )
                         if journal_result.returncode == 0 and journal_result.stdout.strip():
                             container_logs = journal_result.stdout.strip()
-                    except (FileNotFoundError, subprocess.TimeoutExpired):
-                        pass
-                    except Exception:
-                        pass
+                            method_used = 'journalctl'
+                        elif journal_result.returncode != 0:
+                            diagnostics.append(f"journalctl -u {service} returned code {journal_result.returncode}: {journal_result.stderr}")
+                    except FileNotFoundError:
+                        diagnostics.append(f"journalctl binary not found")
+                    except subprocess.TimeoutExpired:
+                        diagnostics.append(f"journalctl -u {service} timed out")
+                    except Exception as e:
+                        diagnostics.append(f"journalctl -u {service} failed: {str(e)}")
                 
                 if container_logs:
                     log_parts.append(container_logs)
+                    if method_used:
+                        log_parts.append(f"[Retrieved via {method_used}]")
+                    logs_retrieved = True
                 else:
-                    log_parts.append(f"Container: {container_name}")
+                    log_parts.append(f"Container: {container_name or 'N/A'}")
                     log_parts.append("Logs not available from within container.")
                 log_parts.append("")
             
             if log_parts:
                 logs = '\n'.join(log_parts)
                 # Only show help message if no logs were retrieved
-                if "Logs not available from within container" in logs:
+                if not logs_retrieved or "Logs not available from within container" in logs:
+                    # Add diagnostic information
+                    logs = '\n' + '='*70 + '\n'
+                    logs += 'CONTAINER LOGS ACCESS DIAGNOSTICS\n'
+                    logs += '='*70 + '\n\n'
+                    
+                    # Add diagnostics
+                    if diagnostics:
+                        logs += 'Diagnostic Information:\n'
+                        for diag in diagnostics:
+                            logs += f'  - {diag}\n'
+                        logs += '\n'
+                    
                     # Try to get hostname for better instructions
                     import socket
                     hostname = None
@@ -1583,27 +1900,47 @@ def get_logs():
                         ssh_target = "the host server"
                         ssh_instruction = '  ssh user@<hostname-or-ip>  # Replace with actual hostname or IP'
                     
-                    logs = '\n' + '='*70 + '\n'
-                    logs += 'CONTAINER LOGS ARE NOT AVAILABLE FROM WITHIN THE CONTAINER\n'
-                    logs += '='*70 + '\n\n'
                     logs += 'Container logs require host-level access to systemd journal and podman.\n'
                     logs += 'To view container logs, you need to SSH to the host server where this\n'
                     logs += 'service is running and execute the commands below.\n\n'
                     logs += f'SSH to {ssh_target}:\n'
                     logs += f'{ssh_instruction}\n\n'
                     logs += 'Once connected, run one of these commands:\n\n'
+                    
+                    # Build service-specific commands based on detected deployment
                     logs += 'Using journalctl (recommended):\n'
-                    logs += '  sudo journalctl -u ztpbootstrap.service -n 50 -f\n'
-                    logs += '  sudo journalctl -u ztpbootstrap-nginx.service -n 50 -f\n'
-                    logs += '  sudo journalctl -u ztpbootstrap-webui.service -n 50 -f\n\n'
+                    if pod_service_exists:
+                        logs += '  sudo journalctl -u ztpbootstrap-pod.service -n 50 -f\n'
+                    if legacy_service_exists:
+                        logs += '  sudo journalctl -u ztpbootstrap.service -n 50 -f\n'
+                    if nginx_service_exists:
+                        logs += '  sudo journalctl -u ztpbootstrap-nginx.service -n 50 -f\n'
+                    if webui_service_exists:
+                        logs += '  sudo journalctl -u ztpbootstrap-webui.service -n 50 -f\n'
+                    logs += '\n'
+                    
                     logs += 'Or using podman logs:\n'
-                    logs += '  sudo podman logs ztpbootstrap-nginx --tail 50 -f\n'
-                    logs += '  sudo podman logs ztpbootstrap-webui --tail 50 -f\n\n'
+                    if nginx_service_exists:
+                        logs += '  sudo podman logs ztpbootstrap-nginx --tail 50 -f\n'
+                    if webui_service_exists:
+                        logs += '  sudo podman logs ztpbootstrap-webui --tail 50 -f\n'
+                    if legacy_service_exists:
+                        logs += '  sudo podman logs ztpbootstrap --tail 50 -f\n'
+                    logs += '\n'
+                    
                     logs += 'Note: The -f flag follows the logs in real-time. Remove it to see\n'
                     logs += '      only the last N lines without following.\n'
                     logs += '='*70 + '\n'
+                    
+                    # Append the original log_parts if any
+                    if log_parts and any("===" in part for part in log_parts):
+                        logs += '\n' + '\n'.join(log_parts)
             else:
                 logs = 'Container logs are not available from within the container.'
+                if diagnostics:
+                    logs += '\n\nDiagnostic Information:\n'
+                    for diag in diagnostics:
+                        logs += f'  - {diag}\n'
         
         if not logs:
             logs = 'No logs available'
