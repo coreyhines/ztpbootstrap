@@ -1297,11 +1297,21 @@ def parse_nginx_access_log():
             # Skip health checks, UI requests, and API requests (WebUI's own requests)
             # Note: We allow browser downloads of /bootstrap.py and / (root, which serves bootstrap.py) to be tracked (for testing purposes)
             # but filter out other browser requests (UI, API, etc.)
-            if (path in ['/health', '/ui', '/api'] or 
-                path.startswith('/ui/') or 
-                path.startswith('/api/') or
-                '/api/' in path or
-                (user_agent and ('Mozilla' in user_agent or 'Gecko' in user_agent or 'Chrome' in user_agent or 'Safari' in user_agent) and path != '/bootstrap.py' and path != '/')):
+            # Also allow Arista device user agents (Arista-EOS, Arista-ZTP, etc.) to be tracked
+            is_browser = user_agent and ('Mozilla' in user_agent or 'Gecko' in user_agent or 'Chrome' in user_agent or 'Safari' in user_agent)
+            is_arista_device = user_agent and ('Arista' in user_agent or 'EOS' in user_agent or 'ZTP' in user_agent)
+            is_bootstrap_path = path == '/bootstrap.py' or path == '/'
+            
+            # Filter out if:
+            # 1. It's a health/UI/API path (except bootstrap paths)
+            # 2. It's a browser request to a non-bootstrap path
+            # But always allow Arista device requests and bootstrap path requests
+            if (not is_arista_device and not is_bootstrap_path and 
+                (path in ['/health', '/ui', '/api'] or 
+                 path.startswith('/ui/') or 
+                 path.startswith('/api/') or
+                 '/api/' in path or
+                 (is_browser and not is_bootstrap_path))):
                 # Mark as processed but don't count
                 new_processed_lines.add(line_stripped)
                 continue
