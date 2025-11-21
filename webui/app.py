@@ -1831,8 +1831,8 @@ def get_logs():
                             capture_output=True,
                             text=True,
                             timeout=3,
-                                env=env
-                            )
+                            env=env
+                        )
                         if journal_result.returncode == 0 and journal_result.stdout.strip():
                             container_logs = journal_result.stdout.strip()
                             method_used = 'journalctl'
