@@ -1232,7 +1232,7 @@ def load_device_connections():
         try:
             with open(DEVICE_CONNECTIONS_FILE, 'r') as f:
                 return json.load(f)
-        except:
+        except Exception:
             return {}
     return {}
 
