@@ -2,23 +2,22 @@
 Description=ZTP Bootstrap Web UI Container
 
 [Container]
-Image=docker.io/python:alpine
+Image=registry.fedoraproject.org/fedora:latest
 ContainerName=ztpbootstrap-webui
 Pod=ztpbootstrap.pod
+Exec=/app/start-webui.sh
 Volume=/opt/containerdata/ztpbootstrap/webui:/app:ro
 Volume=/opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw
 Volume=/opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw
 Volume=/run/systemd/journal:/run/systemd/journal:ro
 Volume=/run/log/journal:/run/log/journal:ro
-Volume=/run/podman:/run/podman:ro
-Volume=/usr/bin/journalctl:/usr/bin/journalctl:ro
-Volume=/lib64/libsystemd.so.0:/lib64/libsystemd.so.0:ro
-Volume=/lib64/libsystemd.so.0.41.0:/lib64/libsystemd.so.0.41.0:ro
-Volume=/usr/lib64/systemd:/usr/lib64/systemd:ro
+Volume=/var/log/journal:/var/log/journal:ro
+Volume=/run/podman/podman.sock:/run/podman/podman.sock:ro
 Environment=TZ=UTC
 Environment=ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap
 Environment=FLASK_APP=app.py
 Environment=FLASK_ENV=production
+Environment=CONTAINER_HOST=unix:///run/podman/podman.sock
 HealthCmd=["sh", "-c", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/api/status')\" || exit 1"]
 HealthInterval=30s
 HealthTimeout=10s
