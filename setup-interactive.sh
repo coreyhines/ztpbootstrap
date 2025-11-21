@@ -2109,8 +2109,8 @@ start_services_after_install() {
             fi
             
             if $start_cmd 2>&1; then
-                # Wait a moment for container to start
-                sleep 3
+                # Wait longer for container to start (containers can take time to initialize)
+                sleep 8
                 
                 # Verify service is actually running
                 local is_active_cmd="systemctl is-active --quiet ztpbootstrap-webui.service"
@@ -2119,29 +2119,40 @@ start_services_after_install() {
                 fi
                 
                 if $is_active_cmd; then
-                    # Verify container is actually running
-                    if podman ps --filter name=ztpbootstrap-webui --format "{{.Names}}" 2>/dev/null | grep -q ztpbootstrap-webui; then
+                    # Check container status with retries (containers may be in "starting" state)
+                    local container_running=false
+                    local max_retries=5
+                    local retry_count=0
+                    
+                    while [[ $retry_count -lt $max_retries ]]; do
+                        # Check if container exists and is running or starting
+                        local container_status
+                        container_status=$(podman ps -a --filter name=ztpbootstrap-webui --format "{{.Status}}" 2>/dev/null || echo "")
+                        
+                        if [[ -n "$container_status" ]]; then
+                            # Container exists - check if it's running, starting, or healthy
+                            if echo "$container_status" | grep -qE "(Up|starting|healthy)"; then
+                                container_running=true
+                                break
+                            fi
+                        fi
+                        
+                        retry_count=$((retry_count + 1))
+                        if [[ $retry_count -lt $max_retries ]]; then
+                            sleep 2
+                        fi
+                    done
+                    
+                    if [[ "$container_running" == "true" ]]; then
                         log "✓ Started ztpbootstrap-webui.service and container is running"
                     else
-                        warn "⚠️  Service reports active but container is not running"
+                        # Only warn if container truly failed after all retries
+                        warn "⚠️  Webui container did not start successfully after multiple checks"
                         diagnose_webui_failure
                     fi
                 else
                     warn "⚠️  Service start command succeeded but service is not active"
                     diagnose_webui_failure
-                    
-                    # Try once more after showing diagnostics
-                    log "Retrying webui container start..."
-                    sleep 2
-                    if $start_cmd 2>&1; then
-                        sleep 3
-                        if $is_active_cmd && podman ps --filter name=ztpbootstrap-webui --format "{{.Names}}" 2>/dev/null | grep -q ztpbootstrap-webui; then
-                            log "✓ Started ztpbootstrap-webui.service on retry and container is running"
-                        else
-                            warn "⚠️  Webui container still not running after retry"
-                            diagnose_webui_failure
-                        fi
-                    fi
                 fi
             else
                 warn "Failed to start ztpbootstrap-webui.service"
@@ -2178,12 +2189,39 @@ start_services_after_install() {
         if [[ "$webui_service_exists" == "true" ]]; then
             log "Starting webui container..."
             if sudo systemctl start ztpbootstrap-webui.service 2>&1; then
-                sleep 3
+                # Wait longer for container to start (containers can take time to initialize)
+                sleep 8
+                
                 if sudo systemctl is-active --quiet ztpbootstrap-webui.service 2>/dev/null; then
-                    if podman ps --filter name=ztpbootstrap-webui --format "{{.Names}}" 2>/dev/null | grep -q ztpbootstrap-webui; then
+                    # Check container status with retries (containers may be in "starting" state)
+                    local container_running=false
+                    local max_retries=5
+                    local retry_count=0
+                    
+                    while [[ $retry_count -lt $max_retries ]]; do
+                        # Check if container exists and is running or starting
+                        local container_status
+                        container_status=$(podman ps -a --filter name=ztpbootstrap-webui --format "{{.Status}}" 2>/dev/null || echo "")
+                        
+                        if [[ -n "$container_status" ]]; then
+                            # Container exists - check if it's running, starting, or healthy
+                            if echo "$container_status" | grep -qE "(Up|starting|healthy)"; then
+                                container_running=true
+                                break
+                            fi
+                        fi
+                        
+                        retry_count=$((retry_count + 1))
+                        if [[ $retry_count -lt $max_retries ]]; then
+                            sleep 2
+                        fi
+                    done
+                    
+                    if [[ "$container_running" == "true" ]]; then
                         log "✓ Started ztpbootstrap-webui.service and container is running"
                     else
-                        warn "⚠️  Service reports active but container is not running"
+                        # Only warn if container truly failed after all retries
+                        warn "⚠️  Webui container did not start successfully after multiple checks"
                     fi
                 else
                     warn "⚠️  Service start command succeeded but service is not active"
