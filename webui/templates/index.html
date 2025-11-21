@@ -389,26 +389,28 @@
                                     </svg>
                                 </button>
                             </div>
-                            <label for="theme-select" class="text-sm font-medium text-gray-700 whitespace-nowrap">Syntax Theme:</label>
-                            <select id="theme-select" x-model="theme" @change="applyTheme()" class="px-3 py-2 text-sm border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm">
-                                <option value="tomorrow">Tomorrow (Dark)</option>
-                                <option value="okaidia">Okaidia (Dark)</option>
-                                <option value="twilight">Twilight (Dark)</option>
-                                <option value="dark">Dark (Dark)</option>
-                                <option value="solarizedlight">Solarized Light</option>
-                                <option value="coy">Coy (Light)</option>
-                                <option value="one-light">One Light</option>
-                                <option value="prism">Prism (Light)</option>
-                            </select>
+                            <div class="flex flex-col">
+                                <label for="theme-select" class="text-xs font-medium text-gray-700 mb-0.5">Syntax Theme:</label>
+                                <select id="theme-select" x-model="theme" @change="applyTheme()" class="px-3 py-2 text-sm border border-gray-300 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm">
+                                    <option value="tomorrow">Tomorrow (Dark)</option>
+                                    <option value="okaidia">Okaidia (Dark)</option>
+                                    <option value="twilight">Twilight (Dark)</option>
+                                    <option value="dark">Dark (Dark)</option>
+                                    <option value="solarizedlight">Solarized Light</option>
+                                    <option value="coy">Coy (Light)</option>
+                                    <option value="one-light">One Light</option>
+                                    <option value="prism">Prism (Light)</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     
                     <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
                         <div x-show="config.error" class="text-red-600" x-text="config.error"></div>
-                        <div x-show="config.raw && !config.error" class="overflow-x-auto">
+                        <div x-show="config.raw && !config.error" class="overflow-x-auto overflow-y-auto max-h-96">
                             <pre class="language-yaml"><code class="language-yaml" x-text="config.raw" x-ref="yamlCode"></code></pre>
                         </div>
-                        <div x-show="config.parsed && !config.error" class="overflow-x-auto">
+                        <div x-show="config.parsed && !config.error" class="overflow-x-auto overflow-y-auto max-h-96">
                             <pre class="language-json"><code class="language-json" x-text="JSON.stringify(config.parsed, null, 2)" x-ref="jsonCode"></code></pre>
                         </div>
                     </div>
@@ -1531,38 +1533,44 @@
                 scrollToFirstMatch(element) {
                     if (!element || !this.configSearchTerm) return;
                     
-                    // Find the first highlighted mark element
-                    const firstMatch = element.querySelector('mark');
-                    if (firstMatch) {
-                        // Get the scrollable container (the pre element or its parent)
-                        let scrollContainer = element.closest('pre');
-                        if (!scrollContainer) {
-                            scrollContainer = element.closest('.overflow-x-auto');
-                        }
-                        if (!scrollContainer) {
-                            scrollContainer = element.parentElement;
-                        }
-                        
-                        if (scrollContainer) {
-                            // Calculate the position relative to the scroll container
-                            const containerRect = scrollContainer.getBoundingClientRect();
-                            const matchRect = firstMatch.getBoundingClientRect();
+                    // Wait a bit for DOM to update after highlighting
+                    setTimeout(() => {
+                        // Find the first highlighted mark element
+                        const firstMatch = element.querySelector('mark');
+                        if (firstMatch) {
+                            // Get the scrollable container - it's the div with overflow classes
+                            let scrollContainer = element.closest('.overflow-x-auto');
+                            if (!scrollContainer) {
+                                scrollContainer = element.closest('pre');
+                            }
+                            if (!scrollContainer) {
+                                scrollContainer = element.parentElement;
+                            }
                             
-                            // Scroll to make the match visible with some padding
-                            const scrollTop = scrollContainer.scrollTop + (matchRect.top - containerRect.top) - 50;
-                            scrollContainer.scrollTo({
-                                top: Math.max(0, scrollTop),
-                                behavior: 'smooth'
-                            });
-                            
-                            // Also highlight the match briefly for better visibility
-                            firstMatch.style.transition = 'background-color 0.3s';
-                            firstMatch.style.backgroundColor = '#fbbf24'; // yellow-400
-                            setTimeout(() => {
-                                firstMatch.style.backgroundColor = '';
-                            }, 1000);
+                            if (scrollContainer) {
+                                // Get the position of the match relative to the code element
+                                const codeRect = element.getBoundingClientRect();
+                                const matchRect = firstMatch.getBoundingClientRect();
+                                
+                                // Calculate scroll position
+                                // The match position relative to the code element
+                                const matchOffsetTop = matchRect.top - codeRect.top + scrollContainer.scrollTop;
+                                
+                                // Scroll to make the match visible with some padding
+                                scrollContainer.scrollTo({
+                                    top: Math.max(0, matchOffsetTop - 50),
+                                    behavior: 'smooth'
+                                });
+                                
+                                // Also highlight the match briefly for better visibility
+                                firstMatch.style.transition = 'background-color 0.3s';
+                                firstMatch.style.backgroundColor = '#fbbf24'; // yellow-400
+                                setTimeout(() => {
+                                    firstMatch.style.backgroundColor = '';
+                                }, 1000);
+                            }
                         }
-                    }
+                    }, 100);
                 },
                 
                 async loadLogs() {
