@@ -1209,7 +1209,7 @@ def get_status():
             try:
                 import urllib.request
                 response = urllib.request.urlopen('http://127.0.0.1/health', timeout=2)
-                if response.status == 200:
+                if response.getcode() == 200:
                     container_running = True
             except Exception:
                 pass
@@ -1235,7 +1235,7 @@ def get_status():
         try:
             import urllib.request
             response = urllib.request.urlopen('http://127.0.0.1/health', timeout=2)
-            health_ok = response.status == 200 and response.read().decode().strip() == 'healthy'
+            health_ok = response.getcode() == 200 and response.read().decode().strip() == 'healthy'
         except:
             pass
         
