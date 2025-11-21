@@ -1632,8 +1632,8 @@ def get_logs():
                         env=env
                     )
                     podman_available = podman_check.returncode == 0
-                except:
-                    # Try without LD_LIBRARY_PATH
+                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                    # LD_LIBRARY_PATH approach failed - try without it
                     try:
                         podman_check = subprocess.run(
                             ['/usr/bin/podman', '--version'],
@@ -1642,7 +1642,8 @@ def get_logs():
                             timeout=2
                         )
                         podman_available = podman_check.returncode == 0
-                    except:
+                    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                        # Podman binary exists but cannot be executed - treat as unavailable
                         pass
             else:
                 # Fallback: try to run podman to see if it's in PATH
@@ -1654,7 +1655,8 @@ def get_logs():
                         timeout=1
                     )
                     podman_available = podman_check.returncode == 0
-                except:
+                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                    # Podman not found in PATH or not executable - treat as unavailable
                     pass
             
             # Check podman socket accessibility
@@ -1671,7 +1673,8 @@ def get_logs():
                         if os.access(socket_path, os.R_OK):
                             podman_socket_accessible = True
                             break
-                    except:
+                    except OSError:
+                        # Socket may be in an unexpected state - continue checking other paths
                         pass
             
             # Also try to test podman connectivity directly
@@ -1686,7 +1689,8 @@ def get_logs():
                     )
                     if test_result.returncode == 0:
                         podman_socket_accessible = True
-                except:
+                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                    # Podman may not be able to connect to its socket - treat as inaccessible
                     pass
             
             # Check journalctl availability and ability to actually execute
@@ -1707,8 +1711,8 @@ def get_logs():
                         env=env
                     )
                     journalctl_available = journalctl_check.returncode == 0
-                except:
-                    # Try without LD_LIBRARY_PATH
+                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                    # LD_LIBRARY_PATH approach failed - try without it
                     try:
                         journalctl_check = subprocess.run(
                             ['/usr/bin/journalctl', '--version'],
@@ -1717,7 +1721,8 @@ def get_logs():
                             timeout=2
                         )
                         journalctl_available = journalctl_check.returncode == 0
-                    except:
+                    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                        # Journalctl binary exists but cannot be executed - treat as unavailable
                         pass
             else:
                 # Fallback: try to run journalctl to see if it's in PATH
@@ -1729,7 +1734,8 @@ def get_logs():
                         timeout=1
                     )
                     journalctl_available = journalctl_check.returncode == 0
-                except:
+                except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                    # Journalctl not found in PATH or not executable - treat as unavailable
                     pass
             
             # Check journal directory accessibility
@@ -1744,7 +1750,8 @@ def get_logs():
                         if os.access(journal_path, os.R_OK):
                             journal_accessible = True
                             break
-                    except:
+                    except OSError:
+                        # Journal path may be in an unexpected state - continue checking other paths
                         pass
             
             # Collect diagnostic information
