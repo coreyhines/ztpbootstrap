@@ -408,7 +408,7 @@
                     <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
                         <div x-show="config.error" class="text-red-600" x-text="config.error"></div>
                         <div x-show="config.raw && !config.error" class="overflow-x-auto overflow-y-auto max-h-[600px]">
-                            <pre class="language-yaml"><code class="language-yaml" x-text="config.raw" x-ref="yamlCode"></code></pre>
+                            <pre class="language-yaml"><code class="language-yaml" x-ref="yamlCode"></code></pre>
                         </div>
                     </div>
                 </div>
@@ -1413,7 +1413,9 @@
                         this.config = data;
                         // Highlight syntax after config loads, then apply search highlighting if needed
                         this.$nextTick(() => {
-                            if (window.Prism && this.$refs.yamlCode) {
+                            if (window.Prism && this.$refs.yamlCode && this.config.raw) {
+                                // Set escaped text content first, then let Prism highlight it
+                                this.$refs.yamlCode.textContent = this.config.raw;
                                 window.Prism.highlightElement(this.$refs.yamlCode);
                                 // Apply search highlighting after Prism
                                 if (this.configSearchTerm) {
