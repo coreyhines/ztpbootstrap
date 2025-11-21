@@ -1642,7 +1642,9 @@ def get_logs():
                             timeout=2
                         )
                         podman_available = podman_check.returncode == 0
-                    except:
+                    except Exception:
+                        # Silently ignore all exceptions - this is a non-critical availability check
+                        # Exceptions may occur due to timeout, missing command, or permission issues
                         pass
             else:
                 # Fallback: try to run podman to see if it's in PATH
@@ -1654,7 +1656,9 @@ def get_logs():
                         timeout=1
                     )
                     podman_available = podman_check.returncode == 0
-                except:
+                except Exception:
+                    # Silently ignore all exceptions - this is a non-critical availability check
+                    # Exceptions may occur due to timeout, missing command, or permission issues
                     pass
             
             # Check podman socket accessibility
@@ -1671,7 +1675,9 @@ def get_logs():
                         if os.access(socket_path, os.R_OK):
                             podman_socket_accessible = True
                             break
-                    except:
+                    except Exception:
+                        # Silently ignore all exceptions - socket access check may raise OSError or other exceptions
+                        # We want to continue checking other socket paths even if one fails
                         pass
             
             # Also try to test podman connectivity directly
@@ -1686,7 +1692,9 @@ def get_logs():
                     )
                     if test_result.returncode == 0:
                         podman_socket_accessible = True
-                except:
+                except Exception:
+                    # Silently ignore all exceptions - podman command may timeout, fail, or be unavailable
+                    # This is a fallback connectivity test and should not halt the application
                     pass
             
             # Check journalctl availability and ability to actually execute
@@ -1707,8 +1715,9 @@ def get_logs():
                         env=env
                     )
                     journalctl_available = journalctl_check.returncode == 0
-                except:
-                    # Try without LD_LIBRARY_PATH
+                except Exception:
+                    # Journalctl execution may fail due to missing libraries, timeout, or other issues
+                    # Try without LD_LIBRARY_PATH as a fallback
                     try:
                         journalctl_check = subprocess.run(
                             ['/usr/bin/journalctl', '--version'],
@@ -1717,7 +1726,9 @@ def get_logs():
                             timeout=2
                         )
                         journalctl_available = journalctl_check.returncode == 0
-                    except:
+                    except Exception:
+                        # Silently ignore all exceptions - journalctl may be unavailable or fail to execute
+                        # This is a non-critical availability check
                         pass
             else:
                 # Fallback: try to run journalctl to see if it's in PATH
@@ -1729,7 +1740,9 @@ def get_logs():
                         timeout=1
                     )
                     journalctl_available = journalctl_check.returncode == 0
-                except:
+                except Exception:
+                    # Silently ignore all exceptions - this is a non-critical availability check
+                    # Exceptions may occur due to timeout, missing command, or permission issues
                     pass
             
             # Check journal directory accessibility
@@ -1744,7 +1757,9 @@ def get_logs():
                         if os.access(journal_path, os.R_OK):
                             journal_accessible = True
                             break
-                    except:
+                    except Exception:
+                        # Silently ignore all exceptions - journal path access check may raise OSError or other exceptions
+                        # We want to continue checking other journal paths even if one fails
                         pass
             
             # Collect diagnostic information
