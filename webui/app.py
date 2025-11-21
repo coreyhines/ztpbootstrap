@@ -1215,6 +1215,8 @@ def get_status():
                     container_running = True
             except Exception as e:
                 # Health endpoint not reachable - service may not be running
+                # Log for debugging
+                print(f"DEBUG: Health endpoint check exception: {type(e).__name__}: {e}", flush=True)
                 pass
         
         # Method 3: Check if podman is available and can see the pod
