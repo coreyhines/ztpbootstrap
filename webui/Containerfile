@@ -1,0 +1,17 @@
+# Containerfile for building a Fedora-based image with Python, podman, and systemd
+# This can be built locally: podman build -t ztpbootstrap-webui:local -f webui/Containerfile .
+# Then update systemd/ztpbootstrap-webui.container to use: Image=ztpbootstrap-webui:local
+
+FROM registry.fedoraproject.org/fedora:latest
+
+# Install Python, podman, systemd, and pip
+# This is a one-time build - containers will start much faster
+RUN dnf install -y python3 python3-pip podman systemd && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf
+
+# Set working directory
+WORKDIR /app
+
+# Note: Application files are mounted at runtime, not copied into image
+# This allows for easy updates without rebuilding the image
