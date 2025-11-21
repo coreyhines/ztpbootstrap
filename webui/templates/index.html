@@ -1475,9 +1475,42 @@
                         if (window.Prism) {
                             if (this.$refs.yamlCode) {
                                 window.Prism.highlightElement(this.$refs.yamlCode);
+                                // Apply search highlighting after Prism
+                                if (this.configSearchTerm) {
+                                    this.$refs.yamlCode.innerHTML = this.highlightConfigSearch(this.$refs.yamlCode.innerHTML);
+                                }
                             }
                             if (this.$refs.jsonCode) {
                                 window.Prism.highlightElement(this.$refs.jsonCode);
+                                // Apply search highlighting after Prism
+                                if (this.configSearchTerm) {
+                                    this.$refs.jsonCode.innerHTML = this.highlightConfigSearch(this.$refs.jsonCode.innerHTML);
+                                }
+                            }
+                        }
+                    });
+                },
+                
+                highlightConfig() {
+                    // Re-apply Prism highlighting and then search highlighting
+                    this.$nextTick(() => {
+                        if (window.Prism && this.$refs.yamlCode && this.config.raw) {
+                            // Reset to original content, apply Prism, then search highlighting
+                            this.$refs.yamlCode.textContent = this.config.raw;
+                            window.Prism.highlightElement(this.$refs.yamlCode);
+                            // Apply search highlighting after Prism
+                            if (this.configSearchTerm) {
+                                this.$refs.yamlCode.innerHTML = this.highlightConfigSearch(this.$refs.yamlCode.innerHTML);
+                            }
+                        }
+                        if (window.Prism && this.$refs.jsonCode && this.config.parsed) {
+                            // Reset to original content, apply Prism, then search highlighting
+                            const jsonContent = JSON.stringify(this.config.parsed, null, 2);
+                            this.$refs.jsonCode.textContent = jsonContent;
+                            window.Prism.highlightElement(this.$refs.jsonCode);
+                            // Apply search highlighting after Prism
+                            if (this.configSearchTerm) {
+                                this.$refs.jsonCode.innerHTML = this.highlightConfigSearch(this.$refs.jsonCode.innerHTML);
                             }
                         }
                     });
@@ -1678,6 +1711,17 @@
                     const regex = new RegExp(`(${escapedSearch})`, 'gi');
                     // Highlight matches with a distinct background that contrasts with all text colors
                     // Use a bright cyan background with dark text that will show on blue, yellow, green, and red text
+                    return htmlText.replace(regex, '<mark class="bg-cyan-400 text-gray-900 font-semibold px-0.5 rounded">$1</mark>');
+                },
+                
+                highlightConfigSearch(htmlText) {
+                    if (!htmlText || !this.configSearchTerm) return htmlText;
+                    // Escape special regex characters in search term
+                    const escapedSearch = this.configSearchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    // Create regex for case-insensitive matching
+                    const regex = new RegExp(`(${escapedSearch})`, 'gi');
+                    // Highlight matches with a distinct background that contrasts with syntax highlighting
+                    // Use a bright cyan background with dark text
                     return htmlText.replace(regex, '<mark class="bg-cyan-400 text-gray-900 font-semibold px-0.5 rounded">$1</mark>');
                 },
                 
