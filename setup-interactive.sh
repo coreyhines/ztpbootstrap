@@ -492,7 +492,7 @@ stop_services_gracefully() {
     fi
     
     log "Stopping services gracefully..."
-    elif [[ "$service_type" == "pod-based" ]]; then
+    if [[ "$service_type" == "pod-based" ]]; then
         # New version: stop containers first, then pod
         log "Stopping pod-based services..."
         local pod_service_name="ztpbootstrap-pod.service"
