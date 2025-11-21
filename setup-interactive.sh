@@ -1815,12 +1815,17 @@ create_pod_files_from_config() {
             local registry_image
             registry_image=$(yq eval '.webui.registry_image // ""' "$config_file" 2>/dev/null || echo "")
             if [[ -n "$registry_image" ]] && [[ "$registry_image" != "null" ]] && [[ "$registry_image" != "" ]]; then
-                image_tag="$registry_image"
-                log "Found configured webui image in config.yaml: $image_tag"
+                # Verify the image actually exists before using it
+                if podman image exists "$registry_image" 2>/dev/null; then
+                    image_tag="$registry_image"
+                    log "Found configured webui image in config.yaml: $image_tag"
+                else
+                    warn "Configured webui image '$registry_image' from config.yaml does not exist. Will check for local image or use base Fedora image."
+                fi
             fi
         fi
         
-        # If no registry image, check for local image
+        # If no registry image (or it doesn't exist), check for local image
         if [[ -z "$image_tag" ]]; then
             local local_tag="ztpbootstrap-webui:local"
             if podman image exists "$local_tag" 2>/dev/null; then
