@@ -2080,7 +2080,28 @@ start_services_after_install() {
         }
         
         # Start webui container if it exists
-        if systemctl list-unit-files | grep -q ztpbootstrap-webui.service; then
+        # Check both generator directory and systemd system directory for service file
+        local webui_service_exists=false
+        if [[ -f "${generator_dir}/ztpbootstrap-webui.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-webui.service" ]]; then
+            webui_service_exists=true
+        elif [[ $EUID -ne 0 ]]; then
+            if sudo test -f "${generator_dir}/ztpbootstrap-webui.service" 2>/dev/null || sudo test -f "${systemd_system_dir}/ztpbootstrap-webui.service" 2>/dev/null; then
+                webui_service_exists=true
+            fi
+        fi
+        
+        # Also check via systemctl list-unit-files as fallback
+        if [[ "$webui_service_exists" == "false" ]]; then
+            if systemctl list-unit-files 2>/dev/null | grep -q ztpbootstrap-webui.service; then
+                webui_service_exists=true
+            elif [[ $EUID -ne 0 ]]; then
+                if sudo systemctl list-unit-files 2>/dev/null | grep -q ztpbootstrap-webui.service; then
+                    webui_service_exists=true
+                fi
+            fi
+        fi
+        
+        if [[ "$webui_service_exists" == "true" ]]; then
             log "Starting webui container..."
             local start_cmd="systemctl start ztpbootstrap-webui.service"
             if [[ $EUID -ne 0 ]]; then
@@ -2144,12 +2165,34 @@ start_services_after_install() {
             warn "Failed to start ztpbootstrap-nginx.service"
         fi
         
-        if systemctl list-unit-files | grep -q ztpbootstrap-webui.service; then
-            if sudo systemctl start ztpbootstrap-webui.service 2>/dev/null; then
-                log "✓ Started ztpbootstrap-webui.service"
+        # Check if webui service exists (check both file locations and systemctl)
+        local webui_service_exists=false
+        if [[ -f "${generator_dir}/ztpbootstrap-webui.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-webui.service" ]]; then
+            webui_service_exists=true
+        elif sudo test -f "${generator_dir}/ztpbootstrap-webui.service" 2>/dev/null || sudo test -f "${systemd_system_dir}/ztpbootstrap-webui.service" 2>/dev/null; then
+            webui_service_exists=true
+        elif sudo systemctl list-unit-files 2>/dev/null | grep -q ztpbootstrap-webui.service; then
+            webui_service_exists=true
+        fi
+        
+        if [[ "$webui_service_exists" == "true" ]]; then
+            log "Starting webui container..."
+            if sudo systemctl start ztpbootstrap-webui.service 2>&1; then
+                sleep 3
+                if sudo systemctl is-active --quiet ztpbootstrap-webui.service 2>/dev/null; then
+                    if podman ps --filter name=ztpbootstrap-webui --format "{{.Names}}" 2>/dev/null | grep -q ztpbootstrap-webui; then
+                        log "✓ Started ztpbootstrap-webui.service and container is running"
+                    else
+                        warn "⚠️  Service reports active but container is not running"
+                    fi
+                else
+                    warn "⚠️  Service start command succeeded but service is not active"
+                fi
             else
                 warn "Failed to start ztpbootstrap-webui.service"
             fi
+        else
+            warn "WebUI service file not found. It may not have been generated yet."
         fi
     fi
     
