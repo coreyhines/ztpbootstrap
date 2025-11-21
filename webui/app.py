@@ -1194,12 +1194,17 @@ def get_status():
         try:
             import urllib.request
             response = urllib.request.urlopen('http://127.0.0.1/health', timeout=2)
-            if response.getcode() == 200:
+            status_code = response.getcode()
+            if status_code == 200:
                 container_running = True
                 # Also check the response body for health status
                 health_body = response.read().decode().strip()
                 health_ok = health_body == 'healthy'
-        except Exception:
+                print(f"DEBUG: Health check successful - container_running={container_running}, health_ok={health_ok}", flush=True)
+            else:
+                print(f"DEBUG: Health endpoint returned status {status_code}, not 200", flush=True)
+        except Exception as e:
+            print(f"DEBUG: Health endpoint check failed: {type(e).__name__}: {e}", flush=True)
             # Health endpoint not reachable - try systemctl as fallback
             try:
                 result = subprocess.run(
