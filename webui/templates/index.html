@@ -439,10 +439,6 @@
                             <button @click="loadLogs()" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium transition-colors">
                                 Refresh
                             </button>
-                            <label class="flex items-center space-x-2 cursor-pointer">
-                                <input type="checkbox" x-model="logAutoRefresh" @change="toggleAutoRefresh()" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                                <span class="text-sm text-gray-700">Auto-refresh</span>
-                            </label>
                             <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
                                 <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                                     <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
@@ -710,7 +706,6 @@
                 logSource: 'nginx_access',
                 logLines: 100,
                 logSearchTerm: '',
-                logAutoRefresh: false,
                 logRefreshInterval: null,
                 logNewEntriesIndicator: false,
                 logNewEntriesNginx: false,
@@ -758,12 +753,14 @@
                         }
                     });
                     
-                    // Watch for tab changes to stop auto-refresh when leaving logs tab
+                    // Watch for tab changes to start/stop auto-refresh
                     this.$watch('activeTab', (newTab) => {
-                        if (newTab !== 'logs' && this.logRefreshInterval) {
-                            this.logAutoRefresh = false;
-                            clearInterval(this.logRefreshInterval);
-                            this.logRefreshInterval = null;
+                        if (newTab === 'logs') {
+                            // Start auto-refresh when entering logs tab
+                            this.startAutoRefresh();
+                        } else {
+                            // Stop auto-refresh when leaving logs tab
+                            this.stopAutoRefresh();
                         }
                     });
                     // Ensure modal is hidden on initial load
@@ -791,6 +788,11 @@
                     // Config will be loaded when user clicks Configuration tab
                     await this.loadLogs();
                     await this.loadDeviceConnections();
+                    
+                    // Start auto-refresh if we're on the logs tab
+                    if (this.activeTab === 'logs') {
+                        this.startAutoRefresh();
+                    }
                     
                     // Check if we should show multi-column layout
                     this.showMultiColumn = window.innerWidth >= 1024;
@@ -1534,18 +1536,23 @@
                     }
                 },
                 
-                toggleAutoRefresh() {
-                    if (this.logAutoRefresh) {
-                        // Start auto-refresh every 2 seconds
-                        this.logRefreshInterval = setInterval(() => {
+                startAutoRefresh() {
+                    // Clear any existing interval first
+                    if (this.logRefreshInterval) {
+                        clearInterval(this.logRefreshInterval);
+                    }
+                    // Start auto-refresh every 2 seconds
+                    this.logRefreshInterval = setInterval(() => {
+                        if (this.activeTab === 'logs') {
                             this.loadLogs();
-                        }, 2000);
-                    } else {
-                        // Stop auto-refresh
-                        if (this.logRefreshInterval) {
-                            clearInterval(this.logRefreshInterval);
-                            this.logRefreshInterval = null;
                         }
+                    }, 2000);
+                },
+                
+                stopAutoRefresh() {
+                    if (this.logRefreshInterval) {
+                        clearInterval(this.logRefreshInterval);
+                        this.logRefreshInterval = null;
                     }
                 },
                 
