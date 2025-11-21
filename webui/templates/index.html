@@ -431,14 +431,10 @@
                     <!-- Multi-column layout for wide screens -->
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4" x-show="showMultiColumn && logSource === 'container'">
                         <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto">
-                            <div class="text-xs text-gray-400 mb-2 font-semibold">Pod Service</div>
-                            <pre class="text-sm text-green-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="formatLogsWithMarks(logsPod)"></pre>
-                        </div>
-                        <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto">
                             <div class="text-xs text-gray-400 mb-2 font-semibold">Nginx Service</div>
                             <pre class="text-sm text-blue-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="formatLogsWithMarks(logsNginx)"></pre>
                         </div>
-                        <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto lg:col-span-2">
+                        <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto">
                             <div class="text-xs text-gray-400 mb-2 font-semibold">WebUI Service</div>
                             <pre class="text-sm text-yellow-400 font-mono overflow-x-auto whitespace-pre-wrap" x-html="formatLogsWithMarks(logsWebUI)"></pre>
                         </div>
@@ -669,7 +665,6 @@
                 backups: [],
                 config: {},
                 logs: 'Loading...',
-                logsPod: '',
                 logsNginx: '',
                 logsWebUI: '',
                 logSource: 'nginx_access',
@@ -1411,13 +1406,11 @@
                         if (this.logSource === 'container' && this.showMultiColumn) {
                             // Split container logs by service
                             const logText = data.logs || '';
-                            // Pod-based service names
-                            const podMatch = logText.match(/=== ztpbootstrap-pod\.service ===([\s\S]*?)(?=== |$)/);
+                            // Service names (excluding pod service)
                             const nginxMatch = logText.match(/=== ztpbootstrap-nginx\.service ===([\s\S]*?)(?=== |$)/);
                             const webuiMatch = logText.match(/=== ztpbootstrap-webui\.service ===([\s\S]*?)(?=== |$)/);
                             
                             // Update individual properties for Alpine.js reactivity
-                            this.logsPod = podMatch ? podMatch[1].trim() : 'No pod logs available';
                             this.logsNginx = nginxMatch ? nginxMatch[1].trim() : 'No nginx logs available';
                             this.logsWebUI = webuiMatch ? webuiMatch[1].trim() : 'No webui logs available';
                         } else {
