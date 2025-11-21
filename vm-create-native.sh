@@ -693,8 +693,14 @@ runcmd:
         fi
       fi
       # Try cloning with retries
+      # Check if ZTP_BRANCH environment variable is set (for testing specific branches)
+      local branch_arg=""
+      if [ -n "${ZTP_BRANCH:-}" ]; then
+        branch_arg="-b ${ZTP_BRANCH}"
+        echo "Cloning branch: ${ZTP_BRANCH}"
+      fi
       for i in 1 2 3; do
-        if sudo -u __CURRENT_USER__ git clone https://github.com/coreyhines/ztpbootstrap.git /home/__CURRENT_USER__/ztpbootstrap 2>&1; then
+        if sudo -u __CURRENT_USER__ git clone ${branch_arg} https://github.com/coreyhines/ztpbootstrap.git /home/__CURRENT_USER__/ztpbootstrap 2>&1; then
           echo "Repository cloned successfully to /home/__CURRENT_USER__/ztpbootstrap"
           break
         elif [ $i -eq 3 ]; then
@@ -706,32 +712,38 @@ runcmd:
       done
     fi
   - |
-    # Create minimal ztpbootstrap.env file for automated testing
-    # This allows setup.sh to run without manual configuration
-    # Create directory first
-    mkdir -p /opt/containerdata/ztpbootstrap
-    # Create env file using printf to avoid YAML heredoc issues
-    printf '%s\n' \
-      '# Minimal configuration for automated testing' \
-      'CV_ADDR=www.arista.io' \
-      'ENROLLMENT_TOKEN=test_token_for_automated_testing' \
-      'CV_PROXY=' \
-      'EOS_URL=' \
-      'NTP_SERVER=time.nist.gov' \
-      'TZ=UTC' \
-      'NGINX_HOST=ztpboot.example.com' \
-      'NGINX_PORT=443' > /opt/containerdata/ztpbootstrap/ztpbootstrap.env
-    chmod 644 /opt/containerdata/ztpbootstrap/ztpbootstrap.env
-    # Also copy bootstrap.py and nginx.conf to expected location for setup.sh if repo was cloned
-    if [ -f /home/__CURRENT_USER__/ztpbootstrap/bootstrap.py ]; then
-      cp /home/__CURRENT_USER__/ztpbootstrap/bootstrap.py /opt/containerdata/ztpbootstrap/bootstrap.py
-      chmod 644 /opt/containerdata/ztpbootstrap/bootstrap.py
+    # Create minimal ztpbootstrap.env file for automated testing (only if AUTO_SETUP flag is set)
+    # This allows setup.sh to run without manual configuration in automated test scenarios
+    # For manual testing, we skip this to avoid false "previous installation" warnings
+    AUTO_SETUP_VAL=$(if [ -f /tmp/auto-setup-flag ]; then echo "true"; else echo "false"; fi)
+    if [ "$AUTO_SETUP_VAL" = "true" ]; then
+      # Create directory first
+      mkdir -p /opt/containerdata/ztpbootstrap
+      # Create env file using printf to avoid YAML heredoc issues
+      printf '%s\n' \
+        '# Minimal configuration for automated testing' \
+        'CV_ADDR=www.arista.io' \
+        'ENROLLMENT_TOKEN=test_token_for_automated_testing' \
+        'CV_PROXY=' \
+        'EOS_URL=' \
+        'NTP_SERVER=time.nist.gov' \
+        'TZ=UTC' \
+        'NGINX_HOST=ztpboot.example.com' \
+        'NGINX_PORT=443' > /opt/containerdata/ztpbootstrap/ztpbootstrap.env
+      chmod 644 /opt/containerdata/ztpbootstrap/ztpbootstrap.env
+      # Also copy bootstrap.py and nginx.conf to expected location for setup.sh if repo was cloned
+      if [ -f /home/__CURRENT_USER__/ztpbootstrap/bootstrap.py ]; then
+        cp /home/__CURRENT_USER__/ztpbootstrap/bootstrap.py /opt/containerdata/ztpbootstrap/bootstrap.py
+        chmod 644 /opt/containerdata/ztpbootstrap/bootstrap.py
+      fi
+      if [ -f /home/__CURRENT_USER__/ztpbootstrap/nginx.conf ]; then
+        cp /home/__CURRENT_USER__/ztpbootstrap/nginx.conf /opt/containerdata/ztpbootstrap/nginx.conf
+        chmod 644 /opt/containerdata/ztpbootstrap/nginx.conf
+      fi
+      echo "Created minimal ztpbootstrap.env for automated testing"
+    else
+      echo "Skipping minimal config creation (manual testing mode)"
     fi
-    if [ -f /home/__CURRENT_USER__/ztpbootstrap/nginx.conf ]; then
-      cp /home/__CURRENT_USER__/ztpbootstrap/nginx.conf /opt/containerdata/ztpbootstrap/nginx.conf
-      chmod 644 /opt/containerdata/ztpbootstrap/nginx.conf
-    fi
-    echo "Created minimal ztpbootstrap.env for automated testing"
   - |
     # Setup macvlan network on the primary ethernet interface
     # Find the primary ethernet interface (usually eth0 or ens*)
