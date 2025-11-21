@@ -1211,7 +1211,10 @@ def get_status():
                 response = urllib.request.urlopen('http://127.0.0.1/health', timeout=2)
                 if response.getcode() == 200:
                     container_running = True
-            except Exception:
+            except Exception as e:
+                # Log error for debugging (only in development)
+                if os.environ.get('FLASK_ENV') == 'development':
+                    print(f"Health endpoint check failed: {e}", flush=True)
                 pass
         
         # Method 3: Check if podman is available and can see the pod
