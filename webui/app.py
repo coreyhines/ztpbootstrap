@@ -1185,56 +1185,27 @@ def get_status():
     """Get service status"""
     try:
         # Check if pod service is running
-        # Since we're in a container, systemctl may not work, so we use multiple methods
+        # Since we're in a container, systemctl may not work, so we use the health endpoint as primary method
         container_running = False
         
-        # Method 1: Try systemctl (works if container has systemd access)
-        try:
-            # Check pod-based service
-            result = subprocess.run(
-                ['systemctl', 'is-active', '--quiet', 'ztpbootstrap-pod.service'],
-                capture_output=True,
-                text=True,
-                timeout=2
-            )
-            if result.returncode == 0:
-                container_running = True
-        except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as e:
-            # systemctl not available or failed - this is expected in containers
-            # We'll use other methods below
-            pass
-        
-        # Method 2: Check if we can reach nginx health endpoint (indicates service is running)
+        # Primary method: Check if we can reach nginx health endpoint (indicates service is running)
         # This is the most reliable method when systemctl is not available in containers
-        if not container_running:
+        try:
+            import urllib.request
+            response = urllib.request.urlopen('http://127.0.0.1/health', timeout=2)
+            if response.getcode() == 200:
+                container_running = True
+        except Exception:
+            # Health endpoint not reachable - try systemctl as fallback
             try:
-                import urllib.request
-                print(f"DEBUG: Attempting health endpoint check, container_running={container_running}", flush=True)
-                response = urllib.request.urlopen('http://127.0.0.1/health', timeout=2)
-                status_code = response.getcode()
-                print(f"DEBUG: Health endpoint returned status {status_code}", flush=True)
-                if status_code == 200:
+                result = subprocess.run(
+                    ['systemctl', 'is-active', '--quiet', 'ztpbootstrap-pod.service'],
+                    capture_output=True,
+                    text=True,
+                    timeout=2
+                )
+                if result.returncode == 0:
                     container_running = True
-                    print(f"DEBUG: Set container_running=True", flush=True)
-            except Exception as e:
-                # Health endpoint not reachable - service may not be running
-                # Log for debugging
-                print(f"DEBUG: Health endpoint check exception: {type(e).__name__}: {e}", flush=True)
-                pass
-        
-        # Method 3: Check if podman is available and can see the pod
-        if not container_running:
-            try:
-                podman_path = Path('/usr/bin/podman')
-                if podman_path.exists() and os.access(podman_path, os.X_OK):
-                    result = subprocess.run(
-                        ['/usr/bin/podman', 'pod', 'exists', 'ztpbootstrap'],
-                        capture_output=True,
-                        text=True,
-                        timeout=2
-                    )
-                    if result.returncode == 0:
-                        container_running = True
             except Exception:
                 pass
         
