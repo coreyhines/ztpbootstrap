@@ -1815,6 +1815,19 @@ create_pod_files_from_config() {
             local registry_image
             registry_image=$(yq eval '.webui.registry_image // ""' "$config_file" 2>/dev/null || echo "")
             if [[ -n "$registry_image" ]] && [[ "$registry_image" != "null" ]] && [[ "$registry_image" != "" ]]; then
+                # If it's just a registry URL (no / or no image name), append default image name
+                if [[ "$registry_image" != "ztpbootstrap-webui:local" ]] && [[ "$registry_image" != *"localhost"* ]]; then
+                    if [[ "$registry_image" != *"/"* ]] || [[ "$registry_image" == *"/" ]] || [[ "$registry_image" != *":"* ]]; then
+                        # It's just a registry URL, append the default image name and tag
+                        if [[ "$registry_image" == *"/" ]]; then
+                            # Remove trailing slash if present
+                            registry_image="${registry_image%/}"
+                        fi
+                        registry_image="${registry_image}/ztpbootstrap-webui:latest"
+                        log "Appended default image name to registry URL from config.yaml: $registry_image"
+                    fi
+                fi
+                
                 # Check if it's a remote registry image (contains / and not localhost)
                 local is_remote_registry=false
                 if [[ "$registry_image" == *"/"* ]] && [[ "$registry_image" != "localhost"* ]] && [[ "$registry_image" != "ztpbootstrap-webui:local" ]]; then
@@ -2524,7 +2537,17 @@ PYTHON_VERIFY
         if [[ -n "$existing_registry_image" ]] && [[ "$existing_registry_image" != "null" ]] && [[ "$existing_registry_image" != "" ]]; then
             # Only use it if it's a remote registry (not local)
             if [[ "$existing_registry_image" != "ztpbootstrap-webui:local" ]] && [[ "$existing_registry_image" != *"localhost"* ]]; then
-                prompt_with_default "Remote registry image (e.g., registry.example.com/ztpbootstrap-webui:latest)" "$existing_registry_image" WEBUI_REGISTRY_IMAGE
+                # If it's just a registry URL (no / or no image name), append default image name
+                local default_value="$existing_registry_image"
+                if [[ "$existing_registry_image" != *"/"* ]] || [[ "$existing_registry_image" == *"/" ]] || [[ "$existing_registry_image" != *":"* ]]; then
+                    # It's just a registry URL, append the default image name and tag
+                    if [[ "$existing_registry_image" == *"/" ]]; then
+                        # Remove trailing slash if present
+                        default_value="${existing_registry_image%/}"
+                    fi
+                    default_value="${default_value}/ztpbootstrap-webui:latest"
+                fi
+                prompt_with_default "Remote registry image (e.g., registry.example.com/ztpbootstrap-webui:latest)" "$default_value" WEBUI_REGISTRY_IMAGE
             else
                 prompt_with_default "Remote registry image (e.g., registry.example.com/ztpbootstrap-webui:latest)" "" WEBUI_REGISTRY_IMAGE
             fi
@@ -2537,10 +2560,23 @@ PYTHON_VERIFY
     
     # If user provided a registry image, extract registry and tag
     if [[ -n "${WEBUI_REGISTRY_IMAGE:-}" ]] && [[ "${WEBUI_REGISTRY_IMAGE}" != "" ]]; then
-        WEBUI_IMAGE_TAG="${WEBUI_REGISTRY_IMAGE}"
+        # If user provided just a registry URL (no / or no image name), append default image name
+        if [[ "$WEBUI_REGISTRY_IMAGE" != *"/"* ]] || [[ "$WEBUI_REGISTRY_IMAGE" == *"/" ]] || [[ "$WEBUI_REGISTRY_IMAGE" != *":"* ]]; then
+            # It's just a registry URL, append the default image name and tag
+            if [[ "$WEBUI_REGISTRY_IMAGE" == *"/" ]]; then
+                # Remove trailing slash if present
+                WEBUI_REGISTRY_IMAGE="${WEBUI_REGISTRY_IMAGE%/}"
+            fi
+            WEBUI_IMAGE_TAG="${WEBUI_REGISTRY_IMAGE}/ztpbootstrap-webui:latest"
+            log "Appended default image name to registry URL: $WEBUI_IMAGE_TAG"
+        else
+            # User provided full image tag
+            WEBUI_IMAGE_TAG="${WEBUI_REGISTRY_IMAGE}"
+        fi
+        
         # Extract registry URL (everything before the last /)
-        if [[ "$WEBUI_REGISTRY_IMAGE" == *"/"* ]]; then
-            WEBUI_IMAGE_REGISTRY="${WEBUI_REGISTRY_IMAGE%/*}"
+        if [[ "$WEBUI_IMAGE_TAG" == *"/"* ]]; then
+            WEBUI_IMAGE_REGISTRY="${WEBUI_IMAGE_TAG%/*}"
         else
             WEBUI_IMAGE_REGISTRY=""
         fi
