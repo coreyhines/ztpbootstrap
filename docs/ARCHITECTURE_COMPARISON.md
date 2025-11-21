@@ -17,7 +17,7 @@ This document compares the ZTP Bootstrap Service across different architectures 
 - ✅ Excellent performance characteristics
 
 **Compatibility:**
-- ✅ All container images available (nginx:alpine, python:alpine)
+- ✅ All container images available (nginx:alpine, python:3-slim)
 - ✅ Podman works correctly
 - ✅ Systemd quadlets work correctly
 - ✅ All scripts execute without issues
@@ -42,7 +42,7 @@ This document compares the ZTP Bootstrap Service across different architectures 
 - ✅ Would be fast on x86_64 host (native)
 
 **Compatibility:**
-- ✅ All container images available (nginx:alpine, python:alpine)
+- ✅ All container images available (nginx:alpine, python:3-slim)
 - ✅ Podman works on x86_64 Linux
 - ✅ Systemd quadlets work on x86_64 Linux
 - ✅ All scripts should work identically
@@ -119,10 +119,11 @@ This document compares the ZTP Bootstrap Service across different architectures 
 - ✅ Available for x86_64
 - ✅ Works correctly on both architectures
 
-### python:alpine
+### python:3-slim
 - ✅ Available for ARM64
 - ✅ Available for x86_64
 - ✅ Works correctly on both architectures
+- ✅ Uses glibc (compatible with Fedora binaries: podman, journalctl)
 
 **Status:** ✅ All required images available for both architectures
 

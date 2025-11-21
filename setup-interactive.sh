@@ -453,13 +453,7 @@ check_running_services() {
     local running_services=()
     local service_type="none"
     
-    # Check for old single-container service
-    if systemctl is-active --quiet ztpbootstrap.service 2>/dev/null; then
-        running_services+=("ztpbootstrap.service")
-        service_type="single-container"
-    fi
-    
-    # Check for new pod-based services (quadlet generates ztpbootstrap-pod.service from ztpbootstrap.pod)
+    # Check for pod-based services (quadlet generates ztpbootstrap-pod.service from ztpbootstrap.pod)
     if systemctl is-active --quiet ztpbootstrap-pod.service 2>/dev/null; then
         running_services+=("ztpbootstrap-pod.service")
         service_type="pod-based"
@@ -498,16 +492,6 @@ stop_services_gracefully() {
     fi
     
     log "Stopping services gracefully..."
-    
-    if [[ "$service_type" == "single-container" ]]; then
-        # Old version: stop single container service
-        log "Stopping ztpbootstrap.service (single-container setup)..."
-        if [[ $EUID -eq 0 ]]; then
-            systemctl stop ztpbootstrap.service 2>/dev/null || warn "Failed to stop ztpbootstrap.service"
-        else
-            sudo systemctl stop ztpbootstrap.service 2>/dev/null || warn "Failed to stop ztpbootstrap.service"
-        fi
-        sleep 2
     elif [[ "$service_type" == "pod-based" ]]; then
         # New version: stop containers first, then pod
         log "Stopping pod-based services..."

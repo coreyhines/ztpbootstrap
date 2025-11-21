@@ -1411,7 +1411,9 @@
                         if (this.logSource === 'container' && this.showMultiColumn) {
                             // Split container logs by service
                             const logText = data.logs || '';
-                            const podMatch = logText.match(/=== ztpbootstrap\.service ===([\s\S]*?)(?=== |$)/);
+                            // Try both pod-based and legacy service names
+                            const podMatch = logText.match(/=== ztpbootstrap-pod\.service ===([\s\S]*?)(?=== |$)/) || 
+                                           logText.match(/=== ztpbootstrap\.service ===([\s\S]*?)(?=== |$)/);
                             const nginxMatch = logText.match(/=== ztpbootstrap-nginx\.service ===([\s\S]*?)(?=== |$)/);
                             const webuiMatch = logText.match(/=== ztpbootstrap-webui\.service ===([\s\S]*?)(?=== |$)/);
                             

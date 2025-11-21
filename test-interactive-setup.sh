@@ -6,9 +6,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DISTRO="${1:-fedora}"
-VERSION="${2:-43}"
+DISTRO="${DISTRO:-fedora}"
+VERSION="${VERSION:-43}"
 SKIP_VM_CREATE="${SKIP_VM_CREATE:-false}"
+VM_CREATE_ARGS=()  # Arguments to pass through to vm-create-native.sh
 
 # Colors
 RED='\033[0;31m'
@@ -17,6 +18,101 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+# Function to show usage
+show_usage() {
+    cat << EOF
+Usage: $0 [OPTIONS] [DISTRO] [VERSION]
+
+Test Interactive Setup with Production Backup
+
+This script tests the interactive setup by restoring a production backup
+and running the interactive setup script in a test VM.
+
+Options:
+    --skip-vm              Skip VM creation, assume VM is already running
+    --help, -h             Show this help message
+
+Arguments:
+    DISTRO                 Distribution name (fedora, ubuntu, debian, rocky, almalinux, etc.)
+                           Default: fedora
+    VERSION                Distribution version (e.g., 43, 24.04, 9)
+                           Default: 43
+
+VM Creation Arguments:
+    Arguments after '--' are passed directly to vm-create-native.sh.
+    Common options include:
+        --arch ARCH        Architecture: aarch64 or x86_64 (default: aarch64)
+        --memory MB        Memory in MB (default: 4096)
+        --cpus NUM         Number of CPUs (default: 2)
+        --name NAME        VM name (default: ztpbootstrap-test-vm)
+        --console          Run with serial console instead of headless
+
+Examples:
+    # Test with default Fedora 43
+    $0
+
+    # Test with Ubuntu 24.04
+    $0 ubuntu 24.04
+
+    # Test with Rocky Linux, passing through VM arguments
+    $0 rocky 9 -- --arch x86_64 --memory 8192
+
+    # Skip VM creation (use existing VM)
+    $0 --skip-vm
+
+Environment Variables:
+    RESTORE_BACKUP=y       Restore production backup (will prompt for host/user)
+    BACKUP_HOST=host       Backup host (required if RESTORE_BACKUP=y)
+    BACKUP_USER=user       Backup user (optional, defaults to current user)
+
+For more VM creation options, see: ./vm-create-native.sh --help
+
+EOF
+}
+
+# Parse arguments first (before interactive prompts)
+PASS_THROUGH=false
+POSITIONAL_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --skip-vm)
+            SKIP_VM_CREATE=true
+            shift
+            ;;
+        --help|-h)
+            show_usage
+            exit 0
+            ;;
+        --)
+            PASS_THROUGH=true
+            shift
+            ;;
+        *)
+            if [[ "$PASS_THROUGH" == "true" ]]; then
+                # Arguments after -- are passed to vm-create-native.sh
+                VM_CREATE_ARGS+=("$1")
+            else
+                # Positional arguments: distro, version
+                POSITIONAL_ARGS+=("$1")
+            fi
+            shift
+            ;;
+    esac
+done
+
+# Set distro and version from positional args (backward compatibility)
+if [[ ${#POSITIONAL_ARGS[@]} -gt 0 ]]; then
+    DISTRO="${POSITIONAL_ARGS[0]}"
+fi
+if [[ ${#POSITIONAL_ARGS[@]} -gt 1 ]]; then
+    VERSION="${POSITIONAL_ARGS[1]}"
+fi
+
+# Set defaults if not provided
+DISTRO="${DISTRO:-fedora}"
+VERSION="${VERSION:-43}"
 
 # Ask if user wants to restore a production backup
 RESTORE_BACKUP="${RESTORE_BACKUP:-}"
@@ -53,21 +149,22 @@ else
     RESTORE_BACKUP="false"
 fi
 
-# Check for --skip-vm flag
-if [[ "${1:-}" == "--skip-vm" ]] || [[ "${2:-}" == "--skip-vm" ]] || [[ "${3:-}" == "--skip-vm" ]]; then
-    SKIP_VM_CREATE=true
-    # Remove --skip-vm from args
-    if [[ "${1:-}" == "--skip-vm" ]]; then
-        DISTRO="${2:-fedora}"
-        VERSION="${3:-43}"
-    elif [[ "${2:-}" == "--skip-vm" ]]; then
-        DISTRO="${1:-fedora}"
-        VERSION="${3:-43}"
-    else
-        DISTRO="${1:-fedora}"
-        VERSION="${2:-43}"
+# Build VM creation command arguments
+# Default to aarch64 unless --arch is already specified in pass-through args
+VM_ARCH_SPECIFIED=false
+for arg in "${VM_CREATE_ARGS[@]}"; do
+    if [[ "$arg" == "--arch" ]] || [[ "$arg" == "-a" ]]; then
+        VM_ARCH_SPECIFIED=true
+        break
     fi
+done
+
+# Build base VM creation args
+VM_BASE_ARGS=("--download" "$DISTRO" "--type" "cloud" "--version" "$VERSION" "--headless")
+if [[ "$VM_ARCH_SPECIFIED" == "false" ]]; then
+    VM_BASE_ARGS+=("--arch" "aarch64")
 fi
+VM_BASE_ARGS+=("${VM_CREATE_ARGS[@]}")
 
 # Determine default user based on distribution
 # Use current logged-in user for Fedora since it has SSH key authentication configured
@@ -115,18 +212,10 @@ if [[ "$RESTORE_BACKUP" == "true" ]]; then
 else
     echo "Backup restoration: Skipped"
 fi
+if [[ ${#VM_CREATE_ARGS[@]} -gt 0 ]]; then
+    echo "Additional VM args: ${VM_CREATE_ARGS[*]}"
+fi
 echo "Date: $(date +'%Y-%m-%d %H:%M:%S')"
-echo ""
-echo "Usage:"
-echo "  $0 [--skip-vm] [distro] [version]"
-echo ""
-echo "  --skip-vm    Skip VM creation, assume VM is already running"
-echo "               Use this if you have a VM already set up"
-echo ""
-echo "  Environment variables:"
-echo "    RESTORE_BACKUP=y    Restore production backup (will prompt for host/user)"
-echo "    BACKUP_HOST=host    Backup host (required if RESTORE_BACKUP=y)"
-echo "    BACKUP_USER=user    Backup user (optional, defaults to current user)"
 echo ""
 
 # Step 1: Get backup from backup host (only if restoring)
@@ -167,14 +256,14 @@ else
         log_warn "VM disk exists but VM is not running."
         log_info "To use existing disk, start VM manually or delete it to create fresh"
         log_info "Creating new VM (will reuse existing cloud image if found)..."
-        ./vm-create-native.sh --download "$DISTRO" --type cloud --arch aarch64 --version "$VERSION" --headless 2>&1 | tee /tmp/test-vm-create.log &
+        ./vm-create-native.sh "${VM_BASE_ARGS[@]}" 2>&1 | tee /tmp/test-vm-create.log &
         VM_PID=$!
         log_info "VM creation started (PID: $VM_PID)"
         sleep 5
         VM_RUNNING=false
     else
         log_info "Creating new VM (will reuse existing cloud image if found in Downloads)..."
-        ./vm-create-native.sh --download "$DISTRO" --type cloud --arch aarch64 --version "$VERSION" --headless 2>&1 | tee /tmp/test-vm-create.log &
+        ./vm-create-native.sh "${VM_BASE_ARGS[@]}" 2>&1 | tee /tmp/test-vm-create.log &
         VM_PID=$!
         log_info "VM creation started (PID: $VM_PID)"
         sleep 5

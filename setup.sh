@@ -676,89 +676,6 @@ start_service() {
     # Systemd quadlet generator needs time to process .container files
     sleep 2
     
-    # Check if webui container file exists and try to ensure systemd recognizes it
-    if [[ -f "${systemd_dir}/ztpbootstrap-webui.container" ]]; then
-        log "WebUI container file found, ensuring systemd recognizes it..."
-        # Manually run quadlet generator to ensure service is created
-        # This is needed because systemd's automatic generator may not always process all files
-        local webui_service_generated=false
-        if command -v /usr/libexec/podman/quadlet >/dev/null 2>&1; then
-            # Try to generate the service file
-            local quadlet_output
-            quadlet_output=$(/usr/libexec/podman/quadlet "${systemd_dir}/ztpbootstrap-webui.container" 2>&1)
-            if [[ $? -eq 0 ]] && [[ -n "$quadlet_output" ]]; then
-                # Check if service file was created in generator directory
-                if [[ -f "/run/systemd/generator/ztpbootstrap-webui.service" ]]; then
-                    log "WebUI service generated successfully by quadlet"
-                    webui_service_generated=true
-                else
-                    # Try to write the output manually
-                    echo "$quadlet_output" | grep -A 1000 "^---ztpbootstrap-webui.service---" | sed '1d' > /tmp/webui.service 2>/dev/null || true
-                    if [[ -s /tmp/webui.service ]]; then
-                        mv /tmp/webui.service /run/systemd/generator/ztpbootstrap-webui.service 2>/dev/null && {
-                            log "WebUI service file created manually from quadlet output"
-                            webui_service_generated=true
-                        } || true
-                    fi
-                fi
-            fi
-        fi
-        
-        # Always ensure the service file includes the start-webui.sh command
-        # Quadlet regenerates the service file, so we use a systemd drop-in to override ExecStart
-        # This is more reliable than modifying the generated file
-        local override_dir="/etc/systemd/system/ztpbootstrap-webui.service.d"
-        if [[ -f "/run/systemd/generator/ztpbootstrap-webui.service" ]]; then
-            mkdir -p "$override_dir"
-            # Extract the ExecStart line from the generated service file
-            local execstart_line
-            execstart_line=$(grep "^ExecStart=" /run/systemd/generator/ztpbootstrap-webui.service | head -1)
-            if [[ -n "$execstart_line" ]] && [[ "$execstart_line" != *"/app/start-webui.sh"* ]]; then
-                log "Creating systemd drop-in to add /app/start-webui.sh command to webui service..."
-                # Append /app/start-webui.sh to the ExecStart line
-                local updated_execstart
-                updated_execstart="${execstart_line} /app/start-webui.sh"
-                cat > "${override_dir}/override.conf" << EOF
-[Service]
-ExecStart=
-ExecStart=${updated_execstart#ExecStart=}
-EOF
-                log "Created systemd drop-in override for webui service"
-            fi
-        fi
-        
-        # If quadlet failed, create a basic service file manually
-        if [[ "$webui_service_generated" == "false" ]]; then
-            warn "Quadlet generator did not create webui service, creating manual service file..."
-            cat > /run/systemd/generator/ztpbootstrap-webui.service << 'EOFWEBUI'
-[Unit]
-Description=ZTP Bootstrap Web UI Container
-SourcePath=/etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container
-RequiresMountsFor=%t/containers
-BindsTo=ztpbootstrap.service
-After=ztpbootstrap.service
-
-[Service]
-Restart=always
-Environment=PODMAN_SYSTEMD_UNIT=%n
-KillMode=mixed
-ExecStop=/usr/bin/podman rm -v -f -i ztpbootstrap-webui
-ExecStopPost=-/usr/bin/podman rm -v -f -i ztpbootstrap-webui
-Delegate=yes
-Type=notify
-NotifyAccess=all
-SyslogIdentifier=%N
-ExecStart=/usr/bin/podman run --name ztpbootstrap-webui --replace --rm --cgroups=split --sdnotify=conmon -d --pod ztpbootstrap -v /opt/containerdata/ztpbootstrap/webui:/app:ro -v /opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw -v /opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw -v /run/systemd/journal:/run/systemd/journal:ro -v /run/log/journal:/run/log/journal:ro -v /run/podman:/run/podman:ro -v /usr/bin/journalctl:/usr/bin/journalctl:ro -v /lib64/libsystemd.so.0:/lib64/libsystemd.so.0:ro -v /lib64/libsystemd.so.0.41.0:/lib64/libsystemd.so.0.41.0:ro -v /usr/lib64/systemd:/usr/lib64/systemd:ro --env TZ=UTC --env ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap --env FLASK_APP=app.py --env FLASK_ENV=production docker.io/python:alpine /app/start-webui.sh
-
-[Install]
-WantedBy=multi-user.target default.target
-EOFWEBUI
-            log "Created manual WebUI service file"
-        fi
-        
-        systemctl daemon-reload
-        sleep 1
-    fi
     
     log "Starting ztpbootstrap pod..."
     if systemctl start ztpbootstrap; then
@@ -779,14 +696,110 @@ EOFWEBUI
         warn "Failed to start nginx container. Check logs with: journalctl -u ztpbootstrap-nginx -f"
     fi
     
+    # Helper function to diagnose webui startup failures
+    diagnose_webui_failure() {
+        warn "=== WebUI Container Startup Diagnostics ==="
+        
+        # Check service file locations
+        local generator_file="/run/systemd/generator/ztpbootstrap-webui.service"
+        local system_file="/etc/systemd/system/ztpbootstrap-webui.service"
+        
+        warn "Service file locations:"
+        if [[ -f "$generator_file" ]]; then
+            warn "  ✓ Found: $generator_file"
+        else
+            warn "  ✗ Not found: $generator_file"
+        fi
+        if [[ -f "$system_file" ]]; then
+            warn "  ✓ Found: $system_file"
+        else
+            warn "  ✗ Not found: $system_file"
+        fi
+        
+        # Check service status
+        warn "Service status:"
+        systemctl status ztpbootstrap-webui.service --no-pager -l | head -20 | sed 's/^/    /' | while IFS= read -r line; do
+            warn "$line"
+        done || true
+        
+        # Check if container exists
+        if podman ps -a --filter name=ztpbootstrap-webui --format "{{.Names}}" | grep -q ztpbootstrap-webui; then
+            warn "Container exists (may be stopped):"
+            podman ps -a --filter name=ztpbootstrap-webui | sed 's/^/    /' | while IFS= read -r line; do
+                warn "$line"
+            done
+            warn "Container logs (last 30 lines):"
+            podman logs ztpbootstrap-webui --tail 30 2>&1 | sed 's/^/    /' | while IFS= read -r line; do
+                warn "$line"
+            done || true
+        else
+            warn "  ✗ Container does not exist"
+        fi
+        
+        # Check journal logs
+        warn "Systemd journal (last 20 lines):"
+        journalctl -u ztpbootstrap-webui.service -n 20 --no-pager 2>&1 | sed 's/^/    /' | while IFS= read -r line; do
+            warn "$line"
+        done || true
+        
+        # Check if required files exist
+        warn "Required files:"
+        if [[ -f "/opt/containerdata/ztpbootstrap/webui/start-webui.sh" ]]; then
+            warn "  ✓ /opt/containerdata/ztpbootstrap/webui/start-webui.sh exists"
+            if [[ -x "/opt/containerdata/ztpbootstrap/webui/start-webui.sh" ]]; then
+                warn "  ✓ start-webui.sh is executable"
+            else
+                warn "  ✗ start-webui.sh is NOT executable"
+            fi
+        else
+            warn "  ✗ /opt/containerdata/ztpbootstrap/webui/start-webui.sh NOT FOUND"
+        fi
+        if [[ -f "/opt/containerdata/ztpbootstrap/webui/app.py" ]]; then
+            warn "  ✓ /opt/containerdata/ztpbootstrap/webui/app.py exists"
+        else
+            warn "  ✗ /opt/containerdata/ztpbootstrap/webui/app.py NOT FOUND"
+        fi
+        
+        warn "=== End Diagnostics ==="
+    }
+    
     # Start webui container if it exists
     # Check both unit-files and if the service is available
     if systemctl list-unit-files | grep -q ztpbootstrap-webui.service || systemctl list-units --all | grep -q ztpbootstrap-webui.service; then
         log "Starting webui container..."
-        if systemctl start ztpbootstrap-webui; then
-            log "Webui container started successfully"
+        if systemctl start ztpbootstrap-webui.service 2>&1; then
+            # Wait a moment for container to start
+            sleep 3
+            
+            # Verify service is actually running
+            if systemctl is-active --quiet ztpbootstrap-webui.service; then
+                # Verify container is actually running
+                if podman ps --filter name=ztpbootstrap-webui --format "{{.Names}}" | grep -q ztpbootstrap-webui; then
+                    log "✓ Webui container started successfully and is running"
+                else
+                    warn "⚠️  Service reports active but container is not running"
+                    diagnose_webui_failure
+                fi
+            else
+                warn "⚠️  Service start command succeeded but service is not active"
+                diagnose_webui_failure
+                
+                # Try once more after showing diagnostics
+                log "Retrying webui container start..."
+                sleep 2
+                if systemctl start ztpbootstrap-webui.service 2>&1; then
+                    sleep 3
+                    if systemctl is-active --quiet ztpbootstrap-webui.service && podman ps --filter name=ztpbootstrap-webui --format "{{.Names}}" | grep -q ztpbootstrap-webui; then
+                        log "✓ Webui container started successfully on retry"
+                    else
+                        warn "⚠️  Webui container still not running after retry"
+                        diagnose_webui_failure
+                    fi
+                fi
+            fi
         else
-            warn "Failed to start webui container. Check logs with: journalctl -u ztpbootstrap-webui -f"
+            warn "Failed to start webui container"
+            diagnose_webui_failure
         fi
     elif [[ -f "${systemd_dir}/ztpbootstrap-webui.container" ]]; then
         # Container file exists but service not generated - try manual start as fallback
@@ -796,14 +809,30 @@ EOFWEBUI
             -v /opt/containerdata/ztpbootstrap/webui:/app:ro \
             -v /opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:rw \
             -v /opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw \
+            -v /run/systemd/journal:/run/systemd/journal:ro \
+            -v /run/log/journal:/run/log/journal:ro \
+            -v /run/podman:/run/podman:ro \
+            -v /usr/bin/podman:/usr/bin/podman:ro \
+            -v /usr/bin/journalctl:/usr/bin/journalctl:ro \
+            -v /lib64/libsystemd.so.0:/lib64/libsystemd.so.0:ro \
+            -v /lib64/libsystemd.so.0.41.0:/lib64/libsystemd.so.0.41.0:ro \
+            -v /usr/lib64/systemd:/usr/lib64/systemd:ro \
             -e TZ=UTC \
             -e ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap \
             -e FLASK_APP=app.py \
-            docker.io/python:alpine \
-            /bin/sh -c "pip install --no-cache-dir flask werkzeug && sleep 2 && python3 /app/app.py" 2>/dev/null; then
-            log "WebUI container started manually"
+            -e FLASK_ENV=production \
+            registry.fedoraproject.org/fedora:latest \
+            /app/start-webui.sh 2>&1; then
+            sleep 2
+            if podman ps --filter name=ztpbootstrap-webui --format "{{.Names}}" | grep -q ztpbootstrap-webui; then
+                log "✓ WebUI container started manually and is running"
+            else
+                warn "⚠️  Manual start command succeeded but container is not running"
+                diagnose_webui_failure
+            fi
         else
-            warn "Failed to start WebUI container manually. It may already be running."
+            warn "Failed to start WebUI container manually"
+            diagnose_webui_failure
         fi
     else
         log "WebUI container file not found (this is OK if webui directory doesn't exist)"

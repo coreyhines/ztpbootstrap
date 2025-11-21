@@ -1190,7 +1190,7 @@ def get_status():
         
         # Method 1: Try systemctl (works if container has systemd access)
         try:
-            # Check pod-based service first
+            # Check pod-based service
             result = subprocess.run(
                 ['systemctl', 'is-active', '--quiet', 'ztpbootstrap-pod.service'],
                 capture_output=True,
@@ -1199,16 +1199,6 @@ def get_status():
             )
             if result.returncode == 0:
                 container_running = True
-            else:
-                # Fallback to legacy service name
-                result = subprocess.run(
-                    ['systemctl', 'is-active', '--quiet', 'ztpbootstrap.service'],
-                    capture_output=True,
-                    text=True,
-                    timeout=2
-                )
-                if result.returncode == 0:
-                    container_running = True
         except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as e:
             # systemctl not available or failed - this is expected in containers
             # We'll use other methods below
@@ -1586,36 +1576,29 @@ def get_logs():
                 
                 return False
             
-            # Detect deployment mode by checking which services exist
-            # If systemctl is not available, assume pod-based deployment (most common)
+            # Check which services exist (pod-based deployment)
             pod_service_exists = check_service_exists('ztpbootstrap-pod.service')
-            legacy_service_exists = check_service_exists('ztpbootstrap.service')
             nginx_service_exists = check_service_exists('ztpbootstrap-nginx.service')
             webui_service_exists = check_service_exists('ztpbootstrap-webui.service')
             
-            # Build container mappings based on detected deployment mode
+            # Build container mappings (pod-based setup)
             containers = {}
-            if pod_service_exists or (not legacy_service_exists and not pod_service_exists):
-                # Pod-based setup (new default) or assume pod-based if we can't detect
-                # Pod service itself doesn't have a direct container, but we can get its logs via journalctl
-                if nginx_service_exists:
-                    containers['ztpbootstrap-nginx.service'] = 'ztpbootstrap-nginx'
-                else:
-                    # Try anyway - container might exist even if service detection failed
-                    containers['ztpbootstrap-nginx.service'] = 'ztpbootstrap-nginx'
-                if webui_service_exists:
-                    containers['ztpbootstrap-webui.service'] = 'ztpbootstrap-webui'
-                else:
-                    # Try anyway - container might exist even if service detection failed
-                    containers['ztpbootstrap-webui.service'] = 'ztpbootstrap-webui'
-                # Optionally include pod service for pod lifecycle logs
-                if pod_service_exists:
-                    containers['ztpbootstrap-pod.service'] = None  # Pod itself, no direct container
-            elif legacy_service_exists:
-                # Legacy single-container setup
-                containers['ztpbootstrap.service'] = 'ztpbootstrap'
+            # Pod service itself doesn't have a direct container, but we can get its logs via journalctl
+            if nginx_service_exists:
+                containers['ztpbootstrap-nginx.service'] = 'ztpbootstrap-nginx'
+            else:
+                # Try anyway - container might exist even if service detection failed
+                containers['ztpbootstrap-nginx.service'] = 'ztpbootstrap-nginx'
+            if webui_service_exists:
+                containers['ztpbootstrap-webui.service'] = 'ztpbootstrap-webui'
+            else:
+                # Try anyway - container might exist even if service detection failed
+                containers['ztpbootstrap-webui.service'] = 'ztpbootstrap-webui'
+            # Optionally include pod service for pod lifecycle logs
+            if pod_service_exists:
+                containers['ztpbootstrap-pod.service'] = None  # Pod itself, no direct container
             
-            # If no containers detected, use default mappings (pod-based)
+            # If no containers detected, use default mappings
             if not containers:
                 containers = {
                     'ztpbootstrap-pod.service': None,
@@ -1758,7 +1741,7 @@ def get_logs():
             
             # Collect diagnostic information
             diagnostics = []
-            diagnostics.append(f"Deployment mode: {'Pod-based' if pod_service_exists else 'Legacy' if legacy_service_exists else 'Unknown (assuming pod-based)'}")
+            diagnostics.append(f"Deployment mode: Pod-based")
             diagnostics.append(f"Services detected: {', '.join(containers.keys())}")
             diagnostics.append(f"Podman binary exists: {podman_binary_path.exists() if 'podman_binary_path' in locals() else 'Unknown'}")
             diagnostics.append(f"Podman executable: {podman_available}")
@@ -1932,12 +1915,10 @@ def get_logs():
                     logs += f'{ssh_instruction}\n\n'
                     logs += 'Once connected, run one of these commands:\n\n'
                     
-                    # Build service-specific commands based on detected deployment
+                    # Build service-specific commands
                     logs += 'Using journalctl (recommended):\n'
                     if pod_service_exists:
                         logs += '  sudo journalctl -u ztpbootstrap-pod.service -n 50 -f\n'
-                    if legacy_service_exists:
-                        logs += '  sudo journalctl -u ztpbootstrap.service -n 50 -f\n'
                     if nginx_service_exists:
                         logs += '  sudo journalctl -u ztpbootstrap-nginx.service -n 50 -f\n'
                     if webui_service_exists:
@@ -1949,8 +1930,6 @@ def get_logs():
                         logs += '  sudo podman logs ztpbootstrap-nginx --tail 50 -f\n'
                     if webui_service_exists:
                         logs += '  sudo podman logs ztpbootstrap-webui --tail 50 -f\n'
-                    if legacy_service_exists:
-                        logs += '  sudo podman logs ztpbootstrap --tail 50 -f\n'
                     logs += '\n'
                     
                     logs += 'Note: The -f flag follows the logs in real-time. Remove it to see\n'
