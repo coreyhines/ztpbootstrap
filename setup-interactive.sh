@@ -2739,8 +2739,87 @@ PYTHON_VERIFY
                                         log "Installing buildah..."
                                         if sudo dnf install -y -q buildah 2>&1; then
                                             log "✓ buildah installed. Retrying multi-arch build..."
-                                            # Retry the buildah path (recursive call would be complex, so we'll just continue with single-arch for now)
-                                            warn "Please re-run setup to build multi-arch images with buildah."
+                                            # Now that buildah is installed, re-check and use it
+                                            if command -v buildah >/dev/null 2>&1; then
+                                                # Re-execute the multi-arch build logic (jump back to buildah section)
+                                                log "Building and pushing multi-arch image to $remote_tag..."
+                                                log "This will build for both amd64 (x86_64) and arm64 (aarch64) architectures..."
+                                                
+                                                local amd64_built=false
+                                                local arm64_built=false
+                                                local amd64_tag="${remote_tag}-amd64"
+                                                local arm64_tag="${remote_tag}-arm64"
+                                                
+                                                # Build for amd64 (x86_64) - needed for production servers
+                                                log "Building for amd64 (x86_64)..."
+                                                if buildah build --arch amd64 --tag "$amd64_tag" -f "$containerfile" "$repo_dir" 2>&1; then
+                                                    log "✓ Built amd64 image"
+                                                    if podman push "$amd64_tag" 2>&1; then
+                                                        log "✓ Pushed amd64 image to registry"
+                                                        amd64_built=true
+                                                    else
+                                                        warn "Failed to push amd64 image"
+                                                    fi
+                                                else
+                                                    warn "Failed to build amd64 image (may need qemu-user-static for cross-platform builds)"
+                                                fi
+                                                
+                                                # Build for arm64 (aarch64) - needed for ARM-based dev machines
+                                                log "Building for arm64 (aarch64)..."
+                                                if buildah build --arch arm64 --tag "$arm64_tag" -f "$containerfile" "$repo_dir" 2>&1; then
+                                                    log "✓ Built arm64 image"
+                                                    if podman push "$arm64_tag" 2>&1; then
+                                                        log "✓ Pushed arm64 image to registry"
+                                                        arm64_built=true
+                                                    else
+                                                        warn "Failed to push arm64 image"
+                                                    fi
+                                                else
+                                                    warn "Failed to build arm64 image"
+                                                fi
+                                                
+                                                # Create and push multi-arch manifest if at least one arch succeeded
+                                                if [[ "$amd64_built" == "true" ]] || [[ "$arm64_built" == "true" ]]; then
+                                                    log "Creating multi-arch manifest..."
+                                                    podman manifest rm "$remote_tag" 2>/dev/null || true
+                                                    
+                                                    if podman manifest create "$remote_tag" 2>/dev/null; then
+                                                        if [[ "$amd64_built" == "true" ]]; then
+                                                            if podman manifest add "$remote_tag" "docker://$amd64_tag" 2>&1; then
+                                                                log "✓ Added amd64 image to manifest"
+                                                            fi
+                                                        fi
+                                                        if [[ "$arm64_built" == "true" ]]; then
+                                                            if podman manifest add "$remote_tag" "docker://$arm64_tag" 2>&1; then
+                                                                log "✓ Added arm64 image to manifest"
+                                                            fi
+                                                        fi
+                                                        
+                                                        if podman manifest push --all "$remote_tag" "docker://$remote_tag" 2>&1; then
+                                                            log "✓ Successfully created and pushed multi-arch manifest"
+                                                            WEBUI_IMAGE_REGISTRY="$WEBUI_REGISTRY"
+                                                            WEBUI_IMAGE_TAG="$remote_tag"
+                                                        else
+                                                            warn "Failed to push multi-arch manifest. Will use local image only."
+                                                            WEBUI_IMAGE_REGISTRY=""
+                                                            WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
+                                                        fi
+                                                    else
+                                                        warn "Failed to create manifest. Will use local image only."
+                                                        WEBUI_IMAGE_REGISTRY=""
+                                                        WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
+                                                    fi
+                                                else
+                                                    warn "Failed to build images for any architecture. Will use local image only."
+                                                    WEBUI_IMAGE_REGISTRY=""
+                                                    WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
+                                                fi
+                                                
+                                                # Skip single-arch build since we just did multi-arch
+                                                continue
+                                            else
+                                                warn "buildah installed but not found in PATH. Continuing with single-arch build."
+                                            fi
                                         else
                                             warn "Failed to install buildah. Continuing with single-arch build."
                                         fi
