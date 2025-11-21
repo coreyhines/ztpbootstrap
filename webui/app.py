@@ -1251,12 +1251,32 @@ def parse_nginx_access_log():
     current_time = time.time()
     
     # Track which log lines we've already processed
+    # Only track processed lines for the last 24 hours to allow re-processing if filtering logic changes
     processed_lines_file = CONFIG_DIR / 'processed_log_lines.txt'
     processed_lines = set()
     if processed_lines_file.exists():
         try:
             with open(processed_lines_file, 'r') as f:
-                processed_lines = set(line.strip() for line in f if line.strip())
+                all_processed = [line.strip() for line in f if line.strip()]
+                # Only keep lines from the last 24 hours (approximate - check timestamp in log line)
+                cutoff_time = current_time - 86400  # 24 hours
+                for line in all_processed:
+                    # Try to extract timestamp from log line to determine if it's recent
+                    # Format: IP - - [timestamp] ...
+                    match = re.match(r'^[^-]+ - - \[([^\]]+)\]', line)
+                    if match:
+                        try:
+                            timestamp_str = match.group(1)
+                            dt = datetime.strptime(timestamp_str.split()[0], '%d/%b/%Y:%H:%M:%S')
+                            line_timestamp = dt.timestamp()
+                            if line_timestamp > cutoff_time:
+                                processed_lines.add(line)
+                        except:
+                            # If we can't parse timestamp, keep the line (conservative approach)
+                            processed_lines.add(line)
+                    else:
+                        # If it doesn't match log format, it might be a MARK line, keep it
+                        processed_lines.add(line)
         except:
             pass
     
