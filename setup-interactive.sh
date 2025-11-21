@@ -1896,6 +1896,28 @@ create_pod_files_from_config() {
 start_services_after_install() {
     log "Starting new services..."
     
+    # Enable and start podman.socket if not already running
+    # This is required for the webui container to access podman commands
+    if systemctl is-enabled podman.socket >/dev/null 2>&1; then
+        if ! systemctl is-active podman.socket >/dev/null 2>&1; then
+            log "Starting podman.socket..."
+            if systemctl start podman.socket 2>&1; then
+                log "✓ podman.socket started"
+            else
+                warn "Failed to start podman.socket (webui container may not be able to access podman commands)"
+            fi
+        else
+            log "✓ podman.socket is already running"
+        fi
+    else
+        log "Enabling and starting podman.socket..."
+        if systemctl enable --now podman.socket 2>&1; then
+            log "✓ podman.socket enabled and started"
+        else
+            warn "Failed to enable/start podman.socket (webui container may not be able to access podman commands)"
+        fi
+    fi
+    
     # Reload systemd first
     if [[ $EUID -eq 0 ]]; then
         systemctl daemon-reload
