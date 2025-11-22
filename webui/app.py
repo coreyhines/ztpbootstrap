@@ -290,6 +290,7 @@ def reload_auth_config():
     # restarted for it to take effect.
 
 
+
 # Configure Flask session
 app.secret_key = AUTH_CONFIG["session_secret"]
 app.config["SESSION_COOKIE_HTTPONLY"] = True
