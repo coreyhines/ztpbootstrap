@@ -1724,14 +1724,20 @@
                 },
 
                 getDeviceIcon(userAgent, bootstrapDownloaded) {
-                    if (!userAgent) return this.getDefaultIcon();
+                    // Handle empty or missing user agent
+                    if (!userAgent || userAgent.trim() === '' || userAgent === '-') {
+                        // If bootstrap was downloaded and user agent is empty, likely an Arista switch
+                        if (bootstrapDownloaded) {
+                            return this.getAristaSwitchIcon();
+                        }
+                        return this.getDefaultIcon();
+                    }
 
                     const ua = userAgent.toLowerCase();
 
                     // Arista devices (switches/routers)
                     // Detection: User agent contains Arista/EOS/ZTP keywords, OR
-                    // Device downloaded bootstrap.py AND user agent is specifically python-requests
-                    // (not wget, curl, or other tools)
+                    // Device downloaded bootstrap.py AND (user agent is python-requests OR empty/minimal)
                     const isLikelyArista = ua.includes('arista') || ua.includes('eos') || ua.includes('ztp') ||
                                           (bootstrapDownloaded && (ua.includes('python-requests') ||
                                            (ua.includes('python') && ua.includes('requests'))));
