@@ -170,8 +170,12 @@
                         <h2 class="text-base font-semibold text-gray-900 mb-1">Device Connections</h2>
                         <p class="text-xs text-gray-500">Track device connections and bootstrap downloads</p>
                     </div>
-                    <button @click="loadDeviceConnections()" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium transition-colors">
-                        Refresh
+                    <button @click="loadDeviceConnections()"
+                            type="button"
+                            :disabled="loadingStates.deviceConnections"
+                            class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                        <span x-show="!loadingStates.deviceConnections">Refresh</span>
+                        <span x-show="loadingStates.deviceConnections">Loading...</span>
                     </button>
                 </div>
 
@@ -1570,15 +1574,22 @@
                             const newNginxLogs = nginxMatch ? nginxMatch[1].trim() : 'No nginx logs available';
                             const newWebUILogs = webuiMatch ? webuiMatch[1].trim() : 'No webui logs available';
 
-                            // Check for new entries
-                            const nginxHash = this.simpleHash(newNginxLogs.substring(0, 500));
-                            const webuiHash = this.simpleHash(newWebUILogs.substring(0, 500));
+                            // Check for new entries - only trigger if content actually changed
+                            // Use a more stable hash that ignores filtered API requests
+                            const nginxHash = this.simpleHash(newNginxLogs);
+                            const webuiHash = this.simpleHash(newWebUILogs);
 
-                            if (this.lastLogNginxHash && nginxHash !== this.lastLogNginxHash && newNginxLogs !== 'No nginx logs available') {
+                            // Only show "NEW" if hash changed AND we have previous hash (not first load)
+                            // AND the content is actually different (not just filtered noise)
+                            if (this.lastLogNginxHash && nginxHash !== this.lastLogNginxHash &&
+                                newNginxLogs !== 'No nginx logs available' &&
+                                newNginxLogs !== this.logsNginx) {
                                 this.logNewEntriesNginx = true;
                                 setTimeout(() => { this.logNewEntriesNginx = false; }, 3000);
                             }
-                            if (this.lastLogWebUIHash && webuiHash !== this.lastLogWebUIHash && newWebUILogs !== 'No webui logs available') {
+                            if (this.lastLogWebUIHash && webuiHash !== this.lastLogWebUIHash &&
+                                newWebUILogs !== 'No webui logs available' &&
+                                newWebUILogs !== this.logsWebUI) {
                                 this.logNewEntriesWebUI = true;
                                 setTimeout(() => { this.logNewEntriesWebUI = false; }, 3000);
                             }
@@ -1603,9 +1614,14 @@
                             // Ensure logs is a string and update directly for reactivity
                             const newLogs = typeof data.logs === 'string' ? data.logs : (data.logs || 'No logs available');
 
-                            // Check for new entries
-                            const logHash = this.simpleHash(newLogs.substring(0, 500));
-                            if (this.lastLogHash && logHash !== this.lastLogHash && newLogs !== 'No logs available') {
+                            // Check for new entries - only trigger if content actually changed
+                            // Use full log content for hash to be more stable
+                            const logHash = this.simpleHash(newLogs);
+                            // Only show "NEW" if hash changed AND we have previous hash (not first load)
+                            // AND the content is actually different (not just filtered noise)
+                            if (this.lastLogHash && logHash !== this.lastLogHash &&
+                                newLogs !== 'No logs available' &&
+                                newLogs !== this.logs) {
                                 this.logNewEntriesIndicator = true;
                                 setTimeout(() => { this.logNewEntriesIndicator = false; }, 3000);
                             }
@@ -1664,9 +1680,15 @@
                 },
 
                 async loadDeviceConnections() {
+                    console.log('loadDeviceConnections called');
                     this.loadingStates.deviceConnections = true;
                     try {
-                        const response = await fetch('/api/device-connections');
+                        const response = await fetch('/api/device-connections', {
+                            credentials: 'same-origin',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            }
+                        });
                         if (!response.ok) {
                             console.error('Device connections API returned:', response.status, response.statusText);
                             this.devices = [];
