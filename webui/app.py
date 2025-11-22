@@ -1252,6 +1252,17 @@ def upload_bootstrap_script():
 
         # Try to save with proper error handling
         try:
+            # Get file size from the file object before saving (avoids path injection)
+            # Flask file objects have content_length, or we can read the stream
+            file_size = None
+            if hasattr(file, 'content_length') and file.content_length:
+                file_size = file.content_length
+            else:
+                # Fallback: read stream to get size
+                file.seek(0, 2)  # Seek to end
+                file_size = file.tell()
+                file.seek(0)  # Reset to beginning for save
+
             file.save(str(file_path))
             # Set permissions - try with subprocess if direct chmod fails
             try:
@@ -1259,15 +1270,6 @@ def upload_bootstrap_script():
             except PermissionError:
                 # Try using chmod command
                 subprocess.run(['chmod', '644', str(file_path)], check=False)
-
-            # Validate path is still safe before accessing file metadata
-            # This prevents path injection even though safe_path_join already validated
-            if not validate_path_in_directory(file_path, CONFIG_DIR):
-                return jsonify({"error": "Invalid file path"}), 400
-
-            # Get file size using os.path.getsize on validated path
-            # This is safe because we've validated the path is within CONFIG_DIR
-            file_size = os.path.getsize(file_path)
 
             # Log security event
             client_ip = request.remote_addr or 'unknown'
