@@ -151,7 +151,7 @@ security_logger.addHandler(console_handler)
 def log_security_event(event_type, outcome, ip_address=None, details=None):
     """
     Log a security-relevant event
-    
+
     Args:
         event_type: Type of event (e.g., 'login', 'file_upload', 'csrf_failure')
         outcome: 'success' or 'failure'
@@ -160,9 +160,9 @@ def log_security_event(event_type, outcome, ip_address=None, details=None):
     """
     ip_str = f"IP={ip_address}" if ip_address else "IP=unknown"
     details_str = f" | {details}" if details else ""
-    
+
     log_message = f"{ip_str} | event={event_type} | outcome={outcome}{details_str}"
-    
+
     if outcome == 'failure':
         security_logger.warning(log_message)
     else:
@@ -320,7 +320,7 @@ def require_auth(f):
             if not csrf_token or not validate_csrf_token(csrf_token):
                 # Log CSRF failure
                 client_ip = request.remote_addr or 'unknown'
-                log_security_event('csrf_validation', 'failure', client_ip, 
+                log_security_event('csrf_validation', 'failure', client_ip,
                                  f'endpoint={request.endpoint} method={request.method}')
                 return jsonify(
                     {"error": "Invalid or missing CSRF token", "code": "CSRF_ERROR"}
@@ -361,7 +361,7 @@ def auth_login():
         if is_rate_limited(client_ip):
             # Log security event
             log_security_event('login', 'failure', client_ip, 'reason=rate_limited')
-            
+
             # Calculate remaining lockout time
             if client_ip in login_attempts:
                 remaining_time = int(
@@ -431,7 +431,7 @@ def auth_login():
         if password_valid:
             # Successful login
             record_login_attempt(client_ip, True)
-            
+
             # Log security event
             log_security_event('login', 'success', client_ip, 'user=admin')
 
@@ -454,10 +454,10 @@ def auth_login():
         else:
             # Failed login
             record_login_attempt(client_ip, False)
-            
+
             # Log security event
             log_security_event('login', 'failure', client_ip, 'user=admin reason=invalid_password')
-            
+
             return jsonify({
                 'error': 'Invalid password',
                 'code': 'INVALID_PASSWORD'
@@ -1030,10 +1030,10 @@ def rename_bootstrap_script(filename):
             if sanitized_filename in metadata:
                 metadata[new_name] = metadata.pop(sanitized_filename)
                 save_scripts_metadata(metadata)
-            
+
             # Log security event
             client_ip = request.remote_addr or 'unknown'
-            log_security_event('file_rename', 'success', client_ip, 
+            log_security_event('file_rename', 'success', client_ip,
                              f'old_name={sanitized_filename} new_name={new_name}')
 
             return jsonify(
@@ -1047,7 +1047,7 @@ def rename_bootstrap_script(filename):
         except OSError as e:
             # Log failure
             client_ip = request.remote_addr or 'unknown'
-            log_security_event('file_rename', 'failure', client_ip, 
+            log_security_event('file_rename', 'failure', client_ip,
                              f'old_name={sanitized_filename} new_name={new_name} reason=filesystem_error')
             return jsonify({'error': f'Failed to rename file: {str(e)}'}), 500
     except Exception as e:
@@ -1093,14 +1093,14 @@ def delete_bootstrap_script(filename):
         # Delete the file
         try:
             script_path.unlink()
-            
+
             # Log security event
             client_ip = request.remote_addr or 'unknown'
             log_security_event('file_delete', 'success', client_ip, f'filename={filename}')
         except OSError as e:
             # Log failure
             client_ip = request.remote_addr or 'unknown'
-            log_security_event('file_delete', 'failure', client_ip, 
+            log_security_event('file_delete', 'failure', client_ip,
                              f'filename={filename} reason=filesystem_error')
             return jsonify({'error': f'Failed to delete file: {str(e)}'}), 500
 
@@ -1259,21 +1259,30 @@ def upload_bootstrap_script():
             except PermissionError:
                 # Try using chmod command
                 subprocess.run(['chmod', '644', str(file_path)], check=False)
-            
+
+            # Validate path is still safe before accessing file metadata
+            # This prevents path injection even though safe_path_join already validated
+            if not validate_path_in_directory(file_path, CONFIG_DIR):
+                return jsonify({"error": "Invalid file path"}), 400
+
+            # Get file size using os.path.getsize on validated path
+            # This is safe because we've validated the path is within CONFIG_DIR
+            file_size = os.path.getsize(file_path)
+
             # Log security event
             client_ip = request.remote_addr or 'unknown'
-            log_security_event('file_upload', 'success', client_ip, 
-                             f'filename={filename} size={file_path.stat().st_size}')
+            log_security_event('file_upload', 'success', client_ip,
+                             f'filename={filename} size={file_size}')
         except PermissionError as e:
             # Log failure
             client_ip = request.remote_addr or 'unknown'
-            log_security_event('file_upload', 'failure', client_ip, 
+            log_security_event('file_upload', 'failure', client_ip,
                              f'filename={filename} reason=permission_denied')
             return jsonify({'error': f'Permission denied: {str(e)}. Directory may need write permissions.'}), 500
         except OSError as e:
             # Log failure
             client_ip = request.remote_addr or 'unknown'
-            log_security_event('file_upload', 'failure', client_ip, 
+            log_security_event('file_upload', 'failure', client_ip,
                              f'filename={filename} reason=filesystem_error')
             return jsonify({'error': f'File system error: {str(e)}'}), 500
 
