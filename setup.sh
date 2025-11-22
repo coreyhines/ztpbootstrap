@@ -217,11 +217,12 @@ setup_logs_directory() {
     }
     
     # Set permissions for nginx to write logs (nginx runs as UID 101 in alpine image)
-    chmod 777 "${SCRIPT_DIR}/logs" 2>/dev/null || true
+    # Use 775 instead of 777 for better security (group-writable but not world-writable)
+    chmod 775 "${SCRIPT_DIR}/logs" 2>/dev/null || true
     
     # Try to set ownership to nginx user (UID 101) if possible
     if command -v chown >/dev/null 2>&1; then
-        chown 101:101 "${SCRIPT_DIR}/logs" 2>/dev/null || chmod 777 "${SCRIPT_DIR}/logs" 2>/dev/null || true
+        chown 101:101 "${SCRIPT_DIR}/logs" 2>/dev/null || chmod 775 "${SCRIPT_DIR}/logs" 2>/dev/null || true
     fi
     
     # Set SELinux context for logs directory (if SELinux is enabled and not on NFS)
@@ -257,8 +258,10 @@ create_self_signed_cert() {
         -addext "subjectAltName=DNS:$DOMAIN"
     
     # Set proper permissions and SELinux context (if SELinux is enabled and not on NFS)
+    # Certificate file can be world-readable (644)
     chmod 644 "$cert_file" 2>/dev/null || true
-    chmod 644 "$key_file" 2>/dev/null || true
+    # Private key file should be readable only by owner (600) for security
+    chmod 600 "$key_file" 2>/dev/null || true
     if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
         # Set container_file_t context for container access (only if not on NFS)
         if ! is_nfs_mount "$CERT_DIR"; then
@@ -903,10 +906,13 @@ main() {
             fi
             log "Set ownership and permissions on script directory for webui uploads (not NFS)"
         else
-            # For NFS, ownership changes may not work, so use 777
+            # For NFS, ownership changes may not work, so use 777/666
+            # SECURITY NOTE: These permissive permissions are only used for NFS mounts
+            # where standard Unix permissions may not work correctly. For local
+            # filesystems, the more secure 775/664 permissions above are used.
             chmod 777 "$SCRIPT_DIR" 2>/dev/null || sudo chmod 777 "$SCRIPT_DIR" 2>/dev/null || true
             chmod 666 "$SCRIPT_DIR"/*.py 2>/dev/null || sudo chmod 666 "$SCRIPT_DIR"/*.py 2>/dev/null || true
-            log "Set permissions on script directory for webui uploads (NFS - using 777, SELinux context not applicable)"
+            log "Set permissions on script directory for webui uploads (NFS - using 777/666 due to NFS limitations, SELinux context not applicable)"
         fi
     fi
     
