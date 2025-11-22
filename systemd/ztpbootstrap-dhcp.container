@@ -1,0 +1,22 @@
+[Unit]
+Description=ZTP Bootstrap DHCP Server (Kea)
+After=ztpbootstrap-pod.service
+Requires=ztpbootstrap-pod.service
+
+[Container]
+Image=docker.io/iscorg/kea:latest
+ContainerName=ztpbootstrap-dhcp
+Pod=ztpbootstrap.pod
+Exec=/usr/sbin/kea-dhcp4 -c /etc/kea/kea-dhcp4.conf
+Exec=/usr/sbin/kea-dhcp6 -c /etc/kea/kea-dhcp6.conf
+Exec=/usr/sbin/kea-ctrl-agent -c /etc/kea/kea-ctrl-agent.conf
+Volume=/opt/containerdata/ztpbootstrap/dhcp:/etc/kea:ro
+Volume=/opt/containerdata/ztpbootstrap/dhcp/leases:/var/lib/kea:rw
+Volume=/opt/containerdata/ztpbootstrap/dhcp/logs:/var/log/kea:rw
+Environment=TZ=UTC
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=ztpbootstrap-pod.service
