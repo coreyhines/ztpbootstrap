@@ -41,12 +41,11 @@ except ImportError:
 
     def validate_path_in_directory(file_path, base_directory):
         try:
-            # lgtm[py/path-injection]
-            # CodeQL: file_path is validated before calling this function via safe_path_join()
-            # The path is guaranteed to be within base_directory by the caller
             resolved_path = file_path.resolve()
             resolved_base = base_directory.resolve()
-            return str(resolved_path).startswith(str(resolved_base))
+            # Use os.path.commonpath to ensure containment within base_directory
+            common = os.path.commonpath([str(resolved_path), str(resolved_base)])
+            return common == str(resolved_base)
         except (OSError, ValueError):
             return False
 
@@ -88,12 +87,18 @@ def safe_path_join(base_dir, filename):
     if '/' in filename or '\\' in filename or '..' in filename:
         return None
 
-    # Construct path - CodeQL may flag this, but filename is validated above
+    # Construct absolute path using resolve to avoid symlink/path issues
     # nosemgrep: python.lang.security.path-injection.path-injection
-    result_path = base_dir / filename
+    result_path = (base_dir / filename)
+    try:
+        resolved_result = result_path.resolve()
+        resolved_base = base_dir.resolve()
+    except (OSError, ValueError):
+        return None
 
     # Validate the path is within base directory (prevents path traversal)
-    if not validate_path_in_directory(result_path, base_dir):
+    common = os.path.commonpath([str(resolved_result), str(resolved_base)])
+    if common != str(resolved_base):
         return None
 
     return result_path
