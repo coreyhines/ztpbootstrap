@@ -4,6 +4,8 @@
 
 This plan implements Kea DHCP server integration into the ZTP Bootstrap Service, providing API-driven DHCP management with OUI filtering, reservations, dynamic DNS, PXE support, log viewing, and relay/proxy support. All configuration is done via Web UI with zero setup prompts.
 
+**Host Networking Mode Support**: The DHCP server fully supports both host networking mode (`host_network: true`) and macvlan networking mode. When using host networking mode, Kea binds directly to the host's network interfaces, making it suitable for VM testing and simple deployments. The system automatically detects the networking mode and configures Kea accordingly.
+
 ## Phase 1: Configuration Schema and Core Infrastructure
 
 ### 1.1 Extend config.yaml.template
@@ -104,6 +106,8 @@ Create module to:
 - `generate_dhcp_options(options_config) -> list`: DHCP options
 - `generate_relay_subnets(relay_config) -> list`: Generate subnet configs per relay agent
 - `configure_giaddr_matching(relay_config) -> dict`: Configure giaddr-based routing
+- `detect_networking_mode(config_yaml) -> str`: Detect if host networking or macvlan (returns "host" or "macvlan")
+- `get_interfaces_for_kea(networking_mode, subnet) -> list`: Get list of interfaces Kea should bind to
 
 ### 1.3 Create Gateway Detection Utility
 
@@ -114,6 +118,8 @@ Functions for:
 - `detect_subnet(ip_address) -> str`: Infer subnet from IP address
 - `validate_dhcp_range(subnet, range_start, range_end, gateway, pod_ip) -> tuple`: Validate range and return conflicts
 - `calculate_default_range(subnet, gateway, pod_ip) -> tuple`: Calculate default .50-.250 range excluding conflicts
+- `check_dhcp_port_conflicts() -> dict`: Check if ports 67/68 (IPv4) or 547/548 (IPv6) are already in use
+- `detect_host_interfaces(subnet=None) -> list`: Detect available network interfaces on host (for host networking mode)
 
 ## Phase 2: Container Deployment
 
@@ -162,6 +168,8 @@ Functions for on-the-fly container creation:
 - Create quadlet file in `/etc/containers/systemd/ztpbootstrap/`
 - Run `systemctl daemon-reload` after creating files
 - Use `podman exec` to check Kea Control Agent health
+- **Host Networking Mode**: When `host_network: true` in config, the DHCP container inherits host networking from the pod. Kea will bind to host interfaces directly. No special container configuration needed - the pod's `Network=host` setting applies.
+- **Port Conflict Detection**: Before enabling DHCP, check if ports 67/68 (IPv4) or 547/548 (IPv6) are already in use. Warn user if conflicts detected.
 
 ### 2.3 Update setup.sh for Optional DHCP Container
 
@@ -231,6 +239,14 @@ Form fields:
 - Require user confirmation before applying
 - Highlight auto-detected vs manually entered values
 
+**Host Networking Mode Warning**:
+- When `host_network: true` is detected in config, show an informational banner/warning:
+  - "Host networking mode detected. DHCP server will bind directly to host interfaces."
+  - "Ensure no other DHCP server is running on ports 67/68 (IPv4) or 547/548 (IPv6)."
+  - "Port conflict check will be performed before enabling DHCP."
+- Display networking mode status (host/macvlan) in DHCP status section
+- Show detected interfaces when in host networking mode
+
 ### 3.3 Create DHCP JavaScript Module
 
 **File**: `webui/templates/index.html` (script section)
@@ -280,12 +296,18 @@ def auto_detect_dhcp_config():
 @app.route('/api/dhcp/status', methods=['GET'])
 @require_auth
 def get_dhcp_status():
-    """Get DHCP service status (enabled/disabled, container status)"""
+    """Get DHCP service status (enabled/disabled, container status, networking mode)"""
+    # Include networking_mode: "host" or "macvlan"
+    # Include port conflict status
+    # Include detected interfaces (if host networking mode)
 
 @app.route('/api/dhcp/enable', methods=['POST'])
 @require_auth
 def enable_dhcp():
     """Enable DHCP (creates container if needed)"""
+    # Check for port conflicts before enabling
+    # Warn if host networking mode and ports are in use
+    # Return networking mode info in response
 
 @app.route('/api/dhcp/disable', methods=['POST'])
 @require_auth
@@ -620,6 +642,46 @@ def delete_pxe_file(filename):
 **Container**:
 - Kea Docker image: `docker.io/iscorg/kea:latest`
 
+## Host Networking Mode Support
+
+### Overview
+The DHCP server fully supports host networking mode (`host_network: true`), which is commonly used for VM testing and simple deployments. When host networking mode is enabled, the DHCP container inherits the host's network stack, allowing Kea to bind directly to host interfaces.
+
+### Key Considerations
+
+1. **Port Conflicts**:
+   - In host networking mode, Kea binds to ports 67/68 (IPv4) and 547/548 (IPv6) on the host
+   - Check for existing DHCP servers before enabling (e.g., systemd-networkd, dnsmasq, ISC DHCP)
+   - Warn user if ports are already in use
+
+2. **Interface Binding**:
+   - Kea must be configured to bind to specific interfaces
+   - In host networking mode, detect available interfaces and configure Kea accordingly
+   - Use `interfaces-config` in Kea config to specify interfaces
+
+3. **Container Configuration**:
+   - No special container configuration needed - inherits from pod's `Network=host` setting
+   - Container runs in the same pod as other services
+   - All containers in pod share host network stack
+
+4. **Detection**:
+   - Read `container.host_network` from config.yaml
+   - Check pod file for `Network=host` setting
+   - Display networking mode in UI status
+
+5. **UI Guidance**:
+   - Show informational banner when host networking mode detected
+   - Display port conflict warnings before enabling
+   - Show detected interfaces in status section
+   - Provide clear messaging about host networking mode implications
+
+### Implementation Details
+
+- **Kea Configuration**: When host networking mode is detected, configure Kea's `interfaces-config` section to bind to detected interfaces
+- **Port Checking**: Use `netstat` or `ss` to check if ports 67/68/547/548 are in use before enabling
+- **Interface Detection**: Use `ip link show` or `/proc/net/dev` to detect available interfaces
+- **Validation**: Warn but don't block - user may intentionally want to replace existing DHCP server
+
 ## Notes
 
 - All configuration changes require Kea config reload (via Control Agent)
@@ -632,3 +694,4 @@ def delete_pxe_file(filename):
 - **Relay Support**: Server can serve multiple subnets via DHCP relay agents (giaddr, option 82)
 - **Relay Logging**: All relay agent information (giaddr, circuit-id, remote-id) is logged and displayed
 - **Zero Setup Prompts**: All DHCP configuration done via Web UI, no setup script prompts
+- **Host Networking Mode**: Fully supported - DHCP server works in both host networking and macvlan modes
