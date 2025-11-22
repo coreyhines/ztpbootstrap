@@ -1796,7 +1796,14 @@ def get_logs():
                                 env=env
                             )
                             if journal_result.returncode == 0 and journal_result.stdout.strip():
-                                container_logs = journal_result.stdout.strip()
+                                # Filter out UI/API log requests to prevent recursive noise
+                                raw_logs = journal_result.stdout.strip()
+                                filtered_log_lines = []
+                                for log_line in raw_logs.split('\n'):
+                                    # Skip lines that contain API log requests (they create recursive noise)
+                                    if '/api/logs' not in log_line and '/api/device-connections' not in log_line:
+                                        filtered_log_lines.append(log_line)
+                                container_logs = '\n'.join(filtered_log_lines) if filtered_log_lines else journal_result.stdout.strip()
                                 method_used = 'journalctl'
                         except Exception as e:
                             logging.exception(f"Exception while retrieving logs via journalctl for {service}")
@@ -1824,7 +1831,14 @@ def get_logs():
                             env=env
                         )
                         if result.returncode == 0 and result.stdout.strip():
-                            container_logs = result.stdout.strip()
+                            # Filter out UI/API log requests to prevent recursive noise
+                            raw_logs = result.stdout.strip()
+                            filtered_log_lines = []
+                            for log_line in raw_logs.split('\n'):
+                                # Skip lines that contain API log requests (they create recursive noise)
+                                if '/api/logs' not in log_line and '/api/device-connections' not in log_line:
+                                    filtered_log_lines.append(log_line)
+                            container_logs = '\n'.join(filtered_log_lines) if filtered_log_lines else result.stdout.strip()
                             method_used = 'podman'
                         elif result.returncode != 0:
                             diagnostics.append(f"podman logs {container_name} returned code {result.returncode}: {result.stderr}")
@@ -1838,15 +1852,25 @@ def get_logs():
                 # Method 2: Try journalctl (works if journal is accessible)
                 if not container_logs and journalctl_available:
                     try:
+                        # Set LD_LIBRARY_PATH for journalctl execution
+                        env = os.environ.copy()
+                        env['LD_LIBRARY_PATH'] = '/lib64:/usr/lib64:/usr/lib64/systemd'
                         journal_result = subprocess.run(
                             ['/usr/bin/journalctl', '-D', '/var/log/journal', '--system', '-u', service, '-n', str(lines // max(len(containers), 1)), '--no-pager', '--no-hostname'],
                             capture_output=True,
                             text=True,
                             timeout=3,
-                                env=env
-                            )
+                            env=env
+                        )
                         if journal_result.returncode == 0 and journal_result.stdout.strip():
-                            container_logs = journal_result.stdout.strip()
+                            # Filter out UI/API log requests to prevent recursive noise
+                            raw_logs = journal_result.stdout.strip()
+                            filtered_log_lines = []
+                            for log_line in raw_logs.split('\n'):
+                                # Skip lines that contain API log requests (they create recursive noise)
+                                if '/api/logs' not in log_line and '/api/device-connections' not in log_line:
+                                    filtered_log_lines.append(log_line)
+                            container_logs = '\n'.join(filtered_log_lines) if filtered_log_lines else journal_result.stdout.strip()
                             method_used = 'journalctl'
                         elif journal_result.returncode != 0:
                             diagnostics.append(f"journalctl -u {service} returned code {journal_result.returncode}: {journal_result.stderr}")
