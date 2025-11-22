@@ -1786,13 +1786,13 @@
                 },
 
                 getAristaSwitchIcon() {
-                    // Official Arista Networks logo from Wikimedia Commons
-                    // Try to load SVG directly, fallback to simple "A" if it fails
-                    return `<img src="https://upload.wikimedia.org/wikipedia/commons/9/99/Arista-networks-logo.svg"
+                    // Use local Arista logo from webui/images directory
+                    // Fallback to Wikimedia Commons if local image fails
+                    return `<img src="/ui/images/arista_logo.png"
                                  alt="Arista Networks"
                                  class="w-6 h-6"
                                  style="object-fit: contain; max-width: 24px; max-height: 24px;"
-                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                 onerror="this.onerror=null; this.src='https://upload.wikimedia.org/wikipedia/commons/9/99/Arista-networks-logo.svg'; this.onerror=function(){this.style.display='none'; this.nextElementSibling.style.display='flex';};">
                          <span class="text-blue-600 font-bold text-sm items-center justify-center" style="display:none;">A</span>`;
                 },
 

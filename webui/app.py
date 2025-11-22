@@ -5,26 +5,27 @@ Lightweight Flask application for configuration and monitoring
 """
 
 import json
+import logging
 import os
 import re
 import secrets
 import subprocess
 import time
-import yaml
-import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, send_from_directory, session
+
+import yaml
+from flask import Flask, jsonify, render_template, request, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 # Import security utilities
 try:
     from security_utils import (
         sanitize_filename,
-        validate_path_in_directory,
         validate_filename_for_api,
+        validate_path_in_directory,
     )
 except ImportError:
     # Fallback if security_utils not available
@@ -63,38 +64,38 @@ def safe_path_join(base_dir, filename):
     """
     Safely join a base directory with a sanitized filename.
     This function ensures the resulting path is within base_dir.
-    
+
     This function prevents path traversal attacks by:
     1. Validating filename contains no path separators
     2. Validating the resulting path is strictly within base_dir
     3. Returning None if any validation fails
-    
+
     Args:
         base_dir: Base directory Path object (trusted, from environment/config)
         filename: Sanitized filename (must be validated via validate_filename_for_api first)
-        
+
     Returns:
         Path object if safe, None otherwise
-        
+
     Note: CodeQL may flag this as path injection, but the filename parameter
     is guaranteed to be sanitized by validate_filename_for_api() before calling this function.
     """
     if not filename or not isinstance(filename, str):
         return None
-    
+
     # Double-check filename is safe (no path components)
     # This is redundant but helps CodeQL understand the validation
     if '/' in filename or '\\' in filename or '..' in filename:
         return None
-    
+
     # Construct path - CodeQL may flag this, but filename is validated above
     # nosemgrep: python.lang.security.path-injection.path-injection
     result_path = base_dir / filename
-    
+
     # Validate the path is within base directory (prevents path traversal)
     if not validate_path_in_directory(result_path, base_dir):
         return None
-    
+
     return result_path
 
 
@@ -130,7 +131,7 @@ def load_auth_config():
         'session_timeout': 3600,  # Default: 1 hour
         'session_secret': None
     }
-    
+
     # Try to load from config.yaml
     if CONFIG_FILE.exists():
         try:
@@ -148,17 +149,17 @@ def load_auth_config():
                         config['session_secret'] = auth_config['session_secret']
         except Exception as e:
             print(f"Warning: Failed to load auth config from {CONFIG_FILE}: {e}")
-    
+
     # Override with environment variable if set
     env_password = os.environ.get('ZTP_ADMIN_PASSWORD')
     if env_password:
         # Hash the plain text password from environment
         config['admin_password_hash'] = generate_password_hash(env_password)
-    
+
     # Generate session secret if not provided
     if not config['session_secret']:
         config['session_secret'] = secrets.token_hex(32)
-    
+
     return config
 
 # Load auth config
@@ -209,7 +210,7 @@ def record_login_attempt(ip, success):
     clean_old_attempts()
     if ip not in login_attempts:
         login_attempts[ip] = {'attempts': 0, 'reset_time': time.time() + 900}
-    
+
     if success:
         # Reset on successful login
         if ip in login_attempts:
@@ -302,7 +303,7 @@ def auth_login():
     try:
         # Get client IP
         client_ip = request.remote_addr or 'unknown'
-        
+
         # Check rate limiting
         if is_rate_limited(client_ip):
             # Calculate remaining lockout time
@@ -322,14 +323,14 @@ def auth_login():
                 'error': 'Too many login attempts. Please try again later.',
                 'code': 'RATE_LIMITED'
             }), 429
-        
+
         # Check if authentication is configured
         if not AUTH_CONFIG['admin_password_hash']:
             return jsonify({
                 'error': 'Authentication is not configured',
                 'code': 'AUTH_NOT_CONFIGURED'
             }), 503
-        
+
         # Get password from request
         data = request.get_json()
         if not data or 'password' not in data:
@@ -338,22 +339,22 @@ def auth_login():
                 'error': 'Password is required',
                 'code': 'MISSING_PASSWORD'
             }), 400
-        
+
         password = data['password']
-        
+
         # Verify password
         # Handle both Werkzeug format and fallback format from setup script
         password_hash = AUTH_CONFIG['admin_password_hash']
         password_valid = False
-        
+
         # Check if this is the fallback format from setup-interactive.sh
         # Format: pbkdf2:sha256:<base64_hash> (no $ separator)
         if password_hash and password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
             # Use fallback format verification
             # lgtm[py/path-injection]
             # CodeQL: password_hash comes from config file (trusted source), not user input
-            import hashlib
             import base64
+            import hashlib
             try:
                 # Extract the base64 hash
                 hash_part = password_hash.split(':', 2)[2]
@@ -370,11 +371,11 @@ def auth_login():
                 password_valid = check_password_hash(password_hash, password)
             except (ValueError, TypeError):
                 password_valid = False
-        
+
         if password_valid:
             # Successful login
             record_login_attempt(client_ip, True)
-            
+
             # Create session
             session['authenticated'] = True
             session['login_time'] = time.time()
@@ -422,28 +423,28 @@ def auth_change_password():
                 'error': 'Current password and new password are required',
                 'code': 'MISSING_PASSWORD'
             }), 400
-        
+
         current_password = data['current_password']
         new_password = data['new_password']
-        
+
         # Validate new password
         if len(new_password) < 8:
             return jsonify({
                 'error': 'New password must be at least 8 characters long',
                 'code': 'PASSWORD_TOO_SHORT'
             }), 400
-        
+
         # Declare global before using it
         global AUTH_CONFIG
-        
+
         # Verify current password
         password_hash = AUTH_CONFIG['admin_password_hash']
         password_valid = False
-        
+
         # Check if this is the fallback format from setup-interactive.sh
         if password_hash and password_hash.startswith('pbkdf2:sha256:') and '$' not in password_hash:
-            import hashlib
             import base64
+            import hashlib
             try:
                 hash_part = password_hash.split(':', 2)[2]
                 stored_hash = base64.b64decode(hash_part)
@@ -457,43 +458,43 @@ def auth_change_password():
                 password_valid = check_password_hash(password_hash, current_password)
             except (ValueError, TypeError, AttributeError):
                 password_valid = False
-        
+
         if not password_valid:
             return jsonify({
                 'error': 'Current password is incorrect',
                 'code': 'INVALID_PASSWORD'
             }), 401
-        
+
         # Generate new password hash
         # Try werkzeug first, fall back to hashlib if not available
         try:
             new_password_hash = generate_password_hash(new_password)
         except (ImportError, NameError):
             # Fallback to hashlib format (same as setup script)
-            import hashlib
             import base64
+            import hashlib
             hash_bytes = hashlib.pbkdf2_hmac('sha256', new_password.encode('utf-8'), b'ztpbootstrap', 100000)
             hash_b64 = base64.b64encode(hash_bytes).decode('utf-8')
             new_password_hash = f'pbkdf2:sha256:{hash_b64}'
-        
+
         # Update config.yaml
         if CONFIG_FILE.exists():
             try:
                 # Read current config
                 with open(CONFIG_FILE, 'r') as f:
                     yaml_config = yaml.safe_load(f) or {}
-                
+
                 # Ensure auth section exists
                 if 'auth' not in yaml_config:
                     yaml_config['auth'] = {}
-                
+
                 # Update password hash (ensure it's a string and properly formatted)
                 # Werkzeug hashes contain special characters ($, :) that need proper handling
                 yaml_config['auth']['admin_password_hash'] = str(new_password_hash).strip()
-                
+
                 # Write back to file using atomic write (write to temp, then rename)
-                import tempfile
                 import shutil
+                import tempfile
                 temp_file = CONFIG_FILE.with_suffix('.yaml.tmp')
                 try:
                     with open(temp_file, 'w') as f:
@@ -505,20 +506,20 @@ def auth_change_password():
                     if temp_file.exists():
                         temp_file.unlink()
                     raise e
-                
+
                 # Reload auth config using the reload function
                 reload_auth_config()
-                
+
                 # Verify the new hash was loaded correctly
                 loaded_hash = AUTH_CONFIG.get('admin_password_hash')
                 expected_hash = str(new_password_hash).strip()
                 test_result = False
-                
+
                 if loaded_hash != expected_hash:
                     # Hash format might differ but still be valid (e.g., werkzeug generates different formats)
                     # Still try to verify the password works with the loaded hash
                     pass
-                
+
                 # Verify the new password works with the loaded hash
                 if loaded_hash:
                     try:
@@ -527,8 +528,8 @@ def auth_change_password():
                     except (ImportError, NameError, AttributeError):
                         # Fallback format verification
                         if loaded_hash.startswith('pbkdf2:sha256:') and '$' not in loaded_hash:
-                            import hashlib
                             import base64
+                            import hashlib
                             try:
                                 hash_part = loaded_hash.split(':', 2)[2]
                                 stored_hash = base64.b64decode(hash_part)
@@ -536,10 +537,10 @@ def auth_change_password():
                                 test_result = (stored_hash == computed_hash)
                             except Exception:
                                 test_result = False
-                
+
                 if not test_result:
                     print(f"ERROR: New password hash verification failed after reload!", flush=True)
-                
+
                 return jsonify({'success': True})
             except Exception as e:
                 # Log detailed error for debugging
@@ -573,6 +574,17 @@ def auth_change_password():
 def index():
     """Main dashboard page"""
     return render_template('index.html')
+
+@app.route('/images/<path:filename>')
+def serve_image(filename):
+    """Serve images from webui/images directory"""
+    images_dir = Path(__file__).parent / 'images'
+    if not images_dir.exists():
+        return "Images directory not found", 404
+    try:
+        return send_from_directory(str(images_dir), filename)
+    except FileNotFoundError:
+        return "Image not found", 404
 
 @app.route('/api/config')
 @require_auth
@@ -621,17 +633,17 @@ def cleanup_old_backups():
     try:
         script_dir = CONFIG_DIR
         backup_files = []
-        
+
         # Find all backup files
         for file in script_dir.glob('bootstrap_backup_*.py'):
             try:
                 backup_files.append((file.stat().st_mtime, file))
             except OSError:
                 continue
-        
+
         # Sort by modification time (newest first)
         backup_files.sort(key=lambda x: x[0], reverse=True)
-        
+
         # Keep only the 5 most recent, delete the rest
         if len(backup_files) > 5:
             for mtime, backup_file in backup_files[5:]:
@@ -650,7 +662,7 @@ def list_bootstrap_scripts():
     script_dir = CONFIG_DIR
     active_script = None
     metadata = load_scripts_metadata()
-    
+
     # Check which script is currently active (bootstrap.py is the active one)
     active_path = BOOTSTRAP_SCRIPT
     if active_path.exists():
@@ -664,7 +676,7 @@ def list_bootstrap_scripts():
         else:
             # bootstrap.py is a regular file, so it's the active one
             active_script = active_path.name
-    
+
     # Get the resolved path and name of the active script for comparison
     active_resolved_path = None
     active_resolved_name = None
@@ -676,12 +688,12 @@ def list_bootstrap_scripts():
                 active_resolved_name = active_resolved_path.name
         except:
             pass
-    
+
     for file in script_dir.glob('bootstrap*.py'):
         # Skip backup files (they shouldn't be shown in the UI)
         if file.name.startswith('bootstrap_backup_'):
             continue
-        
+
         # Skip symlink loops (symlinks pointing to themselves)
         try:
             if file.is_symlink():
@@ -692,7 +704,7 @@ def list_bootstrap_scripts():
         except (OSError, RuntimeError):
             # Error resolving symlink (loop or broken), skip this file
             continue
-        
+
         # Only mark as active if this file's NAME matches the resolved target name
         # This ensures only the actual target file is marked active, not the symlink
         is_active = False
@@ -701,7 +713,7 @@ def list_bootstrap_scripts():
             is_active = file.name == active_resolved_name
         else:
             is_active = file.name == active_script
-        
+
         try:
             # For bootstrap.py, if it's a symlink, we still want to show it
             # but we'll mark the target as active instead
@@ -717,7 +729,7 @@ def list_bootstrap_scripts():
         except OSError as e:
             # Skip files that can't be stat'd (e.g., symlink loops)
             continue
-    
+
     # Always include bootstrap.py in the list if it exists (even as symlink)
     # This ensures it's visible even when it's a symlink to another file
     bootstrap_py_path = script_dir / 'bootstrap.py'
@@ -736,7 +748,7 @@ def list_bootstrap_scripts():
                     is_active = 'bootstrap.py' == active_resolved_name
             else:
                 is_active = 'bootstrap.py' == active_script
-            
+
             file_stat = bootstrap_py_path.stat()
             script_meta = metadata.get('bootstrap.py', {})
             scripts.append({
@@ -748,17 +760,17 @@ def list_bootstrap_scripts():
             })
         except OSError:
             pass
-    
+
     # Sort scripts: active script first, then by name
     scripts.sort(key=lambda x: (not x['active'], x['name']))
-    
+
     return jsonify({'scripts': scripts, 'active': active_script})
 
 @app.route('/api/bootstrap-script/<filename>')
 def get_bootstrap_script(filename):
     """
     Get bootstrap script content.
-    
+
     Security: The filename parameter is validated via validate_filename_for_api()
     before being used in path construction, preventing path traversal attacks.
     """
@@ -777,7 +789,7 @@ def get_bootstrap_script(filename):
 
         if not script_path.exists() or not script_path.suffix == '.py':
             return jsonify({'error': 'Script not found'}), 404
-        
+
         # Check if this script is the active one
         active_path = BOOTSTRAP_SCRIPT
         is_active = False
@@ -789,7 +801,7 @@ def get_bootstrap_script(filename):
                     is_active = script_path.name == active_path.name
             except:
                 is_active = script_path.name == active_path.name
-        
+
         # lgtm[py/path-injection]
         # CodeQL: script_path is validated via safe_path_join() above, ensuring it's within CONFIG_DIR
         return jsonify(
@@ -820,17 +832,17 @@ def set_active_script(filename):
 
         if not script_path.exists() or not script_path.suffix == '.py':
             return jsonify({'error': 'Script not found'}), 404
-        
+
         # Special case: if setting bootstrap.py as active, ensure it's a regular file
         if sanitized_filename == "bootstrap.py":
             target = BOOTSTRAP_SCRIPT
-            
+
             # If bootstrap.py doesn't exist, we need to find what it should point to
             # or create it from another file. But if the user is clicking on bootstrap.py,
             # it should exist (either as file or symlink)
             if not script_path.exists():
                 return jsonify({'error': 'bootstrap.py not found. Please set another script as active first.'}), 404
-            
+
             # Resolve the source file path before potentially removing the symlink
             source_file = script_path
             if script_path.is_symlink():
@@ -841,27 +853,27 @@ def set_active_script(filename):
                         return jsonify({'error': f'Symlink target not found: {source_file}'}), 404
                 except (OSError, RuntimeError) as e:
                     return jsonify({'error': f'Cannot resolve symlink: {str(e)}'}), 500
-            
+
             # If bootstrap.py is a symlink, remove it first
             if target.exists() and target.is_symlink():
                 try:
                     target.unlink()
                 except (OSError, RuntimeError):
                     pass
-            
+
             # Copy the source file to bootstrap.py
             import shutil
             try:
                 shutil.copy2(source_file, target)
             except (OSError, shutil.Error) as e:
                 return jsonify({'error': f'Failed to copy file: {str(e)}'}), 500
-            
+
             return jsonify({
                 'success': True,
                 'message': 'bootstrap.py is now the active bootstrap script',
                 'active': 'bootstrap.py'
             })
-        
+
         # For other scripts, create symlink to bootstrap.py
         target = BOOTSTRAP_SCRIPT
         if target.exists() and target.is_symlink():
@@ -873,10 +885,10 @@ def set_active_script(filename):
             target.rename(backup)
             # Clean up old backups, keeping only the 5 most recent
             cleanup_old_backups()
-        
+
         # Create symlink to the selected script
         target.symlink_to(script_path.name)
-        
+
         return jsonify(
             {
                 "success": True,
@@ -904,10 +916,10 @@ def rename_bootstrap_script(filename):
 
         if not script_path.exists() or not script_path.suffix == '.py':
             return jsonify({'error': 'Script not found'}), 404
-        
+
         data = request.get_json()
         new_name = data.get('new_name', '').strip()
-        
+
         if not new_name:
             return jsonify({'error': 'New name is required'}), 400
 
@@ -924,14 +936,14 @@ def rename_bootstrap_script(filename):
                 return jsonify({"error": "Invalid new filename format"}), 400
 
         new_name = sanitized_new_name
-        
+
         # Check if new name already exists
         new_path = safe_path_join(CONFIG_DIR, new_name)
         if new_path is None:
             return jsonify({"error": "Invalid new filename"}), 400
         if new_path.exists() and new_path != script_path:
             return jsonify({'error': f'A script with the name {new_name} already exists'}), 400
-        
+
         # Prevent renaming the active script (bootstrap.py)
         active_path = BOOTSTRAP_SCRIPT
         if active_path.exists():
@@ -944,18 +956,18 @@ def rename_bootstrap_script(filename):
                     return jsonify({'error': 'Cannot rename bootstrap.py when it is the active script. Set another script as active first.'}), 400
             except (OSError, RuntimeError):
                 pass
-        
+
         # Rename the file
         # CodeQL: Both script_path and new_path are validated via safe_path_join() above
         try:
             script_path.rename(new_path)
-            
+
             # Update metadata if it exists
             metadata = load_scripts_metadata()
             if sanitized_filename in metadata:
                 metadata[new_name] = metadata.pop(sanitized_filename)
                 save_scripts_metadata(metadata)
-            
+
             return jsonify(
                 {
                     "success": True,
@@ -986,13 +998,13 @@ def delete_bootstrap_script(filename):
 
         if not script_path.exists() or not script_path.suffix == '.py':
             return jsonify({'error': 'Script not found'}), 404
-        
+
         # Prevent deleting bootstrap.py if it's the active script (not a symlink)
         if sanitized_filename == "bootstrap.py":
             target = BOOTSTRAP_SCRIPT
             if target.exists() and not target.is_symlink():
                 return jsonify({'error': 'Cannot delete bootstrap.py when it is the active script. Set another script as active first.'}), 400
-        
+
         # Check if this script is currently active
         active_path = BOOTSTRAP_SCRIPT
         if active_path.exists():
@@ -1005,13 +1017,13 @@ def delete_bootstrap_script(filename):
                     return jsonify({'error': 'Cannot delete the active script. Set another script as active first.'}), 400
             except (OSError, RuntimeError):
                 pass
-        
+
         # Delete the file
         try:
             script_path.unlink()
         except OSError as e:
             return jsonify({'error': f'Failed to delete file: {str(e)}'}), 500
-        
+
         return jsonify({
             'success': True,
             'message': f'Script {filename} deleted successfully'
@@ -1025,7 +1037,7 @@ def list_backup_scripts():
     """List backup bootstrap scripts"""
     backups = []
     script_dir = CONFIG_DIR
-    
+
     for file in script_dir.glob('bootstrap_backup_*.py'):
         try:
             stat = file.stat()
@@ -1041,7 +1053,7 @@ def list_backup_scripts():
                 from datetime import datetime
                 dt = datetime.fromtimestamp(stat.st_mtime)
                 human_date = dt.strftime('%Y-%m-%d %H:%M:%S')
-            
+
             backups.append({
                 'name': file.name,
                 'path': str(file),
@@ -1052,10 +1064,10 @@ def list_backup_scripts():
             })
         except OSError:
             continue
-    
+
     # Sort by timestamp (newest first)
     backups.sort(key=lambda x: x['timestamp'], reverse=True)
-    
+
     return jsonify({'backups': backups})
 
 @app.route('/api/bootstrap-script/backup/<filename>/restore', methods=['POST'])
@@ -1078,11 +1090,11 @@ def restore_backup_script(filename):
             return jsonify({"error": "Invalid path"}), 400
         if not backup_path.exists():
             return jsonify({'error': 'Backup not found'}), 404
-        
+
         # Get restore option from request
         data = request.get_json() or {}
         restore_as = data.get('restore_as', 'new')  # 'new' or 'active'
-        
+
         if restore_as == 'active':
             # Restore as bootstrap.py (active)
             target = BOOTSTRAP_SCRIPT
@@ -1104,7 +1116,7 @@ def restore_backup_script(filename):
                 new_name = f"bootstrap_restored_{dt.strftime('%Y%m%d_%H%M%S')}.py"
             except:
                 new_name = f"bootstrap_restored_{int(time.time())}.py"
-            
+
             new_path = safe_path_join(CONFIG_DIR, new_name)
             if new_path is None:
                 return jsonify({"error": "Invalid restored filename"}), 400
@@ -1126,11 +1138,11 @@ def upload_bootstrap_script():
     try:
         if 'file' not in request.files:
             return jsonify({'error': 'No file provided'}), 400
-        
+
         file = request.files['file']
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
-        
+
         if not file.filename.endswith('.py'):
             return jsonify({'error': 'File must be a Python script (.py)'}), 400
 
@@ -1152,7 +1164,7 @@ def upload_bootstrap_script():
                         "error": "Invalid filename format. Must be a valid Python filename starting with bootstrap"
                     }
                 ), 400
-        
+
         # Construct safe path
         file_path = safe_path_join(CONFIG_DIR, filename)
         if file_path is None:
@@ -1171,7 +1183,7 @@ def upload_bootstrap_script():
             return jsonify({'error': f'Permission denied: {str(e)}. Directory may need write permissions.'}), 500
         except OSError as e:
             return jsonify({'error': f'File system error: {str(e)}'}), 500
-        
+
         return jsonify({
             'success': True,
             'message': f'Script {filename} uploaded successfully',
@@ -1189,7 +1201,7 @@ def get_status():
         # Since we're in a container, systemctl may not work, so we use the health endpoint as primary method
         container_running = False
         health_ok = False
-        
+
         # Primary method: Check if we can reach nginx health endpoint (indicates service is running)
         # This is the most reliable method when systemctl is not available in containers
         try:
@@ -1216,7 +1228,7 @@ def get_status():
                     health_ok = True
             except Exception:
                 pass
-        
+
         return jsonify({
             'container_running': container_running,
             'health_ok': health_ok,
@@ -1250,7 +1262,7 @@ def parse_nginx_access_log():
     """Parse nginx access log to track device connections"""
     connections = load_device_connections()
     current_time = time.time()
-    
+
     # Track which log lines we've already processed
     # Only track processed lines for the last 24 hours to allow re-processing if filtering logic changes
     processed_lines_file = CONFIG_DIR / 'processed_log_lines.txt'
@@ -1280,19 +1292,19 @@ def parse_nginx_access_log():
                         processed_lines.add(line)
         except:
             pass
-    
+
     # Nginx log format: IP - - [timestamp] "method path protocol" status size "referer" "user-agent"
     # Example: 10.0.2.15 - - [08/Nov/2025:12:00:00 +0000] "GET /bootstrap.py HTTP/1.1" 200 1234 "-" "Arista-ZTP/1.0"
-    
+
     if not NGINX_ACCESS_LOG.exists():
         return connections
-    
+
     try:
         # Read last 1000 lines to avoid processing too much
         with open(NGINX_ACCESS_LOG, 'r') as f:
             lines = f.readlines()
             recent_lines = lines[-1000:] if len(lines) > 1000 else lines
-        
+
         new_processed_lines = set()
         for line in recent_lines:
             line_stripped = line.strip()
@@ -1300,21 +1312,21 @@ def parse_nginx_access_log():
             if line_stripped in processed_lines:
                 new_processed_lines.add(line_stripped)
                 continue
-            
+
             # Parse log line
             # Match: IP - - [timestamp] "method path protocol" status size "referer" "user-agent"
             match = re.match(r'^(\S+) - - \[([^\]]+)\] "(\S+) (\S+) ([^"]+)" (\d+) (\S+) "([^"]*)" "([^"]*)"', line)
             if not match:
                 new_processed_lines.add(line_stripped)
                 continue
-            
+
             ip = match.group(1)
             timestamp_str = match.group(2)
             method = match.group(3)
             path = match.group(4)
             status = int(match.group(6))
             user_agent = match.group(9)
-            
+
             # Skip health checks, UI requests, and API requests (WebUI's own requests)
             # Note: We allow browser downloads of /bootstrap.py and / (root, which serves bootstrap.py) to be tracked (for testing purposes)
             # but filter out other browser requests (UI, API, etc.)
@@ -1322,28 +1334,28 @@ def parse_nginx_access_log():
             is_browser = user_agent and ('Mozilla' in user_agent or 'Gecko' in user_agent or 'Chrome' in user_agent or 'Safari' in user_agent)
             is_arista_device = user_agent and ('Arista' in user_agent or 'EOS' in user_agent or 'ZTP' in user_agent)
             is_bootstrap_path = path == '/bootstrap.py' or path == '/'
-            
+
             # Filter out if:
             # 1. It's a health/UI/API path (except bootstrap paths)
             # 2. It's a browser request to a non-bootstrap path
             # But always allow Arista device requests and bootstrap path requests
-            if (not is_arista_device and not is_bootstrap_path and 
-                (path in ['/health', '/ui', '/api'] or 
-                 path.startswith('/ui/') or 
+            if (not is_arista_device and not is_bootstrap_path and
+                (path in ['/health', '/ui', '/api'] or
+                 path.startswith('/ui/') or
                  path.startswith('/api/') or
                  '/api/' in path or
                  (is_browser and not is_bootstrap_path))):
                 # Mark as processed but don't count
                 new_processed_lines.add(line_stripped)
                 continue
-            
+
             # Parse timestamp (format: 08/Nov/2025:12:00:00 +0000)
             try:
                 dt = datetime.strptime(timestamp_str.split()[0], '%d/%b/%Y:%H:%M:%S')
                 timestamp = dt.timestamp()
             except:
                 continue
-            
+
             # Initialize device entry if not exists
             if ip not in connections:
                 connections[ip] = {
@@ -1358,17 +1370,17 @@ def parse_nginx_access_log():
                     'user_agent': user_agent,
                     'sessions': []
                 }
-            
+
             device = connections[ip]
             device['last_seen'] = timestamp
             device['total_requests'] = device.get('total_requests', 0) + 1
-            
+
             # Track bootstrap.py downloads (both /bootstrap.py and / which serves bootstrap.py as index)
             if (path == '/bootstrap.py' or (path == '/' and status == 200)) and status == 200:
                 device['bootstrap_downloaded'] = True
                 if not device['bootstrap_download_time'] or timestamp > device['bootstrap_download_time']:
                     device['bootstrap_download_time'] = timestamp
-            
+
             # Track sessions (requests within 5 minutes are considered same session)
             if device['sessions']:
                 last_session = device['sessions'][-1]
@@ -1388,32 +1400,32 @@ def parse_nginx_access_log():
                     'end': timestamp,
                     'requests': 1
                 })
-            
+
             # Keep only last 50 sessions per device
             if len(device['sessions']) > 50:
                 device['sessions'] = device['sessions'][-50:]
-            
+
             # Mark this line as processed
             new_processed_lines.add(line_stripped)
-        
+
         # Save processed lines (keep only last 2000 to avoid file growing too large)
         all_processed = processed_lines | new_processed_lines
         if len(all_processed) > 2000:
             # Keep only the most recent 2000
             all_processed = set(list(all_processed)[-2000:])
-        
+
         try:
             with open(processed_lines_file, 'w') as f:
                 for line in sorted(all_processed):
                     f.write(line + '\n')
         except Exception as e:
             print(f"Error saving processed lines: {e}")
-        
+
         # Clean up old devices (not seen in 24 hours)
         cutoff_time = current_time - 86400  # 24 hours
-        connections = {ip: data for ip, data in connections.items() 
+        connections = {ip: data for ip, data in connections.items()
                       if data['last_seen'] > cutoff_time}
-        
+
         save_device_connections(connections)
         return connections
     except Exception as e:
@@ -1426,9 +1438,9 @@ def get_logs():
     try:
         log_source = request.args.get('source', 'nginx_access')
         lines = int(request.args.get('lines', 100))
-        
+
         logs = []
-        
+
         if log_source == 'nginx_access':
             # Try multiple paths - works with both host networking and macvlan
             # The logs are mounted as a volume, so we should be able to read them directly
@@ -1436,7 +1448,7 @@ def get_logs():
                 Path('/var/log/nginx/ztpbootstrap_access.log'),  # Mounted volume path
                 CONFIG_DIR / 'logs' / 'ztpbootstrap_access.log',  # Alternative path
             ]
-            
+
             log_found = False
             for log_path in log_paths:
                 if log_path.exists():
@@ -1457,7 +1469,7 @@ def get_logs():
                         logs = f"Error reading nginx access log from {log_path}: {str(e)}"
                         log_found = True
                         break
-            
+
             if not log_found:
                 # Fallback: Try to read from nginx container via podman exec
                 # This works regardless of networking mode if podman is accessible
@@ -1479,7 +1491,7 @@ def get_logs():
                     logs = f"Nginx access log not accessible. Podman not available. Checked paths: {', '.join(str(p) for p in log_paths)}"
                 except Exception as e:
                     logs = f"Error accessing nginx access log: {str(e)}"
-        
+
         elif log_source == 'nginx_error':
             # Try multiple paths - works with both host networking and macvlan
             # The logs are mounted as a volume, so we should be able to read them directly
@@ -1487,7 +1499,7 @@ def get_logs():
                 Path('/var/log/nginx/ztpbootstrap_error.log'),  # Mounted volume path
                 CONFIG_DIR / 'logs' / 'ztpbootstrap_error.log',  # Alternative path
             ]
-            
+
             log_found = False
             for log_path in log_paths:
                 if log_path.exists():
@@ -1502,7 +1514,7 @@ def get_logs():
                         logs = f"Error reading nginx error log from {log_path}: {str(e)}"
                         log_found = True
                         break
-            
+
             if not log_found:
                 # Fallback: Try to read from nginx container via podman exec
                 # This works regardless of networking mode if podman is accessible
@@ -1518,7 +1530,7 @@ def get_logs():
                     logs = f"Nginx error log not accessible. Podman not available. Checked paths: {', '.join(str(p) for p in log_paths)}"
                 except Exception as e:
                     logs = f"Error accessing nginx error log: {str(e)}"
-        
+
         # Handle container logs (default) - only if not nginx_access or nginx_error
         if log_source not in ['nginx_access', 'nginx_error']:
             # Helper function to check if a systemd service exists
@@ -1531,7 +1543,7 @@ def get_logs():
                     systemctl_available = True
                 except (FileNotFoundError, subprocess.TimeoutExpired):
                     systemctl_available = False
-                
+
                 if systemctl_available:
                     try:
                         # Use list-unit-files and grep for the service name
@@ -1560,7 +1572,7 @@ def get_logs():
                     except Exception as e:
                         # Log error for debugging but don't fail
                         print(f"Error checking service {service_name} with systemctl: {e}", flush=True)
-                
+
                 # If systemctl not available, try to verify via journalctl
                 # If we can query the journal for this service, it exists
                 try:
@@ -1581,14 +1593,14 @@ def get_logs():
                             return True
                 except Exception:
                     pass
-                
+
                 return False
-            
+
             # Check which services exist (pod-based deployment)
             pod_service_exists = check_service_exists('ztpbootstrap-pod.service')
             nginx_service_exists = check_service_exists('ztpbootstrap-nginx.service')
             webui_service_exists = check_service_exists('ztpbootstrap-webui.service')
-            
+
             # Build container mappings (pod-based setup)
             containers = {}
             # Pod service itself doesn't have a direct container, but we can get its logs via journalctl
@@ -1605,7 +1617,7 @@ def get_logs():
             # Optionally include pod service for pod lifecycle logs
             if pod_service_exists:
                 containers['ztpbootstrap-pod.service'] = None  # Pod itself, no direct container
-            
+
             # If no containers detected, use default mappings
             if not containers:
                 containers = {
@@ -1613,7 +1625,7 @@ def get_logs():
                     'ztpbootstrap-nginx.service': 'ztpbootstrap-nginx',
                     'ztpbootstrap-webui.service': 'ztpbootstrap-webui'
                 }
-            
+
             # Check if podman binary is available and can actually execute
             podman_available = False
             podman_socket_accessible = False
@@ -1656,7 +1668,7 @@ def get_logs():
                     podman_available = podman_check.returncode == 0
                 except:
                     pass
-            
+
             # Check podman socket accessibility
             # Try multiple possible socket locations
             socket_paths = [
@@ -1673,7 +1685,7 @@ def get_logs():
                             break
                     except:
                         pass
-            
+
             # Also try to test podman connectivity directly
             if podman_available and not podman_socket_accessible:
                 try:
@@ -1688,7 +1700,7 @@ def get_logs():
                         podman_socket_accessible = True
                 except:
                     pass
-            
+
             # Check journalctl availability and ability to actually execute
             journalctl_available = False
             journal_accessible = False
@@ -1731,7 +1743,7 @@ def get_logs():
                     journalctl_available = journalctl_check.returncode == 0
                 except:
                     pass
-            
+
             # Check journal directory accessibility
             journal_paths = [
                 Path('/run/systemd/journal'),
@@ -1746,7 +1758,7 @@ def get_logs():
                             break
                     except:
                         pass
-            
+
             # Collect diagnostic information
             diagnostics = []
             diagnostics.append(f"Deployment mode: Pod-based")
@@ -1758,16 +1770,16 @@ def get_logs():
             diagnostics.append(f"Journalctl executable: {journalctl_available}")
             diagnostics.append(f"Journal accessible: {journal_accessible}")
             diagnostics.append(f"Note: Container uses Fedora-based image with podman and journalctl installed via dnf.")
-            
+
             # Try to get container logs using multiple methods
             log_parts = []
             logs_retrieved = False
-            
+
             for service, container_name in containers.items():
                 log_parts.append(f"=== {service} ===")
                 container_logs = None
                 method_used = None
-                
+
                 # Skip pod service if it has no direct container (we'll get its logs via journalctl only)
                 if container_name is None:
                     # For pod service, only try journalctl
@@ -1797,7 +1809,7 @@ def get_logs():
                         log_parts.append("No recent pod lifecycle events.")
                     log_parts.append("")
                     continue
-                
+
                 # Method 1: Try podman logs (works if podman socket is accessible)
                 if podman_available and podman_socket_accessible:
                     try:
@@ -1822,7 +1834,7 @@ def get_logs():
                         diagnostics.append(f"podman logs {container_name} timed out")
                     except Exception as e:
                         diagnostics.append(f"podman logs {container_name} failed: {str(e)}")
-                
+
                 # Method 2: Try journalctl (works if journal is accessible)
                 if not container_logs and journalctl_available:
                     try:
@@ -1844,7 +1856,7 @@ def get_logs():
                         diagnostics.append(f"journalctl -u {service} timed out")
                     except Exception as e:
                         diagnostics.append(f"journalctl -u {service} failed: {str(e)}")
-                
+
                 if container_logs:
                     log_parts.append(container_logs)
                     if method_used:
@@ -1854,7 +1866,7 @@ def get_logs():
                     log_parts.append(f"Container: {container_name or 'N/A'}")
                     log_parts.append("Logs not available from within container.")
                 log_parts.append("")
-            
+
             if log_parts:
                 logs = '\n'.join(log_parts)
                 # Only show help message if no logs were retrieved
@@ -1863,19 +1875,19 @@ def get_logs():
                     logs = '\n' + '='*70 + '\n'
                     logs += 'CONTAINER LOGS ACCESS DIAGNOSTICS\n'
                     logs += '='*70 + '\n\n'
-                    
+
                     # Add diagnostics
                     if diagnostics:
                         logs += 'Diagnostic Information:\n'
                         for diag in diagnostics:
                             logs += f'  - {diag}\n'
                         logs += '\n'
-                    
+
                     # Try to get hostname for better instructions
                     import socket
                     hostname = None
                     host_ip = None
-                    
+
                     # Try multiple methods to get host information
                     try:
                         # Try reading from /etc/hostname (if mounted)
@@ -1884,7 +1896,7 @@ def get_logs():
                             hostname = hostname_file.read_text().strip()
                     except:
                         pass
-                    
+
                     if not hostname:
                         try:
                             hostname = socket.gethostname()
@@ -1893,7 +1905,7 @@ def get_logs():
                                 hostname = None
                         except:
                             pass
-                    
+
                     # Try to get host IP from environment or network
                     try:
                         # Check if we can get host IP from hostname resolution
@@ -1901,7 +1913,7 @@ def get_logs():
                             host_ip = socket.gethostbyname(hostname)
                     except:
                         pass
-                    
+
                     # Build SSH instruction
                     if hostname and hostname not in ['ztpbootstrap', 'localhost']:
                         ssh_target = hostname
@@ -1912,14 +1924,14 @@ def get_logs():
                     else:
                         ssh_target = "the host server"
                         ssh_instruction = '  ssh user@<hostname-or-ip>  # Replace with actual hostname or IP'
-                    
+
                     logs += 'Container logs require host-level access to systemd journal and podman.\n'
                     logs += 'To view container logs, you need to SSH to the host server where this\n'
                     logs += 'service is running and execute the commands below.\n\n'
                     logs += f'SSH to {ssh_target}:\n'
                     logs += f'{ssh_instruction}\n\n'
                     logs += 'Once connected, run one of these commands:\n\n'
-                    
+
                     # Build service-specific commands
                     logs += 'Using journalctl (recommended):\n'
                     if pod_service_exists:
@@ -1929,18 +1941,18 @@ def get_logs():
                     if webui_service_exists:
                         logs += '  sudo journalctl -u ztpbootstrap-webui.service -n 50 -f\n'
                     logs += '\n'
-                    
+
                     logs += 'Or using podman logs:\n'
                     if nginx_service_exists:
                         logs += '  sudo podman logs ztpbootstrap-nginx --tail 50 -f\n'
                     if webui_service_exists:
                         logs += '  sudo podman logs ztpbootstrap-webui --tail 50 -f\n'
                     logs += '\n'
-                    
+
                     logs += 'Note: The -f flag follows the logs in real-time. Remove it to see\n'
                     logs += '      only the last N lines without following.\n'
                     logs += '='*70 + '\n'
-                    
+
                     # Append the original log_parts if any
                     if log_parts and any("===" in part for part in log_parts):
                         logs += '\n' + '\n'.join(log_parts)
@@ -1950,10 +1962,10 @@ def get_logs():
                     logs += '\n\nDiagnostic Information:\n'
                     for diag in diagnostics:
                         logs += f'  - {diag}\n'
-        
+
         if not logs:
             logs = 'No logs available'
-        
+
         return jsonify({'logs': logs, 'source': log_source})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1966,11 +1978,11 @@ def mark_logs():
         from datetime import datetime
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')
         mark_line = f'===== MARK: {timestamp} =====\n'
-        
+
         # Get which log source to mark (default to both)
         log_source = request.args.get('source', 'both')
         errors = []
-        
+
         # Write MARK to nginx access log
         if log_source in ['both', 'nginx_access', 'access']:
             if NGINX_ACCESS_LOG.exists():
@@ -1992,7 +2004,7 @@ def mark_logs():
                         errors.append(f'Failed to write MARK to access log: {result.stderr}')
                 except Exception as e:
                     errors.append(f'Failed to write MARK to access log: {str(e)}')
-        
+
         # Write MARK to nginx error log
         if log_source in ['both', 'nginx_error', 'error']:
             if NGINX_ERROR_LOG.exists():
@@ -2014,10 +2026,10 @@ def mark_logs():
                         errors.append(f'Failed to write MARK to error log: {result.stderr}')
                 except Exception as e:
                     errors.append(f'Failed to write MARK to error log: {str(e)}')
-        
+
         if errors:
             return jsonify({'error': '; '.join(errors)}), 500
-        
+
         return jsonify({
             'success': True,
             'message': f'MARK inserted at {timestamp}',
@@ -2032,7 +2044,7 @@ def get_device_connections():
     try:
         # Parse nginx logs to update connection data
         connections = parse_nginx_access_log()
-        
+
         # Format for frontend
         devices = []
         for ip, data in connections.items():
@@ -2040,7 +2052,7 @@ def get_device_connections():
             sessions = data.get('sessions', [])
             total_duration = sum(s['end'] - s['start'] for s in sessions)
             last_session_duration = sessions[-1]['end'] - sessions[-1]['start'] if sessions else 0
-            
+
             devices.append({
                 'ip': ip,
                 'first_seen': data['first_seen'],
@@ -2053,10 +2065,10 @@ def get_device_connections():
                 'last_session_duration': last_session_duration,
                 'user_agent': data.get('user_agent', 'Unknown')
             })
-        
+
         # Sort by last seen (most recent first)
         devices.sort(key=lambda x: x['last_seen'], reverse=True)
-        
+
         return jsonify({'devices': devices})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
