@@ -160,6 +160,37 @@ curl -I https://your-domain.com/ui/ | grep -i "x-\|strict-transport\|content-sec
 - **Pattern:** Must match `^bootstrap[a-zA-Z0-9_.-]*\.py$`
 - **Protection:** Prevents path traversal (`../`), null bytes, and special characters
 
+### ✅ Security Event Logging (NEW)
+- **Status:** Implemented
+- **Details:** Comprehensive security event logging to dedicated log file
+- **Log Location:** `/opt/containerdata/ztpbootstrap/logs/security.log`
+- **Events Logged:**
+  - Login attempts (success/failure with IP address)
+  - Rate limiting triggers
+  - CSRF validation failures
+  - File uploads (filename, size, outcome)
+  - File deletions (filename, outcome)
+  - File renames (old/new names, outcome)
+- **Format:** Timestamp | Level | IP | Event | Outcome | Details
+- **Example:** `2025-11-22 02:43:15 | WARNING | IP=192.168.1.100 | event=login | outcome=failure | user=admin reason=invalid_password`
+
+### ✅ Improved File Permissions (NEW)
+- **Status:** Implemented
+- **Details:** Reduced file permissions from overly permissive 777/666 to secure 775/644
+- **Changes:**
+  - Logs directory: 777 → 775 (group-writable but not world-writable)
+  - Private key files: 644 → 600 (readable only by owner)
+  - Certificate files: 644 (world-readable, appropriate for certificates)
+  - Script directory: 775/664 for local filesystems
+  - NFS mounts: 777/666 (necessary due to NFS limitations, documented with security notes)
+
+### ✅ Permissions-Policy Header (NEW)
+- **Status:** Implemented
+- **Details:** Added `Permissions-Policy` header to all nginx location blocks
+- **Protection:** Blocks access to browser features that aren't needed
+- **Policy:** `geolocation=(), microphone=(), camera=(), payment=(), usb=(), interest-cohort=()`
+- **Benefit:** Reduces attack surface by preventing potential misuse of browser APIs
+
 ## Security Improvements Needed
 
 ### Medium Priority
@@ -176,14 +207,15 @@ curl -I https://your-domain.com/ui/ | grep -i "x-\|strict-transport\|content-sec
 
 ### Medium Priority
 
-4. **Security Headers Enhancement**
-   - Add `Permissions-Policy` header
-   - Consider stricter CSP (remove `unsafe-eval` if possible)
+4. **Security Headers Enhancement** ✅ IMPLEMENTED
+   - ✅ Added `Permissions-Policy` header
+   - Consider stricter CSP (remove `unsafe-eval` if possible) - Requires Alpine.js migration
    - Risk: Low
 
-5. **Logging & Monitoring**
-   - Log failed authentication attempts
-   - Log security events (CSRF failures, rate limiting)
+5. **Logging & Monitoring** ✅ IMPLEMENTED
+   - ✅ Log failed authentication attempts
+   - ✅ Log security events (CSRF failures, rate limiting)
+   - ✅ Log file operations (upload, delete, rename)
    - Risk: Low
 
 6. **Dependency Updates**
@@ -203,6 +235,82 @@ curl -I https://your-domain.com/ui/ | grep -i "x-\|strict-transport\|content-sec
    - Password history
    - Risk: Low
 
+## Security Logging
+
+### Log Files
+
+The Web UI maintains detailed security logs for audit and compliance:
+
+**Location:** `/opt/containerdata/ztpbootstrap/logs/security.log`
+
+### Events Logged
+
+All security-relevant events are logged with timestamp, IP address, event type, outcome, and details:
+
+1. **Authentication Events**
+   - Successful logins
+   - Failed login attempts (with reason)
+   - Rate limiting triggers
+
+2. **CSRF Protection**
+   - CSRF token validation failures
+   - Endpoint and method information
+
+3. **File Operations** (Authenticated Actions)
+   - File uploads (filename, size)
+   - File deletions (filename)
+   - File renames (old/new names)
+
+### Log Format
+
+```
+YYYY-MM-DD HH:MM:SS | LEVEL | IP=<address> | event=<type> | outcome=<success|failure> | details
+```
+
+### Example Log Entries
+
+```
+2025-11-22 02:43:15 | INFO | IP=192.168.1.100 | event=login | outcome=success | user=admin
+2025-11-22 02:43:20 | WARNING | IP=192.168.1.101 | event=login | outcome=failure | user=admin reason=invalid_password
+2025-11-22 02:43:25 | WARNING | IP=192.168.1.102 | event=login | outcome=failure | reason=rate_limited
+2025-11-22 02:44:00 | INFO | IP=192.168.1.100 | event=file_upload | outcome=success | filename=bootstrap_test.py size=20480
+2025-11-22 02:45:00 | WARNING | IP=192.168.1.103 | event=csrf_validation | outcome=failure | endpoint=upload_bootstrap_script method=POST
+```
+
+### Monitoring Security Logs
+
+View security logs in real-time:
+```bash
+tail -f /opt/containerdata/ztpbootstrap/logs/security.log
+```
+
+Filter for failed events:
+```bash
+grep "outcome=failure" /opt/containerdata/ztpbootstrap/logs/security.log
+```
+
+Filter for specific event types:
+```bash
+grep "event=login" /opt/containerdata/ztpbootstrap/logs/security.log
+```
+
+### Log Rotation
+
+Consider implementing log rotation to manage log file size:
+
+```bash
+# Example logrotate configuration
+/opt/containerdata/ztpbootstrap/logs/security.log {
+    daily
+    rotate 90
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 644 root root
+}
+```
+
 ## Security Testing Workflow
 
 ### Pre-Deployment Checklist
@@ -214,6 +322,7 @@ curl -I https://your-domain.com/ui/ | grep -i "x-\|strict-transport\|content-sec
 5. Test authentication flows
 6. Test input validation
 7. Review error messages (no information leakage)
+8. Review security logs for anomalies
 
 ### Regular Security Maintenance
 

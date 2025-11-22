@@ -1521,16 +1521,20 @@ create_self_signed_cert() {
             -out "$cert_file" \
             -subj "/C=US/ST=State/L=City/O=Organization/CN=$domain" \
             -addext "subjectAltName=DNS:$domain" 2>/dev/null || error "Failed to generate certificate"
+        # Certificate file can be world-readable (644)
         sudo chmod 644 "$cert_file" 2>/dev/null || true
-        sudo chmod 644 "$key_file" 2>/dev/null || true
+        # Private key file should be readable only by owner (600) for security
+        sudo chmod 600 "$key_file" 2>/dev/null || true
     else
         openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
             -keyout "$key_file" \
             -out "$cert_file" \
             -subj "/C=US/ST=State/L=City/O=Organization/CN=$domain" \
             -addext "subjectAltName=DNS:$domain" 2>/dev/null || error "Failed to generate certificate"
+        # Certificate file can be world-readable (644)
         chmod 644 "$cert_file" 2>/dev/null || true
-        chmod 644 "$key_file" 2>/dev/null || true
+        # Private key file should be readable only by owner (600) for security
+        chmod 600 "$key_file" 2>/dev/null || true
     fi
     
     # Set SELinux context if SELinux is enabled and not on NFS
@@ -3946,9 +3950,10 @@ EOFNGINX2
             local logs_dir="${SCRIPT_DIR}/logs"
             if [[ $EUID -eq 0 ]]; then
                 mkdir -p "$logs_dir" 2>/dev/null || true
-                chmod 777 "$logs_dir" 2>/dev/null || true
+                # Use 775 instead of 777 for better security (group-writable but not world-writable)
+                chmod 775 "$logs_dir" 2>/dev/null || true
                 # Try to set ownership to nginx user (UID 101) if possible
-                chown 101:101 "$logs_dir" 2>/dev/null || chmod 777 "$logs_dir" 2>/dev/null || true
+                chown 101:101 "$logs_dir" 2>/dev/null || chmod 775 "$logs_dir" 2>/dev/null || true
                 # Set SELinux context if not on NFS
                 if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
                     if ! is_nfs_mount "$logs_dir"; then
@@ -3958,8 +3963,9 @@ EOFNGINX2
                 fi
             else
                 sudo mkdir -p "$logs_dir" 2>/dev/null || true
-                sudo chmod 777 "$logs_dir" 2>/dev/null || true
-                sudo chown 101:101 "$logs_dir" 2>/dev/null || sudo chmod 777 "$logs_dir" 2>/dev/null || true
+                # Use 775 instead of 777 for better security (group-writable but not world-writable)
+                sudo chmod 775 "$logs_dir" 2>/dev/null || true
+                sudo chown 101:101 "$logs_dir" 2>/dev/null || sudo chmod 775 "$logs_dir" 2>/dev/null || true
                 # Set SELinux context if not on NFS
                 if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
                     if ! is_nfs_mount "$logs_dir"; then
@@ -4001,7 +4007,9 @@ EOFNGINX2
                 fi
                 log "Set ownership and permissions on script directory for webui uploads (not NFS)"
             else
-                # For NFS, ownership changes may not work, so use 777
+                # For NFS, ownership changes may not work, so use 777/666
+                # SECURITY NOTE: These permissive permissions are only used for NFS mounts
+                # where standard Unix permissions may not work correctly.
                 if [[ ("$SCRIPT_DIR" =~ ^/etc/ || "$SCRIPT_DIR" =~ ^/opt/) && $EUID -ne 0 ]]; then
                     sudo chmod 777 "$SCRIPT_DIR" 2>/dev/null || true
                     sudo chmod 666 "$SCRIPT_DIR"/*.py 2>/dev/null || true
@@ -4009,7 +4017,7 @@ EOFNGINX2
                     chmod 777 "$SCRIPT_DIR" 2>/dev/null || true
                     chmod 666 "$SCRIPT_DIR"/*.py 2>/dev/null || true
                 fi
-                log "Set permissions on script directory for webui uploads (NFS - using 777, SELinux context not applicable)"
+                log "Set permissions on script directory for webui uploads (NFS - using 777/666 due to NFS limitations, SELinux context not applicable)"
             fi
         fi
     else
