@@ -41,12 +41,10 @@ except ImportError:
 
     def validate_path_in_directory(file_path, base_directory):
         try:
-            # lgtm[py/path-injection]
-            # CodeQL: file_path is validated before calling this function via safe_path_join()
-            # The path is guaranteed to be within base_directory by the caller
             resolved_path = file_path.resolve()
             resolved_base = base_directory.resolve()
-            return str(resolved_path).startswith(str(resolved_base))
+            # Use os.path.commonpath to securely check for directory containment
+            return os.path.commonpath([str(resolved_path), str(resolved_base)]) == str(resolved_base)
         except (OSError, ValueError):
             return False
 
