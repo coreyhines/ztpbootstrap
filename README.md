@@ -11,6 +11,8 @@ A containerized service that provides a secure HTTPS endpoint for serving Arista
 - **[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 - **[docs/TESTING.md](docs/TESTING.md)** - Testing procedures and validation scripts
 - **[docs/SECURITY.md](docs/SECURITY.md)** - Security features, authentication, and security testing
+- **[docs/SECURITY_BEST_PRACTICES.md](docs/SECURITY_BEST_PRACTICES.md)** - Security best practices and deployment guide
+- **[SECURITY_AUDIT.md](SECURITY_AUDIT.md)** - Comprehensive security audit report
 
 **For Developers:**
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Development workflow, VM testing, and upgrade scenarios
