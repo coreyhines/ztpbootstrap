@@ -244,6 +244,11 @@
                                 class="px-6 py-4 border-b-2 font-medium text-sm">
                             Logs
                         </button>
+                        <button @click="activeTab = 'dhcp'"
+                                :class="activeTab === 'dhcp' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            DHCP
+                        </button>
                     </nav>
                 </div>
 
@@ -499,6 +504,155 @@
                         <pre class="text-sm font-mono overflow-x-auto whitespace-pre-wrap"
                              :class="logSource === 'nginx_error' ? 'text-red-400' : 'text-green-400'"
                              x-html="highlightSearch(formatLogsWithMarks(reverseLogLines(logs)))"></pre>
+                    </div>
+                </div>
+
+                <!-- DHCP Tab -->
+                <div x-show="activeTab === 'dhcp'" class="p-6">
+                    <div class="mb-4">
+                        <h2 class="text-lg font-semibold text-gray-900 mb-2">DHCP Server Configuration</h2>
+                        <p class="text-sm text-gray-600">Configure and manage Kea DHCP server</p>
+                    </div>
+
+                    <!-- DHCP Status Banner -->
+                    <div x-show="dhcpStatus.networking_mode === 'host'" class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
+                        <div class="flex items-start">
+                            <svg class="w-5 h-5 text-blue-600 mt-0.5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <div class="flex-1">
+                                <p class="text-sm font-medium text-blue-900">Host Networking Mode Detected</p>
+                                <p class="text-sm text-blue-700 mt-1">DHCP server will bind directly to host interfaces. Ensure no other DHCP server is running on ports 67/68 (IPv4) or 547/548 (IPv6).</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Port Conflict Warning -->
+                    <div x-show="dhcpStatus.port_conflicts && (dhcpStatus.port_conflicts.ipv4_conflict || dhcpStatus.port_conflicts.ipv6_conflict)" class="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                        <div class="flex items-start">
+                            <svg class="w-5 h-5 text-yellow-600 mt-0.5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                            </svg>
+                            <div class="flex-1">
+                                <p class="text-sm font-medium text-yellow-900">Port Conflicts Detected</p>
+                                <p class="text-sm text-yellow-700 mt-1">
+                                    <span x-show="dhcpStatus.port_conflicts.ipv4_conflict">Ports 67/68 (IPv4) are in use. </span>
+                                    <span x-show="dhcpStatus.port_conflicts.ipv6_conflict">Ports 547/548 (IPv6) are in use. </span>
+                                    Please stop other DHCP servers before enabling.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Enable/Disable Toggle -->
+                    <div class="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="text-sm font-medium text-gray-900">DHCP Server</h3>
+                                <p class="text-xs text-gray-500 mt-1">Enable or disable the DHCP server</p>
+                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" x-model="dhcpConfig.enabled" @change="toggleDhcp()" class="sr-only peer" :disabled="loadingStates.dhcp">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                <span class="ml-3 text-sm font-medium text-gray-700" x-text="dhcpConfig.enabled ? 'Enabled' : 'Disabled'"></span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- DHCP Configuration Form (shown when enabled) -->
+                    <div x-show="dhcpConfig.enabled" class="space-y-6">
+                        <!-- IPv4 Configuration -->
+                        <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+                            <h3 class="text-md font-semibold text-gray-900 mb-4">IPv4 Configuration</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Subnet (CIDR)</label>
+                                    <div class="flex gap-2">
+                                        <input type="text" x-model="dhcpConfig.ipv4.subnet" placeholder="10.0.0.0/24" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                        <button @click="autoDetectSubnet('ipv4')" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Auto-detect</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Gateway</label>
+                                    <div class="flex gap-2">
+                                        <input type="text" x-model="dhcpConfig.ipv4.gateway" placeholder="10.0.0.1" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                        <button @click="autoDetectGateway('ipv4')" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Auto-detect</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Range Start</label>
+                                    <input type="text" x-model="dhcpConfig.ipv4.range_start" placeholder="10.0.0.50" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Range End</label>
+                                    <input type="text" x-model="dhcpConfig.ipv4.range_end" placeholder="10.0.0.250" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- DNS & Domain -->
+                        <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+                            <h3 class="text-md font-semibold text-gray-900 mb-4">DNS & Domain</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">DNS Servers (comma-separated)</label>
+                                    <input type="text" x-model="dhcpConfig.ipv4.dns_servers_str" placeholder="8.8.8.8, 8.8.4.4" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Domain Name</label>
+                                    <input type="text" x-model="dhcpConfig.ipv4.domain" placeholder="example.com" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">NTP Servers (comma-separated)</label>
+                                    <input type="text" x-model="dhcpConfig.ipv4.ntp_servers_str" placeholder="time.nist.gov" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Save Button -->
+                        <div class="flex justify-end">
+                            <button @click="saveDhcpConfig()" :disabled="loadingStates.dhcp" class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium disabled:opacity-50">
+                                <span x-show="!loadingStates.dhcp">Save Configuration</span>
+                                <span x-show="loadingStates.dhcp">Saving...</span>
+                            </button>
+                        </div>
+
+                        <!-- Leases Table -->
+                        <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-md font-semibold text-gray-900">Active Leases</h3>
+                                <button @click="loadDhcpLeases()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Refresh</button>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MAC Address</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP Address</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">State</th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200">
+                                        <template x-for="lease in dhcpLeases" :key="lease.mac">
+                                            <tr>
+                                                <td class="px-4 py-3 text-sm text-gray-900" x-text="lease.mac"></td>
+                                                <td class="px-4 py-3 text-sm text-gray-900" x-text="lease.ip"></td>
+                                                <td class="px-4 py-3 text-sm text-gray-500" x-text="lease.type"></td>
+                                                <td class="px-4 py-3 text-sm text-gray-500" x-text="lease.state"></td>
+                                                <td class="px-4 py-3 text-sm">
+                                                    <button @click="deleteDhcpLease(lease.mac)" class="text-red-600 hover:text-red-800">Delete</button>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                        <tr x-show="dhcpLeases.length === 0">
+                                            <td colspan="5" class="px-4 py-4 text-sm text-gray-500 text-center">No active leases</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -761,8 +915,31 @@
                     config: false,
                     logs: false,
                     deviceConnections: false,
-                    status: false
+                    status: false,
+                    dhcp: false
                 },
+                // DHCP state
+                dhcpConfig: {
+                    enabled: false,
+                    ipv4: {
+                        subnet: '',
+                        range_start: '',
+                        range_end: '',
+                        gateway: '',
+                        dns_servers: [],
+                        dns_servers_str: '',
+                        domain: '',
+                        ntp_servers: [],
+                        ntp_servers_str: ''
+                    }
+                },
+                dhcpStatus: {
+                    enabled: false,
+                    networking_mode: 'unknown',
+                    port_conflicts: {ipv4_conflict: false, ipv6_conflict: false},
+                    container: {exists: false, service_active: false, container_running: false}
+                },
+                dhcpLeases: [],
 
                 async init() {
                     // Cleanup auto-refresh on page unload
@@ -780,6 +957,12 @@
                         } else {
                             // Stop auto-refresh when leaving logs tab
                             this.stopAutoRefresh();
+                        }
+                        if (newTab === 'dhcp') {
+                            // Load DHCP data when entering DHCP tab
+                            this.loadDhcpStatus();
+                            this.loadDhcpConfig();
+                            this.loadDhcpLeases();
                         }
                     });
                     // Ensure modal is hidden on initial load
@@ -1974,6 +2157,224 @@
                     } catch (error) {
                         console.error('Error marking logs:', error);
                         alert('Failed to mark logs: ' + error.message);
+                    }
+                },
+
+                // DHCP Functions
+                async loadDhcpConfig() {
+                    this.loadingStates.dhcp = true;
+                    try {
+                        const response = await fetch('/api/dhcp/config', {
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.showLoginModal = true;
+                            return;
+                        }
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.dhcp) {
+                                this.dhcpConfig = data.dhcp;
+                                // Convert arrays to strings for display
+                                if (this.dhcpConfig.ipv4 && this.dhcpConfig.ipv4.dns_servers) {
+                                    this.dhcpConfig.ipv4.dns_servers_str = this.dhcpConfig.ipv4.dns_servers.join(', ');
+                                }
+                                if (this.dhcpConfig.ipv4 && this.dhcpConfig.ipv4.ntp_servers) {
+                                    this.dhcpConfig.ipv4.ntp_servers_str = this.dhcpConfig.ipv4.ntp_servers.join(', ');
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Failed to load DHCP config:', error);
+                    } finally {
+                        this.loadingStates.dhcp = false;
+                    }
+                },
+
+                async loadDhcpStatus() {
+                    try {
+                        const response = await fetch('/api/dhcp/status', {
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.showLoginModal = true;
+                            return;
+                        }
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.dhcpStatus = data;
+                        }
+                    } catch (error) {
+                        console.error('Failed to load DHCP status:', error);
+                    }
+                },
+
+                async toggleDhcp() {
+                    this.loadingStates.dhcp = true;
+                    try {
+                        const endpoint = this.dhcpConfig.enabled ? '/api/dhcp/enable' : '/api/dhcp/disable';
+                        const headers = {'Content-Type': 'application/json'};
+                        if (this.csrfToken) {
+                            headers['X-CSRF-Token'] = this.csrfToken;
+                        }
+                        const response = await fetch(endpoint, {
+                            method: 'POST',
+                            headers: headers,
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.showLoginModal = true;
+                            return;
+                        }
+                        if (response.ok) {
+                            await this.loadDhcpStatus();
+                            if (this.dhcpConfig.enabled) {
+                                await this.loadDhcpConfig();
+                            }
+                        } else {
+                            const data = await response.json();
+                            alert('Failed to ' + (this.dhcpConfig.enabled ? 'enable' : 'disable') + ' DHCP: ' + (data.error || 'Unknown error'));
+                            this.dhcpConfig.enabled = !this.dhcpConfig.enabled; // Revert toggle
+                        }
+                    } catch (error) {
+                        console.error('Failed to toggle DHCP:', error);
+                        alert('Failed to toggle DHCP: ' + error.message);
+                        this.dhcpConfig.enabled = !this.dhcpConfig.enabled; // Revert toggle
+                    } finally {
+                        this.loadingStates.dhcp = false;
+                    }
+                },
+
+                async saveDhcpConfig() {
+                    this.loadingStates.dhcp = true;
+                    try {
+                        // Convert strings back to arrays
+                        const config = JSON.parse(JSON.stringify(this.dhcpConfig));
+                        if (config.ipv4.dns_servers_str) {
+                            config.ipv4.dns_servers = config.ipv4.dns_servers_str.split(',').map(s => s.trim()).filter(s => s);
+                            delete config.ipv4.dns_servers_str;
+                        }
+                        if (config.ipv4.ntp_servers_str) {
+                            config.ipv4.ntp_servers = config.ipv4.ntp_servers_str.split(',').map(s => s.trim()).filter(s => s);
+                            delete config.ipv4.ntp_servers_str;
+                        }
+
+                        const headers = {'Content-Type': 'application/json'};
+                        if (this.csrfToken) {
+                            headers['X-CSRF-Token'] = this.csrfToken;
+                        }
+                        const response = await fetch('/api/dhcp/config', {
+                            method: 'PUT',
+                            headers: headers,
+                            body: JSON.stringify({dhcp: config}),
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.showLoginModal = true;
+                            return;
+                        }
+                        if (response.ok) {
+                            alert('DHCP configuration saved successfully');
+                            await this.loadDhcpStatus();
+                        } else {
+                            const data = await response.json();
+                            alert('Failed to save DHCP config: ' + (data.error || 'Unknown error'));
+                        }
+                    } catch (error) {
+                        console.error('Failed to save DHCP config:', error);
+                        alert('Failed to save DHCP config: ' + error.message);
+                    } finally {
+                        this.loadingStates.dhcp = false;
+                    }
+                },
+
+                async autoDetectSubnet(version) {
+                    try {
+                        const response = await fetch('/api/dhcp/config/auto-detect', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ipv4_address: '10.0.0.10'}),
+                            credentials: 'same-origin'
+                        });
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.ipv4_subnet) {
+                                this.dhcpConfig.ipv4.subnet = data.ipv4_subnet;
+                            }
+                            if (data.ipv4_range) {
+                                this.dhcpConfig.ipv4.range_start = data.ipv4_range.start;
+                                this.dhcpConfig.ipv4.range_end = data.ipv4_range.end;
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Failed to auto-detect subnet:', error);
+                    }
+                },
+
+                async autoDetectGateway(version) {
+                    try {
+                        const response = await fetch('/api/dhcp/config/auto-detect', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({}),
+                            credentials: 'same-origin'
+                        });
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.gateway && data.gateway.ipv4_gateway) {
+                                this.dhcpConfig.ipv4.gateway = data.gateway.ipv4_gateway;
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Failed to auto-detect gateway:', error);
+                    }
+                },
+
+                async loadDhcpLeases() {
+                    try {
+                        const response = await fetch('/api/dhcp/leases', {
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.showLoginModal = true;
+                            return;
+                        }
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.dhcpLeases = data.leases || [];
+                        }
+                    } catch (error) {
+                        console.error('Failed to load DHCP leases:', error);
+                    }
+                },
+
+                async deleteDhcpLease(mac) {
+                    if (!confirm('Are you sure you want to delete this lease?')) {
+                        return;
+                    }
+                    try {
+                        const headers = {};
+                        if (this.csrfToken) {
+                            headers['X-CSRF-Token'] = this.csrfToken;
+                        }
+                        const response = await fetch(`/api/dhcp/leases/${mac}`, {
+                            method: 'DELETE',
+                            headers: headers,
+                            credentials: 'same-origin'
+                        });
+                        if (response.ok) {
+                            await this.loadDhcpLeases();
+                        } else {
+                            alert('Failed to delete lease');
+                        }
+                    } catch (error) {
+                        console.error('Failed to delete lease:', error);
+                        alert('Failed to delete lease: ' + error.message);
                     }
                 }
             }
