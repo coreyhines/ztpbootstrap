@@ -107,7 +107,26 @@ def create_dhcp_container() -> bool:
         )
         if result.returncode != 0:
             logger.error(f"Failed to copy container file to systemd directory: {result.stderr}")
+            logger.error(
+                f"Source: {TEMP_DHCP_CONTAINER_FILE} (exists: {TEMP_DHCP_CONTAINER_FILE.exists()})"
+            )
+            logger.error(f"Target: {DHCP_CONTAINER_FILE}")
             return False
+
+        # Verify the file was copied (check via sudo since we may not have direct access)
+        verify_result = subprocess.run(
+            ["sudo", "test", "-f", str(DHCP_CONTAINER_FILE)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if verify_result.returncode != 0:
+            logger.error(
+                f"Container file verification failed - file not found at {DHCP_CONTAINER_FILE}"
+            )
+            return False
+
+        logger.info(f"Successfully created container file at {DHCP_CONTAINER_FILE}")
 
         # Reload systemd
         # Always use sudo since we're likely running inside a container
