@@ -87,8 +87,27 @@
 
         <!-- Main Content -->
         <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <!-- Status Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <!-- Application Tabs -->
+            <div class="bg-white rounded-lg shadow-sm mb-4">
+                <div class="border-b border-gray-200">
+                    <nav class="flex -mb-px">
+                        <button @click="activeApplication = 'ztpbootstrap'"
+                                :class="activeApplication === 'ztpbootstrap' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            ZTP Bootstrap Service
+                        </button>
+                        <button @click="activeApplication = 'dhcp'"
+                                :class="activeApplication === 'dhcp' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            DHCP Server
+                        </button>
+                    </nav>
+                </div>
+            </div>
+
+            <!-- Application-Specific Status Cards -->
+            <!-- ZTP Bootstrap Service Status Cards -->
+            <div x-show="activeApplication === 'ztpbootstrap'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
                 <!-- Service Status -->
                 <div class="bg-white rounded-lg shadow-sm p-4 border-l-4"
                      :class="status.container_running ? 'border-green-500' : 'border-red-500'">
@@ -161,10 +180,83 @@
                         </div>
                     </div>
                 </div>
+
             </div>
 
-            <!-- Device Connections Section -->
-            <div class="bg-white rounded-lg shadow-sm p-4 mb-4">
+            <!-- DHCP Server Status Cards -->
+            <div x-show="activeApplication === 'dhcp'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+                <!-- DHCP Service Status -->
+                <div class="bg-white rounded-lg shadow-sm p-4 border-l-4"
+                     :class="dhcpStatus.container && dhcpStatus.container.container_running ? 'border-green-500' : (dhcpStatus.enabled ? 'border-yellow-500' : 'border-gray-300')">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <p class="text-xs font-medium text-gray-600 mb-0.5">Service Status</p>
+                            <p class="text-2xl font-bold"
+                               :class="dhcpStatus.container && dhcpStatus.container.container_running ? 'text-green-600' : (dhcpStatus.enabled ? 'text-yellow-600' : 'text-gray-500')">
+                                <span x-text="dhcpStatus.container && dhcpStatus.container.container_running ? 'Running' : (dhcpStatus.enabled ? 'Starting...' : 'Stopped')"></span>
+                            </p>
+                            <p class="text-xs text-gray-500 mt-0.5">Kea Container</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-full flex items-center justify-center"
+                             :class="dhcpStatus.container && dhcpStatus.container.container_running ? 'bg-green-100' : (dhcpStatus.enabled ? 'bg-yellow-100' : 'bg-gray-100')">
+                            <svg x-show="dhcpStatus.container && dhcpStatus.container.container_running" class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            <svg x-show="dhcpStatus.enabled && (!dhcpStatus.container || !dhcpStatus.container.container_running)" class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <svg x-show="!dhcpStatus.enabled" class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DHCP Container File -->
+                <div class="bg-white rounded-lg shadow-sm p-4 border-l-4"
+                     :class="dhcpStatus.container && dhcpStatus.container.exists ? 'border-green-500' : 'border-gray-300'">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <p class="text-xs font-medium text-gray-600 mb-0.5">Container File</p>
+                            <p class="text-2xl font-bold" :class="dhcpStatus.container && dhcpStatus.container.exists ? 'text-green-600' : 'text-gray-500'">
+                                <span x-text="dhcpStatus.container && dhcpStatus.container.exists ? 'Exists' : 'Missing'"></span>
+                            </p>
+                            <p class="text-xs text-gray-500 mt-0.5">systemd unit</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-full flex items-center justify-center"
+                             :class="dhcpStatus.container && dhcpStatus.container.exists ? 'bg-green-100' : 'bg-gray-100'">
+                            <svg x-show="dhcpStatus.container && dhcpStatus.container.exists" class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            <svg x-show="!(dhcpStatus.container && dhcpStatus.container.exists)" class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DHCP Networking Mode -->
+                <div class="bg-white rounded-lg shadow-sm p-4 border-l-4 border-blue-500">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <p class="text-xs font-medium text-gray-600 mb-0.5">Networking</p>
+                            <p class="text-2xl font-bold text-blue-600">
+                                <span x-text="dhcpStatus.networking_mode === 'host' ? 'Host' : (dhcpStatus.networking_mode === 'macvlan' ? 'MacVLAN' : 'Unknown')"></span>
+                            </p>
+                            <p class="text-xs text-gray-500 mt-0.5">Network Mode</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-full flex items-center justify-center bg-blue-100">
+                            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.212 0"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Application-Specific Content Area -->
+            <!-- ZTP Bootstrap: Device Connections -->
+            <div x-show="activeApplication === 'ztpbootstrap'" class="bg-white rounded-lg shadow-sm p-4 mb-4">
                 <div class="flex items-center justify-between mb-3">
                     <div>
                         <h2 class="text-base font-semibold text-gray-900 mb-1">Device Connections</h2>
@@ -225,8 +317,49 @@
                 </div>
             </div>
 
-            <!-- Tabs -->
-            <div class="bg-white rounded-lg shadow-sm">
+            <!-- DHCP: Active Leases (in same position as Device Connections) -->
+            <div x-show="activeApplication === 'dhcp'" class="bg-white rounded-lg shadow-sm p-4 mb-4">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <h2 class="text-base font-semibold text-gray-900 mb-1">Active Leases</h2>
+                        <p class="text-xs text-gray-500">Current DHCP leases and reservations</p>
+                    </div>
+                    <button @click="loadDhcpLeases()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Refresh</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MAC Address</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP Address</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">State</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <template x-for="(lease, index) in dhcpLeases" :key="`${lease.mac}-${lease.ip}-${index}`">
+                                <tr>
+                                    <td class="px-4 py-3 text-sm text-gray-900" x-text="lease.mac"></td>
+                                    <td class="px-4 py-3 text-sm text-gray-900" x-text="lease.ip"></td>
+                                    <td class="px-4 py-3 text-sm text-gray-500" x-text="lease.type"></td>
+                                    <td class="px-4 py-3 text-sm text-gray-500" x-text="lease.state"></td>
+                                    <td class="px-4 py-3 text-sm">
+                                        <button @click="deleteDhcpLease(lease.mac)" class="text-red-600 hover:text-red-800">Delete</button>
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr x-show="dhcpLeases.length === 0">
+                                <td colspan="5" class="px-4 py-4 text-sm text-gray-500 text-center">No active leases</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Application-Specific Tabs -->
+            <!-- ZTP Bootstrap Tabs -->
+            <div x-show="activeApplication === 'ztpbootstrap'" class="bg-white rounded-lg shadow-sm">
                 <div class="border-b border-gray-200">
                     <nav class="flex -mb-px">
                         <button @click="activeTab = 'scripts'"
@@ -244,10 +377,25 @@
                                 class="px-6 py-4 border-b-2 font-medium text-sm">
                             Logs
                         </button>
-                        <button @click="activeTab = 'dhcp'"
-                                :class="activeTab === 'dhcp' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                    </nav>
+                </div>
+            <div class="bg-white rounded-lg shadow-sm">
+                <div class="border-b border-gray-200">
+                    <nav class="flex -mb-px">
+                        <button @click="activeTab = 'scripts'"
+                                :class="activeTab === 'scripts' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                                 class="px-6 py-4 border-b-2 font-medium text-sm">
-                            DHCP
+                            Bootstrap Scripts
+                        </button>
+                        <button @click="triggerConfigTab()"
+                                :class="activeTab === 'config' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            Configuration
+                        </button>
+                        <button @click="activeTab = 'logs'"
+                                :class="activeTab === 'logs' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            Logs
                         </button>
                     </nav>
                 </div>
@@ -452,6 +600,7 @@
                                 <option value="container">Container Logs</option>
                                 <option value="nginx_access">Nginx Access Log</option>
                                 <option value="nginx_error">Nginx Error Log</option>
+                                <option value="dhcp">DHCP Logs</option>
                             </select>
                             <select x-model="logLines" @change="loadLogs()" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                                 <option value="50">Last 50 lines</option>
@@ -507,10 +656,34 @@
                     </div>
                 </div>
 
-                <!-- DHCP Tab -->
-                <div x-show="activeTab === 'dhcp'" class="p-6">
+            </div>
+
+            <!-- DHCP Server Tabs -->
+            <div x-show="activeApplication === 'dhcp'" class="bg-white rounded-lg shadow-sm">
+                <div class="border-b border-gray-200">
+                    <nav class="flex -mb-px">
+                        <button @click="activeDhcpTab = 'config'"
+                                :class="activeDhcpTab === 'config' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            Configuration
+                        </button>
+                        <button @click="activeDhcpTab = 'status'"
+                                :class="activeDhcpTab === 'status' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            Status
+                        </button>
+                        <button @click="activeDhcpTab = 'logs'"
+                                :class="activeDhcpTab === 'logs' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            Logs
+                        </button>
+                    </nav>
+                </div>
+
+                <!-- DHCP Configuration Tab -->
+                <div x-show="activeDhcpTab === 'config'" class="p-6">
                     <div class="mb-4">
-                        <h2 class="text-lg font-semibold text-gray-900 mb-2">DHCP Server Configuration</h2>
+                        <h2 class="text-lg font-semibold text-gray-900 mb-2">DHCP Server</h2>
                         <p class="text-sm text-gray-600">Configure and manage Kea DHCP server</p>
                     </div>
 
@@ -559,8 +732,26 @@
                         </div>
                     </div>
 
-                    <!-- DHCP Configuration Form (shown when enabled) -->
-                    <div x-show="dhcpConfig.enabled" class="space-y-6">
+                    <!-- DHCP Sub-tabs -->
+                    <div class="mb-6 border-b border-gray-200">
+                        <nav class="-mb-px flex space-x-8">
+                            <button @click="activeDhcpTab = 'config'"
+                                    :class="activeDhcpTab === 'config' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                    class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
+                                Configuration
+                            </button>
+                            <button @click="activeDhcpTab = 'status'"
+                                    :class="activeDhcpTab === 'status' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                    class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
+                                Status
+                            </button>
+                        </nav>
+                    </div>
+
+                    <!-- Configuration Tab -->
+                    <div x-show="activeDhcpTab === 'config'" class="space-y-6">
+                        <!-- DHCP Configuration Form (always visible in Configuration tab) -->
+                        <div class="space-y-6">
                         <!-- IPv4 Configuration -->
                         <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
                             <h3 class="text-md font-semibold text-gray-900 mb-4">IPv4 Configuration</h3>
@@ -590,20 +781,53 @@
                             </div>
                         </div>
 
+                        <!-- IPv6 Configuration -->
+                        <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+                            <h3 class="text-md font-semibold text-gray-900 mb-4">IPv6 Configuration</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Subnet (CIDR)</label>
+                                    <div class="flex gap-2">
+                                        <input type="text" x-model="dhcpConfig.ipv6.subnet" placeholder="2001:db8::/64" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                        <button @click="autoDetectSubnet('ipv6')" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Auto-detect</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Gateway</label>
+                                    <div class="flex gap-2">
+                                        <input type="text" x-model="dhcpConfig.ipv6.gateway" placeholder="2001:db8::1" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                        <button @click="autoDetectGateway('ipv6')" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Auto-detect</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Range Start</label>
+                                    <input type="text" x-model="dhcpConfig.ipv6.range_start" placeholder="2001:db8::50" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Range End</label>
+                                    <input type="text" x-model="dhcpConfig.ipv6.range_end" placeholder="2001:db8::ff00" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- DNS & Domain -->
                         <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
                             <h3 class="text-md font-semibold text-gray-900 mb-4">DNS & Domain</h3>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">DNS Servers (comma-separated)</label>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">IPv4 DNS Servers (comma-separated)</label>
                                     <input type="text" x-model="dhcpConfig.ipv4.dns_servers_str" placeholder="8.8.8.8, 8.8.4.4" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">IPv6 DNS Servers (comma-separated)</label>
+                                    <input type="text" x-model="dhcpConfig.ipv6.dns_servers_str" placeholder="2001:4860:4860::8888, 2001:4860:4860::8844" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Domain Name</label>
                                     <input type="text" x-model="dhcpConfig.ipv4.domain" placeholder="example.com" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                                 </div>
                                 <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">NTP Servers (comma-separated)</label>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">IPv4 NTP Servers (comma-separated)</label>
                                     <input type="text" x-model="dhcpConfig.ipv4.ntp_servers_str" placeholder="time.nist.gov" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                                 </div>
                             </div>
@@ -616,42 +840,177 @@
                                 <span x-show="loadingStates.dhcp">Saving...</span>
                             </button>
                         </div>
+                        </div>
+                    </div>
 
-                        <!-- Leases Table -->
-                        <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-                            <div class="flex items-center justify-between mb-4">
-                                <h3 class="text-md font-semibold text-gray-900">Active Leases</h3>
-                                <button @click="loadDhcpLeases()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Refresh</button>
+                    <!-- Status Tab -->
+                    <div x-show="activeDhcpTab === 'status'" class="space-y-6">
+                        <!-- Current Configuration Display -->
+                        <div class="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg shadow-sm border border-blue-200 p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <div class="flex items-center">
+                                <svg class="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <h3 class="text-lg font-semibold text-gray-900">Current Configuration</h3>
                             </div>
-                            <div class="overflow-x-auto">
-                                <table class="min-w-full divide-y divide-gray-200">
-                                    <thead class="bg-gray-50">
-                                        <tr>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MAC Address</th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP Address</th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">State</th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200">
-                                        <template x-for="lease in dhcpLeases" :key="lease.mac">
-                                            <tr>
-                                                <td class="px-4 py-3 text-sm text-gray-900" x-text="lease.mac"></td>
-                                                <td class="px-4 py-3 text-sm text-gray-900" x-text="lease.ip"></td>
-                                                <td class="px-4 py-3 text-sm text-gray-500" x-text="lease.type"></td>
-                                                <td class="px-4 py-3 text-sm text-gray-500" x-text="lease.state"></td>
-                                                <td class="px-4 py-3 text-sm">
-                                                    <button @click="deleteDhcpLease(lease.mac)" class="text-red-600 hover:text-red-800">Delete</button>
-                                                </td>
-                                            </tr>
-                                        </template>
-                                        <tr x-show="dhcpLeases.length === 0">
-                                            <td colspan="5" class="px-4 py-4 text-sm text-gray-500 text-center">No active leases</td>
-                                        </tr>
-                                    </tbody>
-                                </table>
+                            <div class="flex items-center space-x-2">
+                                <span class="px-3 py-1 text-xs font-semibold rounded-full"
+                                      :class="dhcpStatus.container && dhcpStatus.container.container_running ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'"
+                                      x-text="dhcpStatus.container && dhcpStatus.container.container_running ? 'Container Running' : 'Container Stopped'"></span>
+                                <span class="px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800"
+                                      x-text="dhcpStatus.networking_mode === 'host' ? 'Host Network' : 'MacVLAN'"></span>
                             </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <!-- IPv4 Configuration -->
+                            <div class="bg-white rounded-lg p-4 border border-blue-100 shadow-sm">
+                                <div class="flex items-center mb-3">
+                                    <div class="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
+                                    <h4 class="text-sm font-semibold text-gray-900">IPv4 Configuration</h4>
+                                </div>
+                                <div class="space-y-2 text-sm">
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Subnet:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.subnet || 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Gateway:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.gateway || 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Range:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv4.range_start && dhcpConfig.ipv4.range_end) ? (dhcpConfig.ipv4.range_start + ' - ' + dhcpConfig.ipv4.range_end) : 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">DNS Servers:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.dns_servers_str || (dhcpConfig.ipv4.dns_servers && dhcpConfig.ipv4.dns_servers.length > 0 ? dhcpConfig.ipv4.dns_servers.join(', ') : 'Not configured')"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100" x-show="dhcpConfig.ipv4.domain">
+                                        <span class="text-gray-600 font-medium">Domain:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.domain"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1" x-show="dhcpConfig.ipv4.ntp_servers_str || (dhcpConfig.ipv4.ntp_servers && dhcpConfig.ipv4.ntp_servers.length > 0)">
+                                        <span class="text-gray-600 font-medium">NTP Servers:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.ntp_servers_str || (dhcpConfig.ipv4.ntp_servers ? dhcpConfig.ipv4.ntp_servers.join(', ') : 'Not configured')"></span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- IPv6 Configuration -->
+                            <div class="bg-white rounded-lg p-4 border border-blue-100 shadow-sm">
+                                <div class="flex items-center mb-3">
+                                    <div class="w-2 h-2 bg-indigo-500 rounded-full mr-2"></div>
+                                    <h4 class="text-sm font-semibold text-gray-900">IPv6 Configuration</h4>
+                                </div>
+                                <div class="space-y-2 text-sm">
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Subnet:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv6.subnet || 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Gateway:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv6.gateway || 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Range:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv6.range_start && dhcpConfig.ipv6.range_end) ? (dhcpConfig.ipv6.range_start + ' - ' + dhcpConfig.ipv6.range_end) : 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">DNS Servers:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv6.dns_servers_str || (dhcpConfig.ipv6.dns_servers && dhcpConfig.ipv6.dns_servers.length > 0 ? dhcpConfig.ipv6.dns_servers.join(', ') : 'Not configured')"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1" x-show="dhcpConfig.ipv6.domain">
+                                        <span class="text-gray-600 font-medium">Domain:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv6.domain"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Container Status Details -->
+                        <div class="mt-4 pt-4 border-t border-blue-200">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                <div class="flex items-center">
+                                    <svg class="w-4 h-4 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                                    </svg>
+                                    <span class="text-gray-600">Service:</span>
+                                    <span class="ml-2 font-medium"
+                                          :class="dhcpStatus.container && dhcpStatus.container.service_active ? 'text-green-600' : 'text-gray-500'"
+                                          x-text="dhcpStatus.container && dhcpStatus.container.service_active ? 'Active' : 'Inactive'"></span>
+                                </div>
+                                <div class="flex items-center">
+                                    <svg class="w-4 h-4 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path>
+                                    </svg>
+                                    <span class="text-gray-600">Container File:</span>
+                                    <span class="ml-2 font-medium"
+                                          :class="dhcpStatus.container && dhcpStatus.container.exists ? 'text-green-600' : 'text-gray-500'"
+                                          x-text="dhcpStatus.container && dhcpStatus.container.exists ? 'Exists' : 'Missing'"></span>
+                                </div>
+                                <div class="flex items-center">
+                                    <svg class="w-4 h-4 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                    </svg>
+                                    <span class="text-gray-600">Status:</span>
+                                    <span class="ml-2 font-medium text-gray-900"
+                                          x-text="dhcpStatus.container && dhcpStatus.container.service_status ? dhcpStatus.container.service_status : 'Unknown'"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- DHCP Logs Tab -->
+                    <div x-show="activeDhcpTab === 'logs'" class="p-6">
+                        <div class="mb-4 flex items-center justify-between flex-wrap gap-4">
+                            <div>
+                                <h2 class="text-lg font-semibold text-gray-900 mb-2">DHCP Server Logs</h2>
+                                <p class="text-sm text-gray-600">View logs from Kea DHCP server</p>
+                            </div>
+                            <div class="flex items-center space-x-2 flex-wrap">
+                                <div class="relative">
+                                    <input type="text"
+                                           x-model="logSearchTerm"
+                                           @input="highlightLogs()"
+                                           placeholder="Search logs..."
+                                           class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-48">
+                                    <button x-show="logSearchTerm"
+                                            @click="logSearchTerm = ''; highlightLogs()"
+                                            class="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <select x-model="logLines" @change="loadLogs()" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                    <option value="50">Last 50 lines</option>
+                                    <option value="100">Last 100 lines</option>
+                                    <option value="200">Last 200 lines</option>
+                                    <option value="500">Last 500 lines</option>
+                                </select>
+                                <button @click="markLogs()" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm font-medium transition-colors">
+                                    Mark Logs
+                                </button>
+                                <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
+                                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                    </svg>
+                                    <span>New entries</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto" x-ref="logsContainer">
+                            <div class="text-xs text-gray-400 mb-2 font-semibold flex items-center justify-between">
+                                <span>DHCP Logs</span>
+                                <span x-show="logNewEntriesIndicator" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-500 text-white animate-pulse">
+                                    New entries
+                                </span>
+                            </div>
+                            <pre class="text-sm font-mono overflow-x-auto whitespace-pre-wrap text-green-400"
+                                 x-html="highlightSearch(formatLogsWithMarks(reverseLogLines(logs)))"></pre>
                         </div>
                     </div>
                 </div>
@@ -862,6 +1221,7 @@
     <script>
         function dashboard() {
             return {
+                activeApplication: 'ztpbootstrap', // 'ztpbootstrap' or 'dhcp'
                 activeTab: 'scripts',
                 status: {
                     container_running: false,
@@ -931,6 +1291,15 @@
                         domain: '',
                         ntp_servers: [],
                         ntp_servers_str: ''
+                    },
+                    ipv6: {
+                        subnet: '',
+                        range_start: '',
+                        range_end: '',
+                        gateway: '',
+                        dns_servers: [],
+                        dns_servers_str: '',
+                        domain: ''
                     }
                 },
                 dhcpStatus: {
@@ -940,12 +1309,23 @@
                     container: {exists: false, service_active: false, container_running: false}
                 },
                 dhcpLeases: [],
+                activeDhcpTab: 'config', // 'config' or 'status'
 
                 async init() {
                     // Cleanup auto-refresh on page unload
                     window.addEventListener('beforeunload', () => {
                         if (this.logRefreshInterval) {
                             clearInterval(this.logRefreshInterval);
+                        }
+                    });
+
+                    // Watch for application changes
+                    this.$watch('activeApplication', (newApp) => {
+                        if (newApp === 'dhcp') {
+                            // Load DHCP data when switching to DHCP application
+                            this.loadDhcpStatus();
+                            this.loadDhcpConfig();
+                            this.loadDhcpLeases();
                         }
                     });
 
@@ -958,10 +1338,21 @@
                             // Stop auto-refresh when leaving logs tab
                             this.stopAutoRefresh();
                         }
-                        if (newTab === 'dhcp') {
-                            // Load DHCP data when entering DHCP tab
-                            this.loadDhcpStatus();
-                            this.loadDhcpConfig();
+                    });
+
+                    // Watch for DHCP tab changes
+                    this.$watch('activeDhcpTab', (newTab) => {
+                        if (newTab === 'logs') {
+                            // Set log source to DHCP and start auto-refresh when entering DHCP logs tab
+                            this.logSource = 'dhcp';
+                            this.loadLogs();
+                            this.startAutoRefresh();
+                        } else {
+                            // Stop auto-refresh when leaving DHCP logs tab
+                            this.stopAutoRefresh();
+                        }
+                        if (newTab === 'status') {
+                            // Load leases when entering status tab
                             this.loadDhcpLeases();
                         }
                     });
@@ -988,11 +1379,30 @@
                     await this.loadBackups();
                     // Don't load config on init - require auth first
                     // Config will be loaded when user clicks Configuration tab
+
+                    // Load DHCP status if authenticated
+                    if (this.authenticated) {
+                        await this.loadDhcpStatus();
+                        // Start auto-refresh for DHCP status (every 5 seconds)
+                        setInterval(() => {
+                            if (this.authenticated) {
+                                this.loadDhcpStatus();
+                            }
+                        }, 5000);
+                    }
+                    // Load application-specific data
+                    if (this.activeApplication === 'ztpbootstrap') {
+                        await this.loadScripts();
+                        await this.loadDeviceConnections();
+                    } else if (this.activeApplication === 'dhcp') {
+                        await this.loadDhcpStatus();
+                        await this.loadDhcpConfig();
+                        await this.loadDhcpLeases();
+                    }
                     await this.loadLogs();
-                    await this.loadDeviceConnections();
 
                     // Start auto-refresh if we're on the logs tab
-                    if (this.activeTab === 'logs') {
+                    if (this.activeTab === 'logs' || (this.activeApplication === 'dhcp' && this.activeDhcpTab === 'logs')) {
                         this.startAutoRefresh();
                     }
 
@@ -1005,8 +1415,15 @@
                     // Auto-refresh every 5 seconds
                     setInterval(() => {
                         this.loadStatus();
-                        this.loadDeviceConnections();
-                        if (this.activeTab === 'logs') {
+                        if (this.activeApplication === 'ztpbootstrap') {
+                            this.loadDeviceConnections();
+                        } else if (this.activeApplication === 'dhcp') {
+                            this.loadDhcpStatus();
+                            if (this.activeDhcpTab === 'status') {
+                                this.loadDhcpLeases();
+                            }
+                        }
+                        if (this.activeTab === 'logs' || (this.activeApplication === 'dhcp' && this.activeDhcpTab === 'logs')) {
                             this.loadLogs();
                         }
                     }, 5000);
@@ -1833,7 +2250,7 @@
                     }
                     // Start auto-refresh every 2 seconds
                     this.logRefreshInterval = setInterval(() => {
-                        if (this.activeTab === 'logs') {
+                        if (this.activeTab === 'logs' || (this.activeApplication === 'dhcp' && this.activeDhcpTab === 'logs')) {
                             this.loadLogs();
                         }
                     }, 2000);
@@ -2231,12 +2648,28 @@
                         }
                         if (response.ok) {
                             await this.loadDhcpStatus();
+                            // Refresh status again after delays to catch container state changes
+                            setTimeout(() => this.loadDhcpStatus(), 2000);
+                            setTimeout(() => this.loadDhcpStatus(), 5000);
                             if (this.dhcpConfig.enabled) {
                                 await this.loadDhcpConfig();
                             }
                         } else {
-                            const data = await response.json();
-                            alert('Failed to ' + (this.dhcpConfig.enabled ? 'enable' : 'disable') + ' DHCP: ' + (data.error || 'Unknown error'));
+                            // Try to parse JSON error response, but handle non-JSON responses gracefully
+                            let errorMessage = 'Unknown error';
+                            try {
+                                const contentType = response.headers.get('content-type');
+                                if (contentType && contentType.includes('application/json')) {
+                                    const data = await response.json();
+                                    errorMessage = data.error || `HTTP ${response.status}: ${response.statusText}`;
+                                } else {
+                                    const text = await response.text();
+                                    errorMessage = text || `HTTP ${response.status}: ${response.statusText}`;
+                                }
+                            } catch (parseError) {
+                                errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+                            }
+                            alert('Failed to ' + (this.dhcpConfig.enabled ? 'enable' : 'disable') + ' DHCP: ' + errorMessage);
                             this.dhcpConfig.enabled = !this.dhcpConfig.enabled; // Revert toggle
                         }
                     } catch (error) {
@@ -2253,6 +2686,16 @@
                     try {
                         // Convert strings back to arrays
                         const config = JSON.parse(JSON.stringify(this.dhcpConfig));
+
+                        // Ensure ipv4 and ipv6 objects exist
+                        if (!config.ipv4) {
+                            config.ipv4 = {};
+                        }
+                        if (!config.ipv6) {
+                            config.ipv6 = {};
+                        }
+
+                        // Convert IPv4 string fields to arrays
                         if (config.ipv4.dns_servers_str) {
                             config.ipv4.dns_servers = config.ipv4.dns_servers_str.split(',').map(s => s.trim()).filter(s => s);
                             delete config.ipv4.dns_servers_str;
@@ -2260,6 +2703,12 @@
                         if (config.ipv4.ntp_servers_str) {
                             config.ipv4.ntp_servers = config.ipv4.ntp_servers_str.split(',').map(s => s.trim()).filter(s => s);
                             delete config.ipv4.ntp_servers_str;
+                        }
+
+                        // Convert IPv6 string fields to arrays
+                        if (config.ipv6.dns_servers_str) {
+                            config.ipv6.dns_servers = config.ipv6.dns_servers_str.split(',').map(s => s.trim()).filter(s => s);
+                            delete config.ipv6.dns_servers_str;
                         }
 
                         const headers = {'Content-Type': 'application/json'};
@@ -2280,6 +2729,8 @@
                         if (response.ok) {
                             alert('DHCP configuration saved successfully');
                             await this.loadDhcpStatus();
+                            // Refresh status again after a short delay to catch container startup
+                            setTimeout(() => this.loadDhcpStatus(), 2000);
                         } else {
                             const data = await response.json();
                             alert('Failed to save DHCP config: ' + (data.error || 'Unknown error'));
@@ -2294,20 +2745,33 @@
 
                 async autoDetectSubnet(version) {
                     try {
+                        const requestBody = version === 'ipv4'
+                            ? {ipv4_address: this.dhcpConfig.ipv4.subnet || '10.0.0.10'}
+                            : {ipv6_address: this.dhcpConfig.ipv6.subnet || '2001:db8::10'};
                         const response = await fetch('/api/dhcp/config/auto-detect', {
                             method: 'POST',
                             headers: {'Content-Type': 'application/json'},
-                            body: JSON.stringify({ipv4_address: '10.0.0.10'}),
+                            body: JSON.stringify(requestBody),
                             credentials: 'same-origin'
                         });
                         if (response.ok) {
                             const data = await response.json();
-                            if (data.ipv4_subnet) {
-                                this.dhcpConfig.ipv4.subnet = data.ipv4_subnet;
-                            }
-                            if (data.ipv4_range) {
-                                this.dhcpConfig.ipv4.range_start = data.ipv4_range.start;
-                                this.dhcpConfig.ipv4.range_end = data.ipv4_range.end;
+                            if (version === 'ipv4') {
+                                if (data.ipv4_subnet) {
+                                    this.dhcpConfig.ipv4.subnet = data.ipv4_subnet;
+                                }
+                                if (data.ipv4_range) {
+                                    this.dhcpConfig.ipv4.range_start = data.ipv4_range.start;
+                                    this.dhcpConfig.ipv4.range_end = data.ipv4_range.end;
+                                }
+                            } else {
+                                if (data.ipv6_subnet) {
+                                    this.dhcpConfig.ipv6.subnet = data.ipv6_subnet;
+                                }
+                                if (data.ipv6_range) {
+                                    this.dhcpConfig.ipv6.range_start = data.ipv6_range.start;
+                                    this.dhcpConfig.ipv6.range_end = data.ipv6_range.end;
+                                }
                             }
                         }
                     } catch (error) {
@@ -2325,8 +2789,10 @@
                         });
                         if (response.ok) {
                             const data = await response.json();
-                            if (data.gateway && data.gateway.ipv4_gateway) {
+                            if (version === 'ipv4' && data.gateway && data.gateway.ipv4_gateway) {
                                 this.dhcpConfig.ipv4.gateway = data.gateway.ipv4_gateway;
+                            } else if (version === 'ipv6' && data.gateway && data.gateway.ipv6_gateway) {
+                                this.dhcpConfig.ipv6.gateway = data.gateway.ipv6_gateway;
                             }
                         }
                     } catch (error) {
@@ -2346,7 +2812,12 @@
                         }
                         if (response.ok) {
                             const data = await response.json();
+                            console.log('DHCP leases response:', data);
                             this.dhcpLeases = data.leases || [];
+                            console.log('Loaded leases:', this.dhcpLeases.length);
+                        } else {
+                            const errorText = await response.text();
+                            console.error('Failed to load DHCP leases:', response.status, errorText);
                         }
                     } catch (error) {
                         console.error('Failed to load DHCP leases:', error);
