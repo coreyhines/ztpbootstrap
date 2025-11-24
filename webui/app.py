@@ -475,8 +475,15 @@ def auth_login():
             try:
                 # Extract the base64 hash
                 hash_part = password_hash.split(":", 2)[2]
-                # Decode the base64 hash
-                stored_hash = base64.b64decode(hash_part)
+                # Decode the base64 hash (handle padding if needed)
+                try:
+                    stored_hash = base64.b64decode(hash_part)
+                except Exception:
+                    # Add padding if needed (base64 strings must be multiple of 4)
+                    missing_padding = len(hash_part) % 4
+                    if missing_padding:
+                        hash_part += "=" * (4 - missing_padding)
+                    stored_hash = base64.b64decode(hash_part)
                 # Generate hash with same parameters (salt='ztpbootstrap', iterations=100000)
                 computed_hash = hashlib.pbkdf2_hmac(
                     "sha256", password.encode("utf-8"), b"ztpbootstrap", 100000
@@ -1889,8 +1896,207 @@ def get_logs():
                 except Exception as e:
                     logs = f"Error accessing nginx error log: {str(e)}"
 
-        # Handle container logs (default) - only if not nginx_access or nginx_error
-        if log_source not in ["nginx_access", "nginx_error"]:
+        elif log_source == "dhcp":
+            # DHCP logs from Kea server
+            # Try multiple sources: Kea log file, journalctl, podman logs
+            log_paths = [
+                Path("/opt/containerdata/ztpbootstrap/dhcp/logs/kea.log"),  # Kea log file
+                CONFIG_DIR / "dhcp" / "logs" / "kea.log",  # Alternative path
+            ]
+
+            log_found = False
+            for log_path in log_paths:
+                if log_path.exists():
+                    try:
+                        with open(log_path, "r") as f:
+                            all_lines = f.readlines()
+                            recent_lines = (
+                                all_lines[-lines:] if len(all_lines) > lines else all_lines
+                            )
+                            # Parse and format Kea logs
+                            formatted_lines = []
+                            for line in recent_lines:
+                                # Kea logs are typically JSON or text format
+                                # Try to parse JSON first, fallback to text
+                                try:
+                                    log_entry = json.loads(line.strip())
+                                    # Format JSON log entry
+                                    timestamp = log_entry.get("timestamp", "")
+                                    level = log_entry.get("severity", "INFO")
+                                    message = log_entry.get("message", "")
+                                    # Extract relay agent info if present
+                                    relay_info = ""
+                                    if "relay" in log_entry:
+                                        relay = log_entry["relay"]
+                                        giaddr = relay.get("giaddr", "")
+                                        if giaddr:
+                                            relay_info = f"[RELAY: {giaddr}] "
+                                    formatted_lines.append(
+                                        f"{timestamp} [{level}] {relay_info}{message}"
+                                    )
+                                except (json.JSONDecodeError, ValueError):
+                                    # Plain text log, use as-is
+                                    formatted_lines.append(line.rstrip())
+                            logs = "\n".join(formatted_lines)
+                            log_found = True
+                            break
+                    except Exception as e:
+                        logs = f"Error reading DHCP log from {log_path}: {str(e)}"
+                        log_found = True
+                        break
+
+            if not log_found:
+                # Fallback 1: Try podman logs with sudo (for host access)
+                # Get both stdout and stderr from Kea container
+                try:
+                    # Get stdout/stderr from container (includes Kea operational logs)
+                    result = subprocess.run(
+                        [
+                            "sudo",
+                            "podman",
+                            "logs",
+                            "--tail",
+                            str(lines),
+                            "--timestamps",
+                            "ztpbootstrap-dhcp",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        logs = result.stdout
+                        # Also include stderr if present (Kea errors/warnings)
+                        if result.stderr.strip():
+                            logs = f"{logs}\n\n--- STDERR ---\n{result.stderr}"
+                        log_found = True
+                except FileNotFoundError:
+                    pass
+                except Exception as e:
+                    # Try without sudo as fallback
+                    try:
+                        result = subprocess.run(
+                            [
+                                "podman",
+                                "logs",
+                                "--tail",
+                                str(lines),
+                                "--timestamps",
+                                "ztpbootstrap-dhcp",
+                            ],
+                            capture_output=True,
+                            text=True,
+                            timeout=10,
+                        )
+                        if result.returncode == 0 and result.stdout.strip():
+                            logs = result.stdout
+                            if result.stderr.strip():
+                                logs = f"{logs}\n\n--- STDERR ---\n{result.stderr}"
+                            log_found = True
+                    except Exception:
+                        pass
+
+            if not log_found:
+                # Fallback 2: Try journalctl for DHCP service (with sudo and journal path)
+                journal_paths = [
+                    Path("/run/systemd/journal"),
+                    Path("/run/log/journal"),
+                    Path("/var/log/journal"),
+                ]
+                journal_accessible = False
+                journal_path = None
+                for jpath in journal_paths:
+                    if jpath.exists():
+                        try:
+                            if os.access(jpath, os.R_OK):
+                                journal_accessible = True
+                                journal_path = jpath
+                                break
+                        except:
+                            pass
+
+                if journal_accessible and journal_path:
+                    try:
+                        # Try with sudo first
+                        result = subprocess.run(
+                            [
+                                "sudo",
+                                "journalctl",
+                                "-D",
+                                str(journal_path),
+                                "--system",
+                                "-u",
+                                "ztpbootstrap-dhcp.service",
+                                "-n",
+                                str(lines),
+                                "--no-pager",
+                                "--no-hostname",
+                            ],
+                            capture_output=True,
+                            text=True,
+                            timeout=5,
+                        )
+                        if result.returncode == 0 and result.stdout.strip():
+                            logs = result.stdout
+                            log_found = True
+                    except (FileNotFoundError, subprocess.TimeoutExpired):
+                        pass
+                    except Exception as e:
+                        # Try without sudo
+                        try:
+                            result = subprocess.run(
+                                [
+                                    "journalctl",
+                                    "-D",
+                                    str(journal_path),
+                                    "--system",
+                                    "-u",
+                                    "ztpbootstrap-dhcp.service",
+                                    "-n",
+                                    str(lines),
+                                    "--no-pager",
+                                    "--no-hostname",
+                                ],
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
+                            )
+                            if result.returncode == 0 and result.stdout.strip():
+                                logs = result.stdout
+                                log_found = True
+                        except Exception:
+                            logs = f"Error accessing DHCP logs via journalctl: {str(e)}"
+                            log_found = True
+                else:
+                    # Try standard journalctl without path
+                    try:
+                        result = subprocess.run(
+                            [
+                                "journalctl",
+                                "-u",
+                                "ztpbootstrap-dhcp.service",
+                                "-n",
+                                str(lines),
+                                "--no-pager",
+                            ],
+                            capture_output=True,
+                            text=True,
+                            timeout=5,
+                        )
+                        if result.returncode == 0 and result.stdout.strip():
+                            logs = result.stdout
+                            log_found = True
+                    except (FileNotFoundError, subprocess.TimeoutExpired):
+                        pass
+                    except Exception as e:
+                        logs = f"Error accessing DHCP logs via journalctl: {str(e)}"
+                        log_found = True
+
+            if not log_found:
+                logs = "DHCP logs not found. DHCP server may not be running or logs not configured."
+
+        # Handle container logs (default) - only if not nginx_access, nginx_error, or dhcp
+        if log_source not in ["nginx_access", "nginx_error", "dhcp"]:
             # Helper function to check if a systemd service exists
             # Note: systemctl may not be available in containers, so we try multiple methods
             def check_service_exists(service_name):
@@ -2594,17 +2800,20 @@ def update_dhcp_config():
                 if "Dhcp4" in kea_config:
                     dhcp4_file = dhcp_config_dir / "kea-dhcp4.conf"
                     with open(dhcp4_file, "w") as f:
-                        json.dump(kea_config["Dhcp4"], f, indent=2)
+                        # Kea expects the config wrapped in a top-level "Dhcp4" key
+                        json.dump({"Dhcp4": kea_config["Dhcp4"]}, f, indent=2)
 
                 if "Dhcp6" in kea_config:
                     dhcp6_file = dhcp_config_dir / "kea-dhcp6.conf"
                     with open(dhcp6_file, "w") as f:
-                        json.dump(kea_config["Dhcp6"], f, indent=2)
+                        # Kea expects the config wrapped in a top-level "Dhcp6" key
+                        json.dump({"Dhcp6": kea_config["Dhcp6"]}, f, indent=2)
 
                 if "Control-agent" in kea_config:
                     ctrl_agent_file = dhcp_config_dir / "kea-ctrl-agent.conf"
                     with open(ctrl_agent_file, "w") as f:
-                        json.dump(kea_config["Control-agent"], f, indent=2)
+                        # Kea expects the config wrapped in a top-level "Control-agent" key
+                        json.dump({"Control-agent": kea_config["Control-agent"]}, f, indent=2)
 
                 # Reload Kea config if container is running
                 try:
@@ -2711,18 +2920,10 @@ def get_dhcp_status():
 def enable_dhcp():
     """Enable DHCP (creates container if needed)"""
     try:
-        # Check for port conflicts
+        # Check for port conflicts (warning only, don't block)
+        # In VM environments (like QEMU), other DHCP servers may be running
+        # We'll attempt to start Kea anyway - it will fail with a clear error if it can't bind
         port_conflicts = check_dhcp_port_conflicts()
-        if port_conflicts.get("ipv4_conflict") or port_conflicts.get("ipv6_conflict"):
-            return (
-                jsonify(
-                    {
-                        "error": "Port conflicts detected",
-                        "port_conflicts": port_conflicts,
-                    }
-                ),
-                400,
-            )
 
         # Load config
         if not CONFIG_FILE.exists():
@@ -2748,17 +2949,20 @@ def enable_dhcp():
         if "Dhcp4" in kea_config:
             dhcp4_file = dhcp_config_dir / "kea-dhcp4.conf"
             with open(dhcp4_file, "w") as f:
-                json.dump(kea_config["Dhcp4"], f, indent=2)
+                # Kea expects the config wrapped in a top-level "Dhcp4" key
+                json.dump({"Dhcp4": kea_config["Dhcp4"]}, f, indent=2)
 
         if "Dhcp6" in kea_config:
             dhcp6_file = dhcp_config_dir / "kea-dhcp6.conf"
             with open(dhcp6_file, "w") as f:
-                json.dump(kea_config["Dhcp6"], f, indent=2)
+                # Kea expects the config wrapped in a top-level "Dhcp6" key
+                json.dump({"Dhcp6": kea_config["Dhcp6"]}, f, indent=2)
 
         if "Control-agent" in kea_config:
             ctrl_agent_file = dhcp_config_dir / "kea-ctrl-agent.conf"
             with open(ctrl_agent_file, "w") as f:
-                json.dump(kea_config["Control-agent"], f, indent=2)
+                # Kea expects the config wrapped in a top-level "Control-agent" key
+                json.dump({"Control-agent": kea_config["Control-agent"]}, f, indent=2)
 
         # Create container if needed
         container_status = check_dhcp_container_status()
@@ -2815,30 +3019,114 @@ def get_dhcp_leases():
     """Get current DHCP leases (IPv4 and IPv6)"""
     try:
         leases = []
+        seen_leases = {}  # Track seen MAC+IP combinations to deduplicate
         ipv4_leases = get_leases("dhcp4")
         ipv6_leases = get_leases("dhcp6")
 
         for lease in ipv4_leases:
-            leases.append(
-                {
-                    "mac": lease.get("hw-address", ""),
-                    "ip": lease.get("ip-address", ""),
+            # Use expire field if available, otherwise calculate from valid-lifetime
+            expires = lease.get("expire", 0)
+            if not expires and lease.get("valid-lifetime"):
+                # If expire not set, calculate from current time + valid-lifetime
+                import time
+
+                expires = int(time.time()) + lease.get("valid-lifetime", 0)
+
+            # Convert state to readable string
+            state = lease.get("state", "unknown")
+            if state == "0":
+                state = "active"
+            elif state == "1":
+                state = "expired"
+            elif state == "2":
+                state = "reclaimed"
+
+            mac = lease.get("hw-address", "")
+            ip = lease.get("ip-address", "")
+            lease_key = f"{mac}:{ip}"
+
+            # Deduplicate: prefer active leases, then most recent expires
+            if lease_key not in seen_leases:
+                seen_leases[lease_key] = {
+                    "mac": mac,
+                    "ip": ip,
                     "type": "ipv4",
-                    "state": lease.get("state", "unknown"),
-                    "expires": lease.get("cltt", 0) + lease.get("valid-lft", 0),
+                    "state": state,
+                    "expires": expires,
                 }
-            )
+            else:
+                # If we've seen this MAC+IP combo, prefer active state or more recent expire
+                existing = seen_leases[lease_key]
+                if state == "active" and existing["state"] != "active":
+                    seen_leases[lease_key] = {
+                        "mac": mac,
+                        "ip": ip,
+                        "type": "ipv4",
+                        "state": state,
+                        "expires": expires,
+                    }
+                elif expires > existing["expires"]:
+                    seen_leases[lease_key] = {
+                        "mac": mac,
+                        "ip": ip,
+                        "type": "ipv4",
+                        "state": state,
+                        "expires": expires,
+                    }
 
         for lease in ipv6_leases:
-            leases.append(
-                {
-                    "mac": lease.get("hw-address", ""),
-                    "ip": lease.get("ip-address", ""),
+            # Use expire field if available, otherwise calculate from valid-lifetime
+            expires = lease.get("expire", 0)
+            if not expires and lease.get("valid-lifetime"):
+                # If expire not set, calculate from current time + valid-lifetime
+                import time
+
+                expires = int(time.time()) + lease.get("valid-lifetime", 0)
+
+            # Convert state to readable string
+            state = lease.get("state", "unknown")
+            if state == "0":
+                state = "active"
+            elif state == "1":
+                state = "expired"
+            elif state == "2":
+                state = "reclaimed"
+
+            mac = lease.get("hw-address", "")
+            ip = lease.get("ip-address", "")
+            lease_key = f"{mac}:{ip}"
+
+            # Deduplicate: prefer active leases, then most recent expires
+            if lease_key not in seen_leases:
+                seen_leases[lease_key] = {
+                    "mac": mac,
+                    "ip": ip,
                     "type": "ipv6",
-                    "state": lease.get("state", "unknown"),
-                    "expires": lease.get("cltt", 0) + lease.get("valid-lft", 0),
+                    "state": state,
+                    "expires": expires,
                 }
-            )
+            else:
+                # If we've seen this MAC+IP combo, prefer active state or more recent expire
+                existing = seen_leases[lease_key]
+                if state == "active" and existing["state"] != "active":
+                    seen_leases[lease_key] = {
+                        "mac": mac,
+                        "ip": ip,
+                        "type": "ipv6",
+                        "state": state,
+                        "expires": expires,
+                    }
+                elif expires > existing["expires"]:
+                    seen_leases[lease_key] = {
+                        "mac": mac,
+                        "ip": ip,
+                        "type": "ipv6",
+                        "state": state,
+                        "expires": expires,
+                    }
+
+        # Convert deduplicated dict to list
+        leases = list(seen_leases.values())
 
         return jsonify({"leases": leases})
     except Exception as e:
