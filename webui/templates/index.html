@@ -1665,6 +1665,8 @@
 
                     // Watch for DHCP tab changes
                     this.$watch('activeDhcpTab', (newTab) => {
+                        // Save to localStorage for persistence across refreshes
+                        localStorage.setItem('ztpbootstrap-activeDhcpTab', newTab);
                         if (newTab === 'logs') {
                             // Set log source to DHCP and start auto-refresh when entering DHCP logs tab
                             this.logSource = 'dhcp';
