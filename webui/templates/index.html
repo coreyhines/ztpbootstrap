@@ -1174,7 +1174,7 @@
     <script>
         function dashboard() {
             return {
-                activeApplication: 'ztpbootstrap', // 'ztpbootstrap' or 'dhcp'
+                activeApplication: localStorage.getItem('ztpbootstrap-activeApplication') || 'ztpbootstrap', // 'ztpbootstrap' or 'dhcp'
                 activeTab: 'scripts',
                 status: {
                     container_running: false,
@@ -1262,7 +1262,7 @@
                     container: {exists: false, service_active: false, container_running: false}
                 },
                 dhcpLeases: [],
-                activeDhcpTab: 'config', // 'config' or 'status'
+                activeDhcpTab: localStorage.getItem('ztpbootstrap-activeDhcpTab') || 'config', // 'config' or 'status'
 
                 async init() {
                     // Cleanup auto-refresh on page unload
@@ -1274,6 +1274,8 @@
 
                     // Watch for application changes
                     this.$watch('activeApplication', (newApp) => {
+                        // Save to localStorage for persistence across refreshes
+                        localStorage.setItem('ztpbootstrap-activeApplication', newApp);
                         if (newApp === 'dhcp') {
                             // Load DHCP data when switching to DHCP application
                             this.loadDhcpStatus();
@@ -1295,6 +1297,8 @@
 
                     // Watch for DHCP tab changes
                     this.$watch('activeDhcpTab', (newTab) => {
+                        // Save to localStorage for persistence across refreshes
+                        localStorage.setItem('ztpbootstrap-activeDhcpTab', newTab);
                         if (newTab === 'logs') {
                             // Set log source to DHCP and start auto-refresh when entering DHCP logs tab
                             this.logSource = 'dhcp';
