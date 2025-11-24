@@ -699,25 +699,9 @@
                         </div>
                     </div>
 
-                    <!-- DHCP Sub-tabs -->
-                    <div class="mb-6 border-b border-gray-200">
-                        <nav class="-mb-px flex space-x-8">
-                            <button @click="activeDhcpTab = 'config'"
-                                    :class="activeDhcpTab === 'config' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                                    class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
-                                Configuration
-                            </button>
-                            <button @click="activeDhcpTab = 'status'"
-                                    :class="activeDhcpTab === 'status' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                                    class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">
-                                Status
-                            </button>
-                        </nav>
-                    </div>
-
-                    <!-- Configuration Tab -->
-                    <div x-show="activeDhcpTab === 'config'" class="space-y-6">
-                        <!-- DHCP Configuration Form (always visible in Configuration tab) -->
+                    <!-- Configuration Tab Content -->
+                    <div class="space-y-6">
+                        <!-- DHCP Configuration Form -->
                         <div class="space-y-6">
                         <!-- IPv4 Configuration -->
                         <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
@@ -809,9 +793,10 @@
                         </div>
                         </div>
                     </div>
+                </div>
 
-                    <!-- Status Tab -->
-                    <div x-show="activeDhcpTab === 'status'" class="space-y-6">
+                <!-- DHCP Status Tab -->
+                <div x-show="activeDhcpTab === 'status'" class="p-6">
                         <!-- Current Configuration Display -->
                         <div class="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg shadow-sm border border-blue-200 p-6">
                         <div class="flex items-center justify-between mb-4">
@@ -928,9 +913,10 @@
                             </div>
                         </div>
                     </div>
+                </div>
 
-                    <!-- DHCP Logs Tab -->
-                    <div x-show="activeDhcpTab === 'logs'" class="p-6">
+                <!-- DHCP Logs Tab -->
+                <div x-show="activeDhcpTab === 'logs'" class="p-6">
                         <div class="mb-4 flex items-center justify-between flex-wrap gap-4">
                             <div>
                                 <h2 class="text-lg font-semibold text-gray-900 mb-2">DHCP Server Logs</h2>
