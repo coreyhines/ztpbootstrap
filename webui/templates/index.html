@@ -379,26 +379,6 @@
                         </button>
                     </nav>
                 </div>
-            <div class="bg-white rounded-lg shadow-sm">
-                <div class="border-b border-gray-200">
-                    <nav class="flex -mb-px">
-                        <button @click="activeTab = 'scripts'"
-                                :class="activeTab === 'scripts' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                                class="px-6 py-4 border-b-2 font-medium text-sm">
-                            Bootstrap Scripts
-                        </button>
-                        <button @click="triggerConfigTab()"
-                                :class="activeTab === 'config' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                                class="px-6 py-4 border-b-2 font-medium text-sm">
-                            Configuration
-                        </button>
-                        <button @click="activeTab = 'logs'"
-                                :class="activeTab === 'logs' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
-                                class="px-6 py-4 border-b-2 font-medium text-sm">
-                            Logs
-                        </button>
-                    </nav>
-                </div>
 
                 <!-- Bootstrap Scripts Tab -->
                 <div x-show="activeTab === 'scripts'" class="p-6">
