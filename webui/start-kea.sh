@@ -2,12 +2,73 @@
 # Start all Kea services (dhcp4, dhcp6, ctrl-agent)
 # This script runs the entrypoint first to initialize the database,
 # then starts all three services
-# If kea-ctrl-agent is not found, it will attempt to install it
+# If Kea is not found, it will attempt to install it
 
 # Don't exit on error - we want to handle errors gracefully
 set +e
 
 echo "Starting Kea services..."
+
+# Install Kea if not found
+if ! command -v kea-dhcp4 >/dev/null 2>&1 && \
+   [ ! -f /usr/sbin/kea-dhcp4 ] && \
+   [ ! -f /usr/bin/kea-dhcp4 ]; then
+    echo "Kea not found, attempting to install..."
+
+    INSTALL_SUCCESS=false
+    # Try different package managers
+    if command -v dnf >/dev/null 2>&1; then
+        echo "Installing Kea via dnf (this may take 30-60 seconds)..."
+        if dnf install -y kea 2>&1; then
+            INSTALL_SUCCESS=true
+            echo "Kea installed successfully"
+        else
+            echo "Failed to install via dnf"
+        fi
+    elif command -v yum >/dev/null 2>&1; then
+        echo "Installing Kea via yum (this may take 30-60 seconds)..."
+        if yum install -y kea 2>&1; then
+            INSTALL_SUCCESS=true
+            echo "Kea installed successfully"
+        else
+            echo "Failed to install via yum"
+        fi
+    elif command -v apt-get >/dev/null 2>&1; then
+        echo "Installing Kea via apt-get..."
+        if apt-get update -qq && apt-get install -y -qq isc-kea 2>&1; then
+            INSTALL_SUCCESS=true
+            echo "Kea installed successfully"
+        else
+            echo "Failed to install via apt-get"
+        fi
+    elif command -v apk >/dev/null 2>&1; then
+        echo "Installing Kea via apk..."
+        if apk add --no-cache -q isc-kea 2>&1; then
+            INSTALL_SUCCESS=true
+            echo "Kea installed successfully"
+        else
+            echo "Failed to install via apk"
+        fi
+    else
+        echo "No package manager found, cannot install Kea"
+    fi
+
+    # Verify installation
+    if [ "$INSTALL_SUCCESS" = true ]; then
+        echo "Verifying Kea installation..."
+        if command -v kea-dhcp4 >/dev/null 2>&1; then
+            echo "Kea found at: $(command -v kea-dhcp4)"
+        elif [ -f /usr/sbin/kea-dhcp4 ]; then
+            echo "Kea found at: /usr/sbin/kea-dhcp4"
+        elif [ -f /usr/bin/kea-dhcp4 ]; then
+            echo "Kea found at: /usr/bin/kea-dhcp4"
+        else
+            echo "WARNING: Kea installation reported success but binaries not found"
+            echo "Searching for kea binaries..."
+            find /usr -name "kea-dhcp4" 2>/dev/null || echo "No kea-dhcp4 found"
+        fi
+    fi
+fi
 
 # First, run the entrypoint to initialize/upgrade the database
 # This is necessary for PostgreSQL backends
@@ -32,10 +93,10 @@ if ! command -v kea-ctrl-agent >/dev/null 2>&1 && \
         apt-get update -qq && apt-get install -y -qq isc-kea-ctrl-agent || echo "Failed to install via apt-get"
     elif command -v yum >/dev/null 2>&1; then
         echo "Installing kea-ctrl-agent via yum..."
-        yum install -y -q isc-kea-ctrl-agent || echo "Failed to install via yum"
+        yum install -y -q kea || echo "Failed to install via yum"
     elif command -v dnf >/dev/null 2>&1; then
         echo "Installing kea-ctrl-agent via dnf..."
-        dnf install -y -q isc-kea-ctrl-agent || echo "Failed to install via dnf"
+        dnf install -y -q kea || echo "Failed to install via dnf"
     elif command -v apk >/dev/null 2>&1; then
         echo "Installing kea-ctrl-agent via apk..."
         apk add --no-cache -q isc-kea-ctrl-agent || echo "Failed to install via apk"

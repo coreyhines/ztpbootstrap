@@ -4,6 +4,18 @@
 
 set -euo pipefail
 
+# Always fix DNS first (common issue in containers with pod networking)
+# If using host networking, preserve the host's DNS, otherwise use 8.8.8.8
+echo "Configuring DNS..."
+if grep -q "127.0.0.53" /etc/resolv.conf 2>/dev/null; then
+    echo "Using host DNS (systemd-resolved)"
+elif ! getent hosts pypi.org >/dev/null 2>&1; then
+    echo "DNS not working, configuring fallback..."
+    echo "nameserver 8.8.8.8" > /etc/resolv.conf
+    echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+    echo "DNS configured: $(cat /etc/resolv.conf)"
+fi
+
 # Install system packages needed (Python, podman, journalctl)
 # These are installed in the container rather than mounted from host for better compatibility
 # Note: If using a pre-built image (see webui/Containerfile), packages will already be installed

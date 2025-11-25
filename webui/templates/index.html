@@ -193,7 +193,7 @@
                     <!-- Toggle in upper right corner -->
                     <div class="absolute top-3 right-3">
                         <label class="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" x-model="dhcpConfig.enabled" @change="toggleDhcp()" class="sr-only peer" :disabled="loadingStates.dhcp">
+                            <input type="checkbox" :checked="dhcpStatus.enabled || (dhcpStatus.container && dhcpStatus.container.container_running)" @change="toggleDhcp()" class="sr-only peer" :disabled="loadingStates.dhcp">
                             <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                         </label>
                     </div>
@@ -851,7 +851,7 @@
                                     </div>
                                     <div class="flex justify-between items-center py-1 border-b border-gray-100">
                                         <span class="text-gray-600 font-medium">DNS Servers:</span>
-                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.dns_servers_str || (dhcpConfig.ipv4.dns_servers && dhcpConfig.ipv4.dns_servers.length > 0 ? dhcpConfig.ipv4.dns_servers.join(', ') : 'Not configured')"></span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv4.dns_servers_str ? dhcpConfig.ipv4.dns_servers_str.replace(/[.,\s]+$/, '') : (dhcpConfig.ipv4.dns_servers && dhcpConfig.ipv4.dns_servers.length > 0 ? dhcpConfig.ipv4.dns_servers.map(s => s.replace(/[.,\s]+$/, '')).join(', ') : 'Not configured'))"></span>
                                     </div>
                                     <div class="flex justify-between items-center py-1 border-b border-gray-100" x-show="dhcpConfig.ipv4.domain">
                                         <span class="text-gray-600 font-medium">Domain:</span>
@@ -859,7 +859,7 @@
                                     </div>
                                     <div class="flex justify-between items-center py-1" x-show="dhcpConfig.ipv4.ntp_servers_str || (dhcpConfig.ipv4.ntp_servers && dhcpConfig.ipv4.ntp_servers.length > 0)">
                                         <span class="text-gray-600 font-medium">NTP Servers:</span>
-                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.ntp_servers_str || (dhcpConfig.ipv4.ntp_servers ? dhcpConfig.ipv4.ntp_servers.join(', ') : 'Not configured')"></span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv4.ntp_servers_str ? dhcpConfig.ipv4.ntp_servers_str.replace(/[.,\s]+$/, '') : (dhcpConfig.ipv4.ntp_servers && dhcpConfig.ipv4.ntp_servers.length > 0 ? dhcpConfig.ipv4.ntp_servers.map(s => s.replace(/[.,\s]+$/, '')).join(', ') : 'Not configured'))"></span>
                                     </div>
                                 </div>
                             </div>
@@ -885,7 +885,7 @@
                                     </div>
                                     <div class="flex justify-between items-center py-1 border-b border-gray-100">
                                         <span class="text-gray-600 font-medium">DNS Servers:</span>
-                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv6.dns_servers_str || (dhcpConfig.ipv6.dns_servers && dhcpConfig.ipv6.dns_servers.length > 0 ? dhcpConfig.ipv6.dns_servers.join(', ') : 'Not configured')"></span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv6.dns_servers_str ? dhcpConfig.ipv6.dns_servers_str.replace(/[.,\s]+$/, '') : (dhcpConfig.ipv6.dns_servers && dhcpConfig.ipv6.dns_servers.length > 0 ? dhcpConfig.ipv6.dns_servers.map(s => s.replace(/[.,\s]+$/, '')).join(', ') : 'Not configured'))"></span>
                                     </div>
                                     <div class="flex justify-between items-center py-1" x-show="dhcpConfig.ipv6.domain">
                                         <span class="text-gray-600 font-medium">Domain:</span>
@@ -2719,10 +2719,18 @@
                                 this.dhcpConfig = data.dhcp;
                                 // Convert arrays to strings for display
                                 if (this.dhcpConfig.ipv4 && this.dhcpConfig.ipv4.dns_servers) {
-                                    this.dhcpConfig.ipv4.dns_servers_str = this.dhcpConfig.ipv4.dns_servers.join(', ');
+                                    // Clean trailing periods/commas and join
+                                    this.dhcpConfig.ipv4.dns_servers_str = this.dhcpConfig.ipv4.dns_servers
+                                        .map(s => String(s).replace(/[.,\s]+$/, '').trim())
+                                        .filter(s => s)
+                                        .join(', ');
                                 }
                                 if (this.dhcpConfig.ipv4 && this.dhcpConfig.ipv4.ntp_servers) {
-                                    this.dhcpConfig.ipv4.ntp_servers_str = this.dhcpConfig.ipv4.ntp_servers.join(', ');
+                                    // Clean trailing periods/commas and join
+                                    this.dhcpConfig.ipv4.ntp_servers_str = this.dhcpConfig.ipv4.ntp_servers
+                                        .map(s => String(s).replace(/[.,\s]+$/, '').trim())
+                                        .filter(s => s)
+                                        .join(', ');
                                 }
                             }
                         }
@@ -2746,6 +2754,8 @@
                         if (response.ok) {
                             const data = await response.json();
                             this.dhcpStatus = data;
+                            // Sync dhcpConfig.enabled with actual status
+                            this.dhcpConfig.enabled = data.enabled || (data.container && data.container.container_running);
                         }
                     } catch (error) {
                         console.error('Failed to load DHCP status:', error);

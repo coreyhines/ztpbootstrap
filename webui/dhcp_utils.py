@@ -62,8 +62,27 @@ def detect_gateway(
 
     try:
         # Try to get default route using 'ip route'
+        # First try /usr/sbin/ip (common location), then just 'ip'
+        ip_cmd = None
+        for ip_path in ["/usr/sbin/ip", "/sbin/ip", "ip"]:
+            try:
+                result = subprocess.run(
+                    [ip_path, "--version"],
+                    capture_output=True,
+                    timeout=1,
+                )
+                if result.returncode == 0:
+                    ip_cmd = ip_path
+                    break
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                continue
+
+        if not ip_cmd:
+            logger.warning("ip command not found, skipping gateway detection")
+            return result
+
         ipv4_route_result = subprocess.run(
-            ["ip", "route", "show", "default"],
+            [ip_cmd, "route", "show", "default"],
             capture_output=True,
             text=True,
             timeout=2,
@@ -76,7 +95,7 @@ def detect_gateway(
 
         # Try IPv6 default route
         ipv6_route_result = subprocess.run(
-            ["ip", "-6", "route", "show", "default"],
+            [ip_cmd, "-6", "route", "show", "default"],
             capture_output=True,
             text=True,
             timeout=2,
@@ -322,11 +341,27 @@ def calculate_default_range(
 def check_dhcp_port_conflicts() -> Dict[str, bool]:
     """
     Check if ports 67/68 (IPv4) or 547/548 (IPv6) are already in use.
+    Excludes our own DHCP container from conflict detection.
 
     Returns:
         Dict with 'ipv4_conflict' and 'ipv6_conflict' boolean keys
     """
     result = {"ipv4_conflict": False, "ipv6_conflict": False}
+
+    # First, check if our own DHCP container is running
+    # If it is, ports being in use by it is expected and not a conflict
+    our_dhcp_running = False
+    try:
+        from dhcp_deploy import check_dhcp_container_status
+
+        dhcp_status = check_dhcp_container_status()
+        our_dhcp_running = dhcp_status.get("container_running", False) or dhcp_status.get(
+            "service_active", False
+        )
+        if our_dhcp_running:
+            logger.debug("Our DHCP container is running - port usage by it is expected")
+    except Exception as e:
+        logger.debug(f"Could not check our DHCP container status: {e}")
 
     # Check IPv4 ports (67, 68)
     for port in [67, 68]:
@@ -336,9 +371,14 @@ def check_dhcp_port_conflicts() -> Dict[str, bool]:
             try:
                 sock.bind(("0.0.0.0", port))
                 sock.close()
+                # Port is available - no conflict
             except OSError:
-                result["ipv4_conflict"] = True
-                logger.warning(f"Port {port} (IPv4) is already in use")
+                # Port is in use - only report conflict if it's NOT our own container
+                if not our_dhcp_running:
+                    result["ipv4_conflict"] = True
+                    logger.warning(f"Port {port} (IPv4) is already in use by another service")
+                else:
+                    logger.debug(f"Port {port} (IPv4) is in use by our DHCP container (expected)")
                 break
         except Exception as e:
             logger.warning(f"Failed to check IPv4 port {port}: {e}")
@@ -351,9 +391,14 @@ def check_dhcp_port_conflicts() -> Dict[str, bool]:
             try:
                 sock.bind(("::", port))
                 sock.close()
+                # Port is available - no conflict
             except OSError:
-                result["ipv6_conflict"] = True
-                logger.warning(f"Port {port} (IPv6) is already in use")
+                # Port is in use - only report conflict if it's NOT our own container
+                if not our_dhcp_running:
+                    result["ipv6_conflict"] = True
+                    logger.warning(f"Port {port} (IPv6) is already in use by another service")
+                else:
+                    logger.debug(f"Port {port} (IPv6) is in use by our DHCP container (expected)")
                 break
         except Exception as e:
             logger.warning(f"Failed to check IPv6 port {port}: {e}")
@@ -374,9 +419,28 @@ def detect_host_interfaces(subnet: Optional[str] = None) -> List[str]:
     interfaces = []
 
     try:
+        # Find ip command (try common locations)
+        ip_cmd = None
+        for ip_path in ["/usr/sbin/ip", "/sbin/ip", "ip"]:
+            try:
+                test_result = subprocess.run(
+                    [ip_path, "--version"],
+                    capture_output=True,
+                    timeout=1,
+                )
+                if test_result.returncode == 0:
+                    ip_cmd = ip_path
+                    break
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                continue
+
+        if not ip_cmd:
+            logger.warning("ip command not found, cannot detect host interfaces")
+            return interfaces
+
         # Use 'ip link show' to get interfaces
         result = subprocess.run(
-            ["ip", "link", "show"],
+            [ip_cmd, "link", "show"],
             capture_output=True,
             text=True,
             timeout=2,
@@ -403,7 +467,7 @@ def detect_host_interfaces(subnet: Optional[str] = None) -> List[str]:
                 for iface in interfaces:
                     # Get IP addresses for this interface
                     addr_result = subprocess.run(
-                        ["ip", "addr", "show", iface],
+                        [ip_cmd, "addr", "show", iface],
                         capture_output=True,
                         text=True,
                         timeout=1,
