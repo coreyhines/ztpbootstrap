@@ -89,7 +89,9 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         interfaces_config["interfaces"] = ["*"]
 
     # Build subnet configuration
+    # Kea requires each subnet to have a unique id
     subnet_config = {
+        "id": 1,  # Use 1 as default, can be made configurable if needed
         "subnet": subnet,
         "pools": [{"pool": f"{range_start} - {range_end}"}],
     }
@@ -98,14 +100,22 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     if gateway:
         subnet_config["option-data"] = [{"name": "routers", "data": gateway}]
 
-    # Add DNS servers
+    # Add DNS servers (option 6 - must be array of IP addresses)
     dns_servers = ipv4_config.get("dns_servers", [])
     if dns_servers:
-        if "option-data" not in subnet_config:
-            subnet_config["option-data"] = []
-        subnet_config["option-data"].append(
-            {"name": "domain-name-servers", "data": ", ".join(dns_servers)}
-        )
+        # Ensure dns_servers is a list
+        if isinstance(dns_servers, str):
+            # Split by comma and clean
+            dns_servers = [s.strip().rstrip("., ") for s in dns_servers.split(",") if s.strip()]
+        # Clean each IP address (remove trailing periods/commas)
+        cleaned_dns = [ip.strip().rstrip("., ") for ip in dns_servers if ip.strip()]
+        if cleaned_dns:
+            if "option-data" not in subnet_config:
+                subnet_config["option-data"] = []
+            # Kea expects DNS servers as an array, not a comma-separated string
+            subnet_config["option-data"].append(
+                {"name": "domain-name-servers", "data": cleaned_dns}
+            )
 
     # Add domain name
     domain = ipv4_config.get("domain", "")
@@ -114,12 +124,20 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
             subnet_config["option-data"] = []
         subnet_config["option-data"].append({"name": "domain-name", "data": domain})
 
-    # Add NTP servers
+    # Add NTP servers (option 42 - must be array of IP addresses)
     ntp_servers = ipv4_config.get("ntp_servers", [])
     if ntp_servers:
-        if "option-data" not in subnet_config:
-            subnet_config["option-data"] = []
-        subnet_config["option-data"].append({"name": "ntp-servers", "data": ", ".join(ntp_servers)})
+        # Ensure ntp_servers is a list
+        if isinstance(ntp_servers, str):
+            # Split by comma and clean
+            ntp_servers = [s.strip().rstrip("., ") for s in ntp_servers.split(",") if s.strip()]
+        # Clean each IP address
+        cleaned_ntp = [ip.strip().rstrip("., ") for ip in ntp_servers if ip.strip()]
+        if cleaned_ntp:
+            if "option-data" not in subnet_config:
+                subnet_config["option-data"] = []
+            # Kea expects NTP servers as an array
+            subnet_config["option-data"].append({"name": "ntp-servers", "data": cleaned_ntp})
 
     # Handle relay mode
     relay_config = dhcp_config.get("relay", {})
@@ -134,14 +152,26 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
                 pass
 
     # Build main DHCPv4 config
+    backend_config = dhcp_config.get("backend", {})
+    backend_type = backend_config.get("type", "memfile")
+
     config = {
         "interfaces-config": interfaces_config,
-        "lease-database": generate_lease_database(dhcp_config.get("backend", {})),
+        "lease-database": generate_lease_database(backend_config),
         "subnet4": [subnet_config],
         "valid-lifetime": 86400,  # 24 hours default
         "renew-timer": 43200,  # 12 hours
         "rebind-timer": 75600,  # 21 hours
+        "control-socket": {
+            "socket-type": "unix",
+            "socket-name": "/var/run/kea/kea-dhcp4-ctrl.sock",
+        },
     }
+
+    # Only add hosts-database for PostgreSQL/MySQL (entrypoint script requirement)
+    # For memfile, we omit it to avoid entrypoint script errors
+    if backend_type in ["postgresql", "mysql"]:
+        config["hosts-database"] = generate_lease_database(backend_config)
 
     # Add client classification for OUI filtering
     oui_config = dhcp_config.get("oui_filtering", {})
@@ -203,7 +233,9 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         interfaces_config["interfaces"] = ["*"]
 
     # Build subnet configuration
+    # Kea requires each subnet to have a unique id
     subnet_config = {
+        "id": 1,  # Use 1 as default, can be made configurable if needed
         "subnet": subnet,
         "pools": [{"pool": f"{range_start} - {range_end}"}],
     }
@@ -212,12 +244,20 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     if gateway:
         subnet_config["option-data"] = [{"name": "sntp-servers", "data": gateway}]
 
-    # Add DNS servers (option 23)
+    # Add DNS servers (option 23 - must be array of IP addresses)
     dns_servers = ipv6_config.get("dns_servers", [])
     if dns_servers:
-        if "option-data" not in subnet_config:
-            subnet_config["option-data"] = []
-        subnet_config["option-data"].append({"name": "dns-servers", "data": ", ".join(dns_servers)})
+        # Ensure dns_servers is a list
+        if isinstance(dns_servers, str):
+            # Split by comma and clean
+            dns_servers = [s.strip().rstrip("., ") for s in dns_servers.split(",") if s.strip()]
+        # Clean each IP address
+        cleaned_dns = [ip.strip().rstrip("., ") for ip in dns_servers if ip.strip()]
+        if cleaned_dns:
+            if "option-data" not in subnet_config:
+                subnet_config["option-data"] = []
+            # Kea expects DNS servers as an array
+            subnet_config["option-data"].append({"name": "dns-servers", "data": cleaned_dns})
 
     # Add domain name (option 24)
     domain = ipv6_config.get("domain", "")
@@ -234,14 +274,26 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
             subnet_config = relay_subnets[0]
 
     # Build main DHCPv6 config
+    backend_config = dhcp_config.get("backend", {})
+    backend_type = backend_config.get("type", "memfile")
+
     config = {
         "interfaces-config": interfaces_config,
-        "lease-database": generate_lease_database(dhcp_config.get("backend", {})),
+        "lease-database": generate_lease_database(backend_config),
         "subnet6": [subnet_config],
         "valid-lifetime": 86400,  # 24 hours default
         "renew-timer": 43200,  # 12 hours
         "rebind-timer": 75600,  # 21 hours
+        "control-socket": {
+            "socket-type": "unix",
+            "socket-name": "/var/run/kea/kea-dhcp6-ctrl.sock",
+        },
     }
+
+    # Only add hosts-database for PostgreSQL/MySQL (entrypoint script requirement)
+    # For memfile, we omit it to avoid entrypoint script errors
+    if backend_type in ["postgresql", "mysql"]:
+        config["hosts-database"] = generate_lease_database(backend_config)
 
     # Add client classification for OUI filtering
     oui_config = dhcp_config.get("oui_filtering", {})
@@ -383,7 +435,14 @@ def generate_dhcp_options(options_config: Dict) -> List[Dict]:
     standard = options_config.get("standard", {})
     dns_servers = standard.get("dns_servers", [])
     if dns_servers:
-        options.append({"name": "domain-name-servers", "data": ", ".join(dns_servers)})
+        # Ensure dns_servers is a list
+        if isinstance(dns_servers, str):
+            dns_servers = [s.strip().rstrip("., ") for s in dns_servers.split(",") if s.strip()]
+        # Clean each IP address
+        cleaned_dns = [ip.strip().rstrip("., ") for ip in dns_servers if ip.strip()]
+        if cleaned_dns:
+            # Kea expects DNS servers as an array
+            options.append({"name": "domain-name-servers", "data": cleaned_dns})
 
     ntp_servers = standard.get("ntp_servers", [])
     if ntp_servers:
@@ -469,6 +528,7 @@ def generate_relay_subnets(relay_config: Dict, version: str) -> List[Dict]:
             continue
 
         subnet_config = {
+            "id": len(subnets) + 1,  # Unique ID for each relay subnet
             "subnet": subnet,
             "pools": [{"pool": f"{range_start} - {range_end}"}],
         }
@@ -531,9 +591,12 @@ def generate_lease_database(backend_config: Dict) -> Dict:
         }
     else:
         # Default to memfile
+        # Note: For hosts-database, we use the same memfile backend
+        # but with a different filename for hosts reservations
         return {
             "type": "memfile",
             "name": "/var/lib/kea/dhcp4.leases",  # Will be overridden per service
+            "persist": True,  # Enable lease persistence to disk
             "lfc-interval": 3600,
         }
 
@@ -549,7 +612,7 @@ def generate_ctrl_agent_config() -> Dict:
         "http-host": "0.0.0.0",
         "http-port": KEA_CTRL_AGENT_PORT,
         "control-sockets": {
-            "dhcp4": {"socket-type": "unix", "socket-name": "/run/kea/kea-dhcp4-ctrl.sock"},
-            "dhcp6": {"socket-type": "unix", "socket-name": "/run/kea/kea-dhcp6-ctrl.sock"},
+            "dhcp4": {"socket-type": "unix", "socket-name": "/var/run/kea/kea-dhcp4-ctrl.sock"},
+            "dhcp6": {"socket-type": "unix", "socket-name": "/var/run/kea/kea-dhcp6-ctrl.sock"},
         },
     }

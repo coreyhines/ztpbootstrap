@@ -45,7 +45,11 @@ def kea_request(command: str, service: str, arguments: Optional[Dict] = None) ->
             timeout=KEA_CTRL_AGENT_TIMEOUT,
         )
         response.raise_for_status()
-        return response.json()
+        result = response.json()
+        # Kea Control Agent returns a list of responses, get the first one
+        if isinstance(result, list) and len(result) > 0:
+            return result[0]
+        return result
     except requests.exceptions.RequestException as e:
         logger.error(f"Kea Control Agent request failed: {e}")
         raise
@@ -55,6 +59,9 @@ def get_leases(service: str = "dhcp4") -> List[Dict]:
     """
     Get current DHCP leases.
 
+    For memfile backend, reads directly from the lease file.
+    For other backends, would use Kea API (but Kea doesn't support lease-get-all).
+
     Args:
         service: "dhcp4" or "dhcp6"
 
@@ -62,13 +69,59 @@ def get_leases(service: str = "dhcp4") -> List[Dict]:
         List of lease dicts
     """
     try:
-        response = kea_request("lease-get-all", service)
-        if response.get("result") == 0:
-            leases = response.get("arguments", {}).get("leases", [])
-            return leases
-        else:
-            logger.warning(f"Kea returned error: {response.get('text', 'Unknown error')}")
+        # Kea doesn't support lease4-get-all command, so we read from the memfile directly
+        import csv
+        import os
+        from pathlib import Path
+
+        # Try multiple possible locations for the lease file
+        # 1. Inside DHCP container: /var/lib/kea/{service}.leases
+        # 2. Via shared volume: /opt/containerdata/ztpbootstrap/dhcp/leases/{service}.leases
+        # 3. Via host mount (if WebUI has access)
+        lease_file_paths = [
+            Path(f"/var/lib/kea/{service}.leases"),
+            Path(f"/opt/containerdata/ztpbootstrap/dhcp/leases/{service}.leases"),
+            Path(os.getenv("ZTP_CONFIG_DIR", "/opt/containerdata/ztpbootstrap"))
+            / "dhcp"
+            / "leases"
+            / f"{service}.leases",
+        ]
+
+        lease_file = None
+        for path in lease_file_paths:
+            if path.exists():
+                lease_file = path
+                break
+
+        if not lease_file:
+            logger.debug(f"Lease file not found in any of: {[str(p) for p in lease_file_paths]}")
             return []
+
+        leases = []
+        with open(lease_file, "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Skip header row if it appears as data
+                if not row.get("address") or row.get("address") == "address":
+                    continue
+                # Convert CSV row to Kea API format
+                lease = {
+                    "ip-address": row.get("address", ""),
+                    "hw-address": row.get("hwaddr", ""),
+                    "client-id": row.get("client_id", ""),
+                    "valid-lifetime": (
+                        int(row.get("valid_lifetime", 0)) if row.get("valid_lifetime") else 0
+                    ),
+                    "expire": int(row.get("expire", 0)) if row.get("expire") else 0,
+                    "subnet-id": int(row.get("subnet_id", 0)) if row.get("subnet_id") else 0,
+                    "state": row.get("state", "unknown"),
+                    "hostname": row.get("hostname", ""),
+                }
+                # Only include leases with valid IP addresses
+                if lease["ip-address"]:
+                    leases.append(lease)
+
+        return leases
     except Exception as e:
         logger.error(f"Failed to get leases: {e}")
         return []
@@ -86,7 +139,9 @@ def get_lease(mac: str, service: str = "dhcp4") -> Optional[Dict]:
         Lease dict or None
     """
     try:
-        response = kea_request("lease-get", service, {"hw-address": mac})
+        # Use service-specific command: lease4-get for dhcp4, lease6-get for dhcp6
+        command = "lease4-get" if service == "dhcp4" else "lease6-get"
+        response = kea_request(command, service, {"hw-address": mac})
         if response.get("result") == 0:
             leases = response.get("arguments", {}).get("leases", [])
             if leases:
