@@ -359,33 +359,8 @@ def stop_dhcp_container() -> bool:
         True if successful, False otherwise
     """
     try:
-        # Try podman first (works from inside containers with podman socket access)
-        podman_cmd = ["podman"]
-        container_host = os.environ.get("CONTAINER_HOST")
-        if container_host:
-            podman_cmd.extend(["--url", container_host])
-
-        podman_success = False
-        try:
-            result = subprocess.run(
-                podman_cmd + ["stop", DHCP_CONTAINER_NAME],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-
-            if result.returncode == 0:
-                logger.info("DHCP container stopped successfully via podman")
-                return True
-            elif "no such container" in result.stderr.lower():
-                logger.debug("Container doesn't exist via podman, trying systemctl...")
-            else:
-                logger.debug(f"podman stop failed: {result.stderr}")
-        except Exception as e:
-            logger.debug(f"podman stop failed with exception: {e}, trying systemctl...")
-
-        # Always try systemctl as fallback (works on host system and from containers with sudo)
-        logger.info("Attempting to stop DHCP service via systemctl...")
+        # Use systemctl to stop the service (quadlets/systemd is our control mechanism)
+        logger.info("Stopping DHCP service via systemctl...")
         if os.geteuid() == 0:
             result = subprocess.run(
                 ["systemctl", "stop", DHCP_SERVICE_NAME],
