@@ -12,6 +12,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
     <style>
         [x-cloak] { display: none !important; }
+        /* Ensure login modal is hidden by default */
+        .login-modal-hidden { display: none !important; }
         /* Custom styling for YAML in config */
         pre[class*="language-"] {
             margin: 0;
@@ -569,37 +571,48 @@
                             <h2 class="text-lg font-semibold text-gray-900 mb-2">Service Logs</h2>
                             <p class="text-sm text-gray-600">View logs from different sources</p>
                         </div>
-                        <div class="flex items-center space-x-2 flex-wrap">
-                            <div class="relative">
+                        <div class="flex items-center space-x-1.5 flex-wrap">
+                            <div class="relative group">
                                 <input type="text"
                                        x-model="logSearchTerm"
                                        @input="highlightLogs()"
-                                       placeholder="Search logs..."
-                                       class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-48">
+                                       placeholder="Search..."
+                                       class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-32"
+                                       title="Search logs">
                                 <button x-show="logSearchTerm"
                                         @click="logSearchTerm = ''; highlightLogs()"
-                                        class="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        class="absolute right-1 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                                     </svg>
                                 </button>
                             </div>
-                            <select x-model="logSource" @change="loadLogs()" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                                <option value="container">Container Logs</option>
-                                <option value="nginx_access">Nginx Access Log</option>
-                                <option value="nginx_error">Nginx Error Log</option>
-                                <option value="dhcp">DHCP Logs</option>
-                            </select>
-                            <select x-model="logLines" @change="loadLogs()" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                                <option value="50">Last 50 lines</option>
-                                <option value="100">Last 100 lines</option>
-                                <option value="200">Last 200 lines</option>
-                                <option value="500">Last 500 lines</option>
-                            </select>
-                            <button @click="markLogs()" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm font-medium transition-colors">
-                                Mark Logs
+                            <div class="relative group">
+                                <select x-model="logSource" @change="loadLogs()" class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 pr-6" title="Log source">
+                                    <option value="container">Container</option>
+                                    <option value="nginx_access">Nginx Access</option>
+                                    <option value="nginx_error">Nginx Error</option>
+                                    <option value="dhcp">DHCP</option>
+                                </select>
+                            </div>
+                            <div class="relative group">
+                                <select x-model="logLines" @change="loadLogs()" class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 pr-6" title="Number of lines">
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                    <option value="200">200</option>
+                                    <option value="500">500</option>
+                                </select>
+                            </div>
+                            <button @click="markLogs()" class="px-2.5 py-1.5 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs font-medium transition-colors" title="Mark current position in logs">
+                                Mark
                             </button>
-                            <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
+                            <div class="relative group">
+                                <label class="inline-flex items-center cursor-pointer" title="Auto-refresh logs">
+                                    <input type="checkbox" x-model="autoRefreshEnabled" @change="toggleAutoRefresh()" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                </label>
+                            </div>
+                            <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-1.5 py-0.5 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
                                 <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                                     <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
                                 </svg>
@@ -923,31 +936,40 @@
                                 <h2 class="text-lg font-semibold text-gray-900 mb-2">DHCP Server Logs</h2>
                                 <p class="text-sm text-gray-600">View logs from Kea DHCP server</p>
                             </div>
-                            <div class="flex items-center space-x-2 flex-wrap">
-                                <div class="relative">
+                            <div class="flex items-center space-x-1.5 flex-wrap">
+                                <div class="relative group">
                                     <input type="text"
                                            x-model="logSearchTerm"
                                            @input="highlightLogs()"
-                                           placeholder="Search logs..."
-                                           class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-48">
+                                           placeholder="Search..."
+                                           class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-32"
+                                           title="Search logs">
                                     <button x-show="logSearchTerm"
                                             @click="logSearchTerm = ''; highlightLogs()"
-                                            class="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            class="absolute right-1 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                                         </svg>
                                     </button>
                                 </div>
-                                <select x-model="logLines" @change="loadLogs()" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                                    <option value="50">Last 50 lines</option>
-                                    <option value="100">Last 100 lines</option>
-                                    <option value="200">Last 200 lines</option>
-                                    <option value="500">Last 500 lines</option>
-                                </select>
-                                <button @click="markLogs()" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm font-medium transition-colors">
-                                    Mark Logs
+                                <div class="relative group">
+                                    <select x-model="logLines" @change="loadLogs()" class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 pr-6" title="Number of lines">
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                        <option value="200">200</option>
+                                        <option value="500">500</option>
+                                    </select>
+                                </div>
+                                <button @click="markLogs()" class="px-2.5 py-1.5 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs font-medium transition-colors" title="Mark current position in logs">
+                                    Mark
                                 </button>
-                                <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
+                                <div class="relative group">
+                                    <label class="inline-flex items-center cursor-pointer" title="Auto-refresh logs">
+                                        <input type="checkbox" x-model="autoRefreshEnabled" @change="toggleAutoRefresh()" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                    </label>
+                                </div>
+                                <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-1.5 py-0.5 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
                                     <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                                         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
                                     </svg>
@@ -968,14 +990,13 @@
                         </div>
                     </div>
                 </div>
-            </div>
         </main>
 
         <!-- Script Viewer Modal -->
         <div x-show="showScriptModal"
+             x-cloak
              @click.away="showScriptModal = false"
-             class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
-             style="display: none;">
+             class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
             <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-lg font-semibold text-gray-900" x-text="'Script: ' + (viewingScript?.name || '')"></h3>
@@ -1090,86 +1111,82 @@
         </template>
 
         <!-- Login Modal -->
-        <template x-if="showLoginModal">
-        <div x-transition:enter="transition ease-out duration-300"
+        <div x-show="showLoginModal"
+             x-transition:enter="transition ease-out duration-300"
              x-transition:enter-start="opacity-0"
              x-transition:enter-end="opacity-100"
              x-transition:leave="transition ease-in duration-200"
              x-transition:leave-start="opacity-100"
              x-transition:leave-end="opacity-0"
-             x-init="$watch('showLoginModal', value => {
-                 console.log('showLoginModal changed to:', value);
-                 if(value) {
-                     $nextTick(() => $refs.passwordInput && $refs.passwordInput.focus());
-                 }
-             })"
-             @keydown.escape.window="showLoginModal = false; loginPassword = ''; loginError = ''"
+             @keydown.escape.window="if(showLoginModal) { showLoginModal = false; loginPassword = ''; loginError = ''; }"
              class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
              @click.self="showLoginModal = false; loginPassword = ''; loginError = ''">
-        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
-             @click.stop>
-            <div class="mt-3">
-                <div class="flex items-center justify-between mb-4">
-                    <h3 class="text-lg font-medium text-gray-900">Authentication Required</h3>
-                    <button @click="showLoginModal = false; loginPassword = ''; loginError = ''"
-                            class="text-gray-400 hover:text-gray-600">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                        </svg>
-                    </button>
-                </div>
-
-                <p class="text-sm text-gray-600 mb-4">
-                    Please enter the admin password to perform this action.
-                </p>
-
-                <form @submit.prevent="login()">
-                    <div class="mb-4">
-                        <label for="loginPassword" class="block text-sm font-medium text-gray-700 mb-2">
-                            Password
-                        </label>
-                        <input
-                            type="password"
-                            id="loginPassword"
-                            x-model="loginPassword"
-                            x-ref="passwordInput"
-                            autocomplete="current-password"
-                            @keyup.escape="showLoginModal = false; loginPassword = ''; loginError = ''"
-                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                            placeholder="Enter admin password"
-                            :disabled="loginLoading"
-                            required
-                        />
-                    </div>
-
-                    <!-- Error message -->
-                    <div x-show="loginError" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
-                        <p class="text-sm text-red-800" x-text="loginError"></p>
-                    </div>
-
-                    <div class="flex items-center justify-end gap-3">
-                        <button
-                            type="button"
-                            @click="showLoginModal = false; loginPassword = ''; loginError = ''"
-                            :disabled="loginLoading"
-                            class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50">
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            :disabled="loginLoading || !loginPassword"
-                            class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 flex items-center gap-2">
-                            <svg x-show="loginLoading" class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
+                 @click.stop>
+                <div class="mt-3">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-medium text-gray-900">Authentication Required</h3>
+                        <button type="button" @click="showLoginModal = false; loginPassword = ''; loginError = ''"
+                                class="text-gray-400 hover:text-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                             </svg>
-                            <span x-text="loginLoading ? 'Logging in...' : 'Login'"></span>
                         </button>
                     </div>
-                </form>
+
+                    <p class="text-sm text-gray-600 mb-4">
+                        Please enter the admin password to perform this action.
+                    </p>
+
+                    <form @submit.prevent="login()">
+                        <div class="mb-4">
+                            <label for="loginPassword" class="block text-sm font-medium text-gray-700 mb-2">
+                                Password
+                            </label>
+                            <input
+                                type="password"
+                                id="loginPassword"
+                                x-model="loginPassword"
+                                x-ref="passwordInput"
+                                autocomplete="current-password"
+                                @keyup.escape="showLoginModal = false; loginPassword = ''; loginError = ''"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                placeholder="Enter admin password"
+                                :disabled="loginLoading"
+                                required
+                            />
+                        </div>
+
+                        <!-- Error message - only show when there's an error -->
+                        <div x-show="loginError && loginError.length > 0"
+                             x-transition
+                             class="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                            <p class="text-sm text-red-800" x-text="loginError"></p>
+                        </div>
+
+                        <div class="flex items-center justify-end gap-3">
+                            <button
+                                type="button"
+                                @click="showLoginModal = false; loginPassword = ''; loginError = ''"
+                                :disabled="loginLoading"
+                                class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50">
+                                Cancel
+                            </button>
+                            <button
+                                type="submit"
+                                :disabled="loginLoading || !loginPassword"
+                                class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 flex items-center gap-2">
+                                <svg x-show="loginLoading" x-cloak class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                <span x-text="loginLoading ? 'Logging in...' : 'Login'"></span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
-        </template>
     </div>
 
     <script>
@@ -1197,6 +1214,7 @@
                 logNewEntriesIndicator: false,
                 logNewEntriesNginx: false,
                 logNewEntriesWebUI: false,
+                autoRefreshEnabled: true, // Auto-refresh toggle for logs
                 lastLogHash: '',
                 lastLogNginxHash: '',
                 lastLogWebUIHash: '',
@@ -1215,6 +1233,7 @@
                 loginPassword: '',
                 loginError: '',
                 loginLoading: false,
+                // Force reset login state on init - clear any stale state
                 pendingAction: null,
                 showChangePasswordModal: false,
                 changePasswordCurrent: '',
@@ -1266,6 +1285,17 @@
                 activeDhcpTab: localStorage.getItem('ztpbootstrap-activeDhcpTab') || 'config', // 'config' or 'status'
 
                 async init() {
+                    // Initialize modal states - ensure all modals start hidden
+                    this.showLoginModal = false;
+                    this.showScriptModal = false;
+                    this.showChangePasswordModal = false;
+                    this.showRestoreDialog = false;
+                    this.loginLoading = false;
+                    this.loginError = '';
+                    this.loginPassword = '';
+                    this.pendingAction = null;
+                    this.viewingScript = null;
+
                     // Cleanup auto-refresh on page unload
                     window.addEventListener('beforeunload', () => {
                         if (this.logRefreshInterval) {
@@ -1278,17 +1308,20 @@
                         // Save to localStorage for persistence across refreshes
                         localStorage.setItem('ztpbootstrap-activeApplication', newApp);
                         if (newApp === 'dhcp') {
-                            // Load DHCP data when switching to DHCP application
+                            // Load DHCP data when switching to DHCP application (read-only, no auth required)
+                            // These functions will silently handle 401s without showing modal
                             this.loadDhcpStatus();
                             this.loadDhcpConfig();
                             this.loadDhcpLeases();
                         }
+                        // Ensure modal stays hidden when switching applications
+                        this.showLoginModal = false;
                     });
 
                     // Watch for tab changes to start/stop auto-refresh
                     this.$watch('activeTab', (newTab) => {
-                        if (newTab === 'logs') {
-                            // Start auto-refresh when entering logs tab
+                        if (newTab === 'logs' && this.autoRefreshEnabled) {
+                            // Start auto-refresh when entering logs tab (only if enabled)
                             this.startAutoRefresh();
                         } else {
                             // Stop auto-refresh when leaving logs tab
@@ -1301,10 +1334,12 @@
                         // Save to localStorage for persistence across refreshes
                         localStorage.setItem('ztpbootstrap-activeDhcpTab', newTab);
                         if (newTab === 'logs') {
-                            // Set log source to DHCP and start auto-refresh when entering DHCP logs tab
+                            // Set log source to DHCP and start auto-refresh when entering DHCP logs tab (only if enabled)
                             this.logSource = 'dhcp';
                             this.loadLogs();
-                            this.startAutoRefresh();
+                            if (this.autoRefreshEnabled) {
+                                this.startAutoRefresh();
+                            }
                         } else {
                             // Stop auto-refresh when leaving DHCP logs tab
                             this.stopAutoRefresh();
@@ -1353,14 +1388,16 @@
                         await this.loadScripts();
                         await this.loadDeviceConnections();
                     } else if (this.activeApplication === 'dhcp') {
+                        // Load DHCP data (read-only, no auth required)
+                        // These functions will silently handle 401s without showing modal
                         await this.loadDhcpStatus();
                         await this.loadDhcpConfig();
                         await this.loadDhcpLeases();
                     }
                     await this.loadLogs();
 
-                    // Start auto-refresh if we're on the logs tab
-                    if (this.activeTab === 'logs' || (this.activeApplication === 'dhcp' && this.activeDhcpTab === 'logs')) {
+                    // Start auto-refresh if we're on the logs tab (only if enabled)
+                    if (this.autoRefreshEnabled && (this.activeTab === 'logs' || (this.activeApplication === 'dhcp' && this.activeDhcpTab === 'logs'))) {
                         this.startAutoRefresh();
                     }
 
@@ -1381,7 +1418,8 @@
                                 this.loadDhcpLeases();
                             }
                         }
-                        if (this.activeTab === 'logs' || (this.activeApplication === 'dhcp' && this.activeDhcpTab === 'logs')) {
+                        // Only refresh logs if currently on a logs tab AND auto-refresh is enabled
+                        if (this.autoRefreshEnabled && (this.activeTab === 'logs' || (this.activeApplication === 'dhcp' && this.activeDhcpTab === 'logs'))) {
                             this.loadLogs();
                         }
                     }, 5000);
@@ -1395,35 +1433,96 @@
                 // Authentication methods
                 async checkAuthStatus() {
                     try {
+                        // Check if cookies are available
+                        console.log('Checking cookies:', document.cookie);
+
                         const response = await fetch('/api/auth/status', {
                             credentials: 'same-origin'
                         });
+                        console.log('checkAuthStatus response:', response.status, response.statusText);
+                        console.log('checkAuthStatus request headers sent:', 'Cookie: ' + (document.cookie || 'none'));
+                        if (response.status === 401 || !response.ok) {
+                            this.authenticated = false;
+                            this.authExpiresAt = null;
+                            this.csrfToken = null;
+                            console.log('checkAuthStatus: Not authenticated (401 or !ok)');
+                            return;
+                        }
                         const data = await response.json();
                         this.authenticated = data.authenticated || false;
                         this.authExpiresAt = data.expires_at || null;
                         this.csrfToken = data.csrf_token || null;
+                        console.log('checkAuthStatus: authenticated =', this.authenticated);
                     } catch (error) {
                         console.error('Failed to check auth status:', error);
                         this.authenticated = false;
+                        this.authExpiresAt = null;
                         this.csrfToken = null;
                     }
                 },
 
                 async login() {
+                    console.log('=== LOGIN FUNCTION CALLED ===');
+                    console.log('loginLoading before:', this.loginLoading);
+                    console.log('loginPassword length:', this.loginPassword ? this.loginPassword.length : 0);
+
                     this.loginLoading = true;
                     this.loginError = '';
 
+                    console.log('Login attempt started, password length:', this.loginPassword.length);
+                    console.log('Login password value:', this.loginPassword ? '***' : 'empty');
+                    console.log('loginLoading after setting to true:', this.loginLoading);
+
                     try {
-                        const response = await fetch('/api/auth/login', {
+                        const loginUrl = '/api/auth/login';
+                        const loginPayload = { password: this.loginPassword };
+                        console.log('Sending login request to:', loginUrl);
+                        console.log('Request payload keys:', Object.keys(loginPayload));
+
+                        const response = await fetch(loginUrl, {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
                             },
-                            body: JSON.stringify({ password: this.loginPassword }),
+                            body: JSON.stringify(loginPayload),
                             credentials: 'same-origin'
+                        }).catch(fetchError => {
+                            console.error('Fetch error:', fetchError);
+                            throw fetchError;
                         });
 
-                        const data = await response.json();
+                        console.log('Login response received, status:', response.status, response.statusText);
+                        console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
+                        // Check for Set-Cookie header
+                        const setCookieHeader = response.headers.get('Set-Cookie');
+                        if (setCookieHeader) {
+                            console.log('Set-Cookie header received:', setCookieHeader);
+                        } else {
+                            console.warn('WARNING: No Set-Cookie header in login response!');
+                        }
+
+                        let data;
+                        try {
+                            const responseText = await response.text();
+                            console.log('Response text length:', responseText.length);
+                            console.log('Response text preview:', responseText.substring(0, 200));
+
+                            if (!responseText) {
+                                throw new Error('Empty response from server');
+                            }
+
+                            data = JSON.parse(responseText);
+                            console.log('Login response data:', data);
+                        } catch (jsonError) {
+                            console.error('Failed to parse JSON response:', jsonError);
+                            console.error('Response status:', response.status);
+                            const text = await response.text().catch(() => 'Could not read response');
+                            console.error('Response text:', text);
+                            this.loginError = 'Invalid response from server. Please try again.';
+                            this.loginLoading = false;
+                            return;
+                        }
 
                         if (response.ok && data.success) {
                             // Update authentication state first
@@ -1453,6 +1552,21 @@
 
                             console.log('Modal should be hidden now, showLoginModal:', this.showLoginModal);
 
+                            // Small delay to ensure browser processes the session cookie
+                            await new Promise(resolve => setTimeout(resolve, 200));
+
+                            // Verify authentication status after login to confirm cookie was set
+                            console.log('Verifying authentication after login...');
+                            await this.checkAuthStatus();
+                            console.log('After login verification, authenticated:', this.authenticated);
+
+                            if (!this.authenticated) {
+                                console.error('WARNING: Authentication failed after login! Cookie may not have been set.');
+                                this.loginError = 'Login succeeded but session not established. Please try again.';
+                                this.loginLoading = false;
+                                return;
+                            }
+
                             // Execute pending action if any (now that we're authenticated)
                             if (pendingAction) {
                                 try {
@@ -1466,13 +1580,22 @@
                                 }
                             }
                         } else {
-                            this.loginError = data.error || 'Login failed';
+                            // Handle specific error codes
+                            if (data.code === 'RATE_LIMITED') {
+                                const remaining = data.remaining_time || 0;
+                                const minutes = Math.ceil(remaining / 60);
+                                this.loginError = data.error || `Too many login attempts. Please try again in ${minutes} minute(s).`;
+                            } else {
+                                this.loginError = data.error || 'Login failed. Please check your password.';
+                            }
                             this.loginPassword = '';
+                            // Don't close modal on error - let user try again or cancel
                         }
                     } catch (error) {
                         console.error('Login error:', error);
-                        this.loginError = 'Login failed. Please try again.';
+                        this.loginError = 'Login failed. Please try again. Error: ' + (error.message || 'Unknown error');
                         this.loginPassword = '';
+                        // Don't close modal on error - let user try again or cancel
                     } finally {
                         this.loginLoading = false;
                     }
@@ -1564,25 +1687,30 @@
 
                 async requireAuth(action) {
                     console.log('requireAuth called, current authenticated state:', this.authenticated);
-                    // Always check auth status first to ensure it's current
-                    await this.checkAuthStatus();
-                    console.log('After checkAuthStatus, authenticated:', this.authenticated);
+                    // Only check auth status if we're not already authenticated
+                    // This prevents unnecessary API calls and race conditions after login
+                    if (!this.authenticated) {
+                        await this.checkAuthStatus();
+                        console.log('After checkAuthStatus, authenticated:', this.authenticated);
+                    }
 
                     // Double-check authentication status
                     if (!this.authenticated) {
                         console.log('User not authenticated, showing login modal');
-                        // Only show modal if not already showing
-                        if (!this.showLoginModal) {
-                            this.pendingAction = action;
-                            // Set showLoginModal to true and force Alpine.js reactivity
-                            this.showLoginModal = true;
-                            // Use $dispatch to ensure Alpine.js processes the change
-                            this.$dispatch('login-modal-show');
-                            await this.$nextTick();
-                            console.log('Login modal should be visible:', this.showLoginModal);
-                        } else {
-                            // Modal already showing, just store the action
-                            this.pendingAction = action;
+                        this.pendingAction = action;
+                        // Reset modal state before showing
+                        this.loginPassword = '';
+                        this.loginError = '';
+                        this.loginLoading = false;
+                        // Show the modal
+                        this.showLoginModal = true;
+                        console.log('Set showLoginModal to true');
+                        // Focus the password input after modal is shown
+                        await this.$nextTick();
+                        const input = document.getElementById('loginPassword');
+                        if (input) {
+                            input.focus();
+                            console.log('Focused password input');
                         }
                         // Return early to prevent action from executing
                         console.log('requireAuth returning early (not authenticated)');
@@ -1596,7 +1724,9 @@
                 async loadStatus() {
                     this.loadingStates.status = true;
                     try {
-                        const response = await fetch('/api/status');
+                        const response = await fetch('/api/status', {
+                            credentials: 'same-origin'
+                        });
                         if (!response.ok) {
                             console.error('Status API returned:', response.status, response.statusText);
                             return;
@@ -1619,7 +1749,9 @@
                 async loadScripts() {
                     this.loadingStates.scripts = true;
                     try {
-                        const response = await fetch('/api/bootstrap-scripts');
+                        const response = await fetch('/api/bootstrap-scripts', {
+                            credentials: 'same-origin'
+                        });
                         if (!response.ok) {
                             console.error('Scripts API returned:', response.status, response.statusText);
                             this.scripts = [];
@@ -1641,7 +1773,9 @@
                 async loadBackups() {
                     this.loadingStates.backups = true;
                     try {
-                        const response = await fetch('/api/bootstrap-scripts/backups');
+                        const response = await fetch('/api/bootstrap-scripts/backups', {
+                            credentials: 'same-origin'
+                        });
                         if (!response.ok) {
                             console.error('Backups API returned:', response.status, response.statusText);
                             this.backups = [];
@@ -1931,9 +2065,13 @@
                 },
 
                 async triggerConfigTab() {
+                    console.log('triggerConfigTab called');
                     // Require authentication BEFORE showing configuration tab
                     await this.requireAuth(async () => {
+                        console.log('requireAuth callback executed - user is authenticated');
                         this.activeTab = 'config';
+                        // Small delay to ensure UI updates before loading config
+                        await this.$nextTick();
                         // Load config after switching to tab
                         await this.loadConfig();
                     });
@@ -1949,13 +2087,16 @@
                 async loadConfig() {
                     this.loadingStates.config = true;
                     // User should already be authenticated (tab only opens after auth)
-                    // But double-check to be safe
-                    await this.checkAuthStatus();
+                    // Only check auth status if we don't already know we're authenticated
+                    // This prevents unnecessary API calls right after login
                     if (!this.authenticated) {
-                        this.activeTab = 'scripts'; // Switch away from config tab
-                        this.showLoginModal = true;
-                        this.loadingStates.config = false;
-                        return;
+                        await this.checkAuthStatus();
+                        if (!this.authenticated) {
+                            this.activeTab = 'scripts'; // Switch away from config tab
+                            this.showLoginModal = true;
+                            this.loadingStates.config = false;
+                            return;
+                        }
                     }
 
                     try {
@@ -2119,7 +2260,9 @@
                 async loadLogs() {
                     this.loadingStates.logs = true;
                     try {
-                        const response = await fetch(`/api/logs?source=${this.logSource}&lines=${this.logLines}`);
+                        const response = await fetch(`/api/logs?source=${this.logSource}&lines=${this.logLines}`, {
+                            credentials: 'same-origin'
+                        });
                         const data = await response.json();
 
                         if (this.logSource === 'container' && this.showMultiColumn) {
@@ -2186,12 +2329,14 @@
                             this.lastLogHash = logHash;
 
                             this.logs = newLogs;
-                            // Auto-scroll to top (newest first)
-                            this.$nextTick(() => {
-                                if (this.$refs.logsContainer) {
-                                    this.$refs.logsContainer.scrollTop = 0;
-                                }
-                            });
+                            // Auto-scroll to top (newest first) only if auto-refresh is enabled
+                            if (this.autoRefreshEnabled) {
+                                this.$nextTick(() => {
+                                    if (this.$refs.logsContainer) {
+                                        this.$refs.logsContainer.scrollTop = 0;
+                                    }
+                                });
+                            }
                         }
                     } catch (error) {
                         console.error('Failed to load logs:', error);
@@ -2202,14 +2347,21 @@
                 },
 
                 startAutoRefresh() {
+                    // Only start if auto-refresh is enabled
+                    if (!this.autoRefreshEnabled) {
+                        return;
+                    }
                     // Clear any existing interval first
                     if (this.logRefreshInterval) {
                         clearInterval(this.logRefreshInterval);
                     }
                     // Start auto-refresh every 2 seconds
                     this.logRefreshInterval = setInterval(() => {
-                        if (this.activeTab === 'logs' || (this.activeApplication === 'dhcp' && this.activeDhcpTab === 'logs')) {
+                        if (this.autoRefreshEnabled && (this.activeTab === 'logs' || (this.activeApplication === 'dhcp' && this.activeDhcpTab === 'logs'))) {
                             this.loadLogs();
+                        } else {
+                            // Stop if auto-refresh was disabled
+                            this.stopAutoRefresh();
                         }
                     }, 2000);
                 },
@@ -2218,6 +2370,18 @@
                     if (this.logRefreshInterval) {
                         clearInterval(this.logRefreshInterval);
                         this.logRefreshInterval = null;
+                    }
+                },
+
+                toggleAutoRefresh() {
+                    if (this.autoRefreshEnabled) {
+                        // Auto-refresh enabled - start it if we're on a logs tab
+                        if (this.activeTab === 'logs' || (this.activeApplication === 'dhcp' && this.activeDhcpTab === 'logs')) {
+                            this.startAutoRefresh();
+                        }
+                    } else {
+                        // Auto-refresh disabled - stop it
+                        this.stopAutoRefresh();
                     }
                 },
 
@@ -2278,7 +2442,9 @@
 
                 async viewScript(filename) {
                     try {
-                        const response = await fetch(`/api/bootstrap-script/${filename}`);
+                        const response = await fetch(`/api/bootstrap-script/${filename}`, {
+                            credentials: 'same-origin'
+                        });
                         const data = await response.json();
                         this.viewingScript = data;
                         this.showScriptModal = true;
@@ -2543,8 +2709,8 @@
                             credentials: 'same-origin'
                         });
                         if (response.status === 401) {
+                            // Read-only operation - just update auth status, don't show modal
                             this.authenticated = false;
-                            this.showLoginModal = true;
                             return;
                         }
                         if (response.ok) {
@@ -2573,8 +2739,8 @@
                             credentials: 'same-origin'
                         });
                         if (response.status === 401) {
+                            // Read-only operation - just update auth status, don't show modal
                             this.authenticated = false;
-                            this.showLoginModal = true;
                             return;
                         }
                         if (response.ok) {
@@ -2587,6 +2753,19 @@
                 },
 
                 async toggleDhcp() {
+                    // Check authentication first
+                    await this.checkAuthStatus();
+                    if (!this.authenticated) {
+                        console.log('Not authenticated for toggleDhcp, showing login modal');
+                        this.pendingAction = () => this.toggleDhcp();
+                        this.showLoginModal = true;
+                        await this.$nextTick();
+                        // Revert the toggle since we didn't actually change it
+                        this.dhcpConfig.enabled = !this.dhcpConfig.enabled;
+                        this.loadingStates.dhcp = false;
+                        return;
+                    }
+
                     this.loadingStates.dhcp = true;
                     try {
                         const endpoint = this.dhcpConfig.enabled ? '/api/dhcp/enable' : '/api/dhcp/disable';
@@ -2600,8 +2779,14 @@
                             credentials: 'same-origin'
                         });
                         if (response.status === 401) {
+                            console.log('Received 401 in toggleDhcp, showing login modal');
                             this.authenticated = false;
+                            await this.checkAuthStatus();
+                            this.pendingAction = () => this.toggleDhcp();
                             this.showLoginModal = true;
+                            await this.$nextTick();
+                            // Revert the toggle since we didn't actually change it
+                            this.dhcpConfig.enabled = !this.dhcpConfig.enabled;
                             return;
                         }
                         if (response.ok) {
@@ -2640,6 +2825,25 @@
                 },
 
                 async saveDhcpConfig() {
+                    // Check authentication first
+                    await this.checkAuthStatus();
+                    console.log('saveDhcpConfig: authenticated =', this.authenticated, 'showLoginModal =', this.showLoginModal);
+                    if (!this.authenticated) {
+                        console.log('Not authenticated, showing login modal');
+                        this.pendingAction = () => this.saveDhcpConfig();
+                        this.showLoginModal = true;
+                        console.log('Set showLoginModal to true, current value:', this.showLoginModal);
+                        await this.$nextTick();
+                        console.log('After $nextTick, showLoginModal:', this.showLoginModal);
+                        // Force a re-render by toggling
+                        this.showLoginModal = false;
+                        await this.$nextTick();
+                        this.showLoginModal = true;
+                        await this.$nextTick();
+                        console.log('Login modal should be visible now, showLoginModal:', this.showLoginModal);
+                        return;
+                    }
+
                     this.loadingStates.dhcp = true;
                     try {
                         // Convert strings back to arrays
@@ -2680,18 +2884,24 @@
                             credentials: 'same-origin'
                         });
                         if (response.status === 401) {
+                            console.log('Received 401, showing login modal');
                             this.authenticated = false;
+                            await this.checkAuthStatus();
+                            this.pendingAction = () => this.saveDhcpConfig();
                             this.showLoginModal = true;
+                            await this.$nextTick();
+                            console.log('Login modal should be visible after 401, showLoginModal:', this.showLoginModal);
                             return;
                         }
                         if (response.ok) {
+                            const data = await response.json();
                             alert('DHCP configuration saved successfully');
                             await this.loadDhcpStatus();
                             // Refresh status again after a short delay to catch container startup
                             setTimeout(() => this.loadDhcpStatus(), 2000);
                         } else {
-                            const data = await response.json();
-                            alert('Failed to save DHCP config: ' + (data.error || 'Unknown error'));
+                            const errorData = await response.json().catch(() => ({error: 'Unknown error'}));
+                            alert('Failed to save DHCP config: ' + (errorData.error || 'Unknown error'));
                         }
                     } catch (error) {
                         console.error('Failed to save DHCP config:', error);
@@ -2764,8 +2974,9 @@
                             credentials: 'same-origin'
                         });
                         if (response.status === 401) {
+                            // Read-only operation - just update auth status, don't show modal
                             this.authenticated = false;
-                            this.showLoginModal = true;
+                            this.dhcpLeases = []; // Clear leases on auth failure
                             return;
                         }
                         if (response.ok) {
