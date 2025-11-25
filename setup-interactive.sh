@@ -1804,6 +1804,85 @@ create_pod_files_from_config() {
                 $sed_cmd -i.tmp "/^IP6=/d" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
                 log "Set Network=host in pod file"
             else
+                # Validate network exists before setting static IPs
+                if ! podman network exists "$network" 2>/dev/null; then
+                    warn "Network '$network' does not exist. Static IP addresses cannot be assigned."
+                    warn "Please create the network first using:"
+                    warn "  podman network create --driver macvlan --subnet <subnet> --gateway <gateway> -o parent=<interface> $network"
+                    warn "Or run: ./check-macvlan.sh for instructions"
+                    if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]] && [[ "$ipv4" != "" ]]; then
+                        warn "Removing IPv4 address from pod file (network doesn't exist)"
+                        ipv4=""
+                    fi
+                    if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]] && [[ "$ipv6" != "" ]]; then
+                        warn "Removing IPv6 address from pod file (network doesn't exist)"
+                        ipv6=""
+                    fi
+                else
+                    # Network exists - validate IP addresses are in the network's subnet
+                    local network_subnet
+                    network_subnet=$(podman network inspect "$network" 2>/dev/null | grep -i "\"Subnet\"" | head -1 | sed -n 's/.*"Subnet": *"\([^"]*\)".*/\1/p' || echo "")
+
+                    if [[ -n "$network_subnet" ]]; then
+                        log "Network '$network' exists with subnet: $network_subnet"
+
+                        # Validate IPv4 is in subnet
+                        if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]] && [[ "$ipv4" != "" ]]; then
+                            local ip_in_subnet=false
+                            if command -v ipcalc >/dev/null 2>&1; then
+                                if ipcalc -c "$ipv4" "$network_subnet" >/dev/null 2>&1; then
+                                    ip_in_subnet=true
+                                fi
+                            elif command -v ip >/dev/null 2>&1; then
+                                # Fallback: check if IP is in subnet using ip command
+                                local subnet_base="${network_subnet%%/*}"
+                                local subnet_mask="${network_subnet##*/}"
+                                if [[ "$subnet_mask" =~ ^[0-9]+$ ]] && [[ "$subnet_mask" -le 32 ]]; then
+                                    # Basic validation - check if first octets match
+                                    local ip_octets=($(echo "$ipv4" | tr '.' ' '))
+                                    local subnet_octets=($(echo "$subnet_base" | tr '.' ' '))
+                                    local octets_to_check=$((subnet_mask / 8))
+                                    local match=true
+                                    for ((i=0; i<octets_to_check && i<4; i++)); do
+                                        if [[ "${ip_octets[$i]}" != "${subnet_octets[$i]}" ]]; then
+                                            match=false
+                                            break
+                                        fi
+                                    done
+                                    if [[ "$match" == "true" ]]; then
+                                        ip_in_subnet=true
+                                    fi
+                                fi
+                            fi
+
+                            if [[ "$ip_in_subnet" != "true" ]]; then
+                                warn "IPv4 address $ipv4 is not in network '$network' subnet ($network_subnet)"
+                                warn "Removing IPv4 address from pod file. Pod will use DHCP instead."
+                                ipv4=""
+                            else
+                                log "✓ IPv4 address $ipv4 is valid for network '$network'"
+                            fi
+                        fi
+
+                        # Validate IPv6 is in subnet (if IPv6 subnet exists)
+                        if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]] && [[ "$ipv6" != "" ]]; then
+                            # For IPv6, we'll just check if the network supports IPv6
+                            local has_ipv6_subnet
+                            has_ipv6_subnet=$(podman network inspect "$network" 2>/dev/null | grep -i "ipv6" || echo "")
+                            if [[ -z "$has_ipv6_subnet" ]]; then
+                                warn "Network '$network' does not appear to support IPv6"
+                                warn "Removing IPv6 address from pod file"
+                                ipv6=""
+                            else
+                                log "✓ IPv6 address $ipv6 configured for network '$network'"
+                            fi
+                        fi
+                    else
+                        warn "Could not determine subnet for network '$network'"
+                        warn "Static IP validation skipped. Pod may fail to start if IP is invalid."
+                    fi
+                fi
+
                 # Set Network to specified network (or default ztpbootstrap-net)
                 $sed_cmd -i.tmp "s|^Network=.*|Network=$network|" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
                 log "Set Network=$network in pod file"
@@ -2026,6 +2105,41 @@ create_pod_files_from_config() {
 start_services_after_install() {
     log "Starting new services..."
 
+    # Validate network exists before starting services (if not using host network)
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local config_file="${repo_dir}/config.yaml"
+
+    if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+        local host_network
+        local network
+        host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
+        network=$(yq eval '.network.network' "$config_file" 2>/dev/null || echo "")
+
+        # If network is null or empty, use default
+        if [[ -z "$network" ]] || [[ "$network" == "null" ]]; then
+            network="ztpbootstrap-net"
+        fi
+
+        # Check if we need to validate the network
+        if [[ "$host_network" != "true" ]] && [[ -n "$network" ]]; then
+            if ! podman network exists "$network" 2>/dev/null; then
+                error "Cannot start services: Network '$network' does not exist."
+                error ""
+                error "Please create the macvlan network first:"
+                error "  podman network create --driver macvlan --subnet <subnet> --gateway <gateway> -o parent=<interface> $network"
+                error ""
+                error "Or run: ./check-macvlan.sh for detailed instructions"
+                error ""
+                error "Example:"
+                error "  podman network create --driver macvlan --subnet 10.0.0.0/24 --gateway 10.0.0.1 -o parent=eth0 $network"
+                return 1
+            else
+                log "✓ Network '$network' exists"
+            fi
+        fi
+    fi
+
     # Enable and start podman.socket if not already running
     # This is required for the webui container to access podman commands
     local socket_check_cmd="systemctl"
@@ -2118,9 +2232,33 @@ start_services_after_install() {
             sleep 2
         else
             local pod_error
-            pod_error=$(systemctl status "$pod_service_name" --no-pager -l 2>&1 | tail -10 || echo "Could not get status")
+            pod_error=$(systemctl status "$pod_service_name" --no-pager -l 2>&1 | tail -20 || echo "Could not get status")
             warn "Failed to start $pod_service_name"
-            warn "Error details: ${pod_error:0:300}"
+            warn "Error details: ${pod_error:0:500}"
+
+            # Check if error is related to static IP assignment
+            if echo "$pod_error" | grep -qi "static ip\|requested.*ip\|network.*not found"; then
+                # Get network name from config for error message
+                local error_network="ztpbootstrap-net"
+                if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+                    local config_network
+                    config_network=$(yq eval '.network.network' "$config_file" 2>/dev/null || echo "")
+                    if [[ -n "$config_network" ]] && [[ "$config_network" != "null" ]]; then
+                        error_network="$config_network"
+                    fi
+                fi
+                warn ""
+                warn "⚠️  This error is likely related to network configuration:"
+                warn "   - The macvlan network may not exist"
+                warn "   - The static IP address may not be in the network's subnet"
+                warn "   - The IP address may already be in use"
+                warn ""
+                warn "To diagnose:"
+                warn "  1. Check if network exists: podman network ls | grep $error_network"
+                warn "  2. Check network subnet: podman network inspect $error_network | grep Subnet"
+                warn "  3. Verify IP is in subnet: ./check-macvlan.sh"
+                warn "  4. Check pod logs: journalctl -xeu $pod_service_name"
+            fi
         fi
 
         # Start nginx container
@@ -2295,9 +2433,33 @@ start_services_after_install() {
             sleep 2
         else
             local pod_error
-            pod_error=$(sudo systemctl status "$pod_service_name" --no-pager -l 2>&1 | tail -10 || echo "Could not get status")
+            pod_error=$(sudo systemctl status "$pod_service_name" --no-pager -l 2>&1 | tail -20 || echo "Could not get status")
             warn "Failed to start $pod_service_name"
-            warn "Error details: ${pod_error:0:300}"
+            warn "Error details: ${pod_error:0:500}"
+
+            # Check if error is related to static IP assignment
+            if echo "$pod_error" | grep -qi "static ip\|requested.*ip\|network.*not found"; then
+                # Get network name from config for error message
+                local error_network="ztpbootstrap-net"
+                if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+                    local config_network
+                    config_network=$(yq eval '.network.network' "$config_file" 2>/dev/null || echo "")
+                    if [[ -n "$config_network" ]] && [[ "$config_network" != "null" ]]; then
+                        error_network="$config_network"
+                    fi
+                fi
+                warn ""
+                warn "⚠️  This error is likely related to network configuration:"
+                warn "   - The macvlan network may not exist"
+                warn "   - The static IP address may not be in the network's subnet"
+                warn "   - The IP address may already be in use"
+                warn ""
+                warn "To diagnose:"
+                warn "  1. Check if network exists: podman network ls | grep $error_network"
+                warn "  2. Check network subnet: podman network inspect $error_network | grep Subnet"
+                warn "  3. Verify IP is in subnet: ./check-macvlan.sh"
+                warn "  4. Check pod logs: journalctl -xeu $pod_service_name"
+            fi
         fi
 
         if sudo systemctl start ztpbootstrap-nginx.service 2>/dev/null; then
