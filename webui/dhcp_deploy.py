@@ -470,9 +470,10 @@ def check_dhcp_container_status() -> Dict[str, any]:
 
         # Fallback: Check if Kea control agent is responding (port 8000)
         # This is a reliable way to verify the container is actually running
+        # Use this when systemctl/podman checks fail (common from inside containers)
         # Note: For macvlan networking, the control agent won't be on 127.0.0.1
         # so we skip this check if we're on host network but DHCP is on macvlan
-        if not result["container_running"]:
+        if not result["container_running"] or not result["service_active"]:
             try:
                 import socket
 
@@ -481,10 +482,11 @@ def check_dhcp_container_status() -> Dict[str, any]:
                 result_check = sock.connect_ex(("127.0.0.1", 8000))
                 sock.close()
                 if result_check == 0:
+                    # Port is open, so Kea is running
                     result["container_running"] = True
-                    if not result["service_active"]:
-                        result["service_active"] = True
-                        result["service_status"] = "active"
+                    result["service_active"] = True
+                    result["service_status"] = "active"
+                    logger.debug("Kea control agent port check: service is running")
             except Exception as e:
                 logger.debug(f"Could not check Kea control agent port: {e}")
 
