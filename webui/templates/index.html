@@ -1080,31 +1080,40 @@
                                 <h2 class="text-lg font-semibold text-gray-900 mb-2">DHCP Server Logs</h2>
                                 <p class="text-sm text-gray-600">View logs from Kea DHCP server</p>
                             </div>
-                            <div class="flex items-center space-x-2 flex-wrap">
-                                <div class="relative">
+                            <div class="flex items-center space-x-1.5 flex-wrap">
+                                <div class="relative group">
                                     <input type="text"
                                            x-model="logSearchTerm"
                                            @input="highlightLogs()"
-                                           placeholder="Search logs..."
-                                           class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-48">
+                                           placeholder="Search..."
+                                           class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-32"
+                                           title="Search logs">
                                     <button x-show="logSearchTerm"
                                             @click="logSearchTerm = ''; highlightLogs()"
-                                            class="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            class="absolute right-1 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                                         </svg>
                                     </button>
                                 </div>
-                                <select x-model="logLines" @change="loadLogs()" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                                    <option value="50">Last 50 lines</option>
-                                    <option value="100">Last 100 lines</option>
-                                    <option value="200">Last 200 lines</option>
-                                    <option value="500">Last 500 lines</option>
-                                </select>
-                                <button @click="markLogs()" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm font-medium transition-colors">
-                                    Mark Logs
+                                <div class="relative group">
+                                    <select x-model="logLines" @change="loadLogs()" class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 pr-6" title="Number of lines">
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                        <option value="200">200</option>
+                                        <option value="500">500</option>
+                                    </select>
+                                </div>
+                                <button @click="markLogs()" class="px-2.5 py-1.5 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs font-medium transition-colors" title="Mark current position in logs">
+                                    Mark
                                 </button>
-                                <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
+                                <div class="relative group">
+                                    <label class="inline-flex items-center cursor-pointer" title="Auto-refresh logs">
+                                        <input type="checkbox" x-model="autoRefreshEnabled" @change="toggleAutoRefresh()" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                    </label>
+                                </div>
+                                <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-1.5 py-0.5 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
                                     <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                                         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
                                     </svg>
@@ -1668,10 +1677,12 @@
                         // Save to localStorage for persistence across refreshes
                         localStorage.setItem('ztpbootstrap-activeDhcpTab', newTab);
                         if (newTab === 'logs') {
-                            // Set log source to DHCP and start auto-refresh when entering DHCP logs tab
+                            // Set log source to DHCP and start auto-refresh when entering DHCP logs tab (only if enabled)
                             this.logSource = 'dhcp';
                             this.loadLogs();
-                            this.startAutoRefresh();
+                            if (this.autoRefreshEnabled) {
+                                this.startAutoRefresh();
+                            }
                         } else {
                             // Stop auto-refresh when leaving DHCP logs tab
                             this.stopAutoRefresh();
