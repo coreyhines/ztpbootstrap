@@ -564,32 +564,8 @@ def check_dhcp_container_status() -> Dict[str, any]:
             except Exception as e:
                 logger.debug(f"Could not check Kea control agent port: {e}")
 
-        # Additional fallback: Check if lease file exists and has content (indicates DHCP is/was running)
-        if not result["container_running"] and not result["service_active"]:
-            try:
-                lease_file = DHCP_LEASES_DIR / "dhcp4.leases"
-                if lease_file.exists():
-                    # Check if file has content (more than just header)
-                    file_size = lease_file.stat().st_size
-                    if file_size > 200:  # More than just header line
-                        # Lease file has content, assume DHCP is or was recently running
-                        result["container_running"] = True
-                        result["service_active"] = True
-                        result["service_status"] = "active (detected via lease file)"
-                        logger.debug("Detected running DHCP via lease file content")
-                    # Also check if file was modified recently (within last 30 minutes)
-                    import time
-
-                    file_mtime = lease_file.stat().st_mtime
-                    current_time = time.time()
-                    if current_time - file_mtime < 1800:  # 30 minutes
-                        # Lease file was recently updated, assume DHCP is running
-                        result["container_running"] = True
-                        result["service_active"] = True
-                        result["service_status"] = "active (detected via lease file timestamp)"
-                        logger.debug("Detected running DHCP via lease file timestamp")
-            except Exception as e:
-                logger.debug(f"Could not check lease file: {e}")
+        # Don't use lease file as a fallback - it can exist even when service is stopped
+        # Trust systemctl and podman checks only
 
         # Final fallback: If container file exists, assume it might be running
         # This handles cases where we can't verify status from inside a container
