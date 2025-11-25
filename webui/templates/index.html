@@ -189,19 +189,19 @@
             <div x-show="activeApplication === 'dhcp'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
                 <!-- DHCP Service Status -->
                 <div class="bg-white rounded-lg shadow-sm p-4 border-l-4 relative"
-                     :class="dhcpStatus.container && dhcpStatus.container.container_running ? 'border-green-500' : (dhcpStatus.enabled ? 'border-yellow-500' : 'border-gray-300')">
+                     :class="(dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'border-green-500' : (dhcpStatus.enabled ? 'border-yellow-500' : 'border-gray-300')">
                     <!-- Toggle in upper right corner -->
                     <div class="absolute top-3 right-3">
                         <label class="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" :checked="dhcpStatus.enabled || (dhcpStatus.container && dhcpStatus.container.container_running)" @change="toggleDhcp()" class="sr-only peer" :disabled="loadingStates.dhcp">
+                            <input type="checkbox" :checked="dhcpConfig.enabled" @change="toggleDhcp()" class="sr-only peer" :disabled="loadingStates.dhcp">
                             <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                         </label>
                     </div>
                     <!-- Main content with status icon -->
                     <div class="flex items-center pr-16">
                         <div class="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 mr-3"
-                             :class="dhcpStatus.container && dhcpStatus.container.container_running ? 'bg-green-100' : (dhcpStatus.enabled ? 'bg-yellow-100' : 'bg-gray-100')">
-                            <svg x-show="dhcpStatus.container && dhcpStatus.container.container_running" class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                             :class="(dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'bg-green-100' : (dhcpStatus.enabled ? 'bg-yellow-100' : 'bg-gray-100')">
+                            <svg x-show="dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active" class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                             </svg>
                             <svg x-show="dhcpStatus.enabled && (!dhcpStatus.container || !dhcpStatus.container.container_running)" class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -214,8 +214,8 @@
                         <div class="flex-1">
                             <p class="text-xs font-medium text-gray-600 mb-0.5">Service Status</p>
                             <p class="text-2xl font-bold"
-                               :class="dhcpStatus.container && dhcpStatus.container.container_running ? 'text-green-600' : (dhcpStatus.enabled ? 'text-yellow-600' : 'text-gray-500')">
-                                <span x-text="dhcpStatus.container && dhcpStatus.container.container_running ? 'Running' : (dhcpStatus.enabled ? 'Starting...' : 'Stopped')"></span>
+                               :class="(dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'text-green-600' : (dhcpStatus.enabled ? 'text-yellow-600' : 'text-gray-500')">
+                                <span x-text="(dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'Running' : (dhcpStatus.enabled ? 'Starting...' : 'Stopped')"></span>
                             </p>
                             <p class="text-xs text-gray-500 mt-0.5">Kea Container</p>
                         </div>
@@ -2754,8 +2754,9 @@
                         if (response.ok) {
                             const data = await response.json();
                             this.dhcpStatus = data;
-                            // Sync dhcpConfig.enabled with actual status
-                            this.dhcpConfig.enabled = data.enabled || (data.container && data.container.container_running);
+                            // Sync dhcpConfig.enabled with config value only (not container state)
+                            // Container state is separate - a container can be running but disabled
+                            this.dhcpConfig.enabled = data.enabled;
                         }
                     } catch (error) {
                         console.error('Failed to load DHCP status:', error);
@@ -2777,8 +2778,13 @@
                     }
 
                     this.loadingStates.dhcp = true;
+                    // Capture the current state before toggling
+                    const wasEnabled = this.dhcpConfig.enabled;
+                    // Toggle the state immediately for UI responsiveness
+                    this.dhcpConfig.enabled = !this.dhcpConfig.enabled;
                     try {
-                        const endpoint = this.dhcpConfig.enabled ? '/api/dhcp/enable' : '/api/dhcp/disable';
+                        // Use the OLD state to determine which endpoint to call
+                        const endpoint = wasEnabled ? '/api/dhcp/disable' : '/api/dhcp/enable';
                         const headers = {'Content-Type': 'application/json'};
                         if (this.csrfToken) {
                             headers['X-CSRF-Token'] = this.csrfToken;

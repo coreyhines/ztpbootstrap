@@ -530,10 +530,17 @@ def check_dhcp_container_status() -> Dict[str, any]:
 
             if podman_result.returncode == 0 and DHCP_CONTAINER_NAME in podman_result.stdout:
                 result["container_running"] = True
-                # If container is running, assume service is active too
-                if not result["service_active"]:
-                    result["service_active"] = True
+                # Only set service_active if systemctl also confirms it's active
+                # Don't override systemctl's status - it's the source of truth
+                if result["service_active"]:
                     result["service_status"] = "active"
+                else:
+                    # Container exists but service is not active - this shouldn't happen normally
+                    # but if it does, trust systemctl over podman
+                    result["container_running"] = False
+                    logger.debug(
+                        "Container found in podman but service is not active - trusting systemctl"
+                    )
         except Exception as e:
             logger.debug(f"Could not check container via podman: {e}")
 
