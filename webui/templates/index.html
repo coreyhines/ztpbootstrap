@@ -214,8 +214,8 @@
                         <div class="flex-1">
                             <p class="text-xs font-medium text-gray-600 mb-0.5">Service Status</p>
                             <p class="text-2xl font-bold"
-                               :class="(dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'text-green-600' : (dhcpStatus.enabled ? 'text-yellow-600' : 'text-gray-500')">
-                                <span x-text="(dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'Running' : (dhcpStatus.enabled ? 'Starting...' : 'Stopped')"></span>
+                               :class="(dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'text-green-600' : ((dhcpStatus.container && dhcpStatus.container.service_active && !dhcpStatus.container.container_running) || (dhcpStatus.enabled && !dhcpStatus.container?.service_active)) ? 'text-yellow-600' : 'text-gray-500'">
+                                <span x-text="(dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'Running' : ((dhcpStatus.container && dhcpStatus.container.service_active && !dhcpStatus.container.container_running) || (dhcpStatus.enabled && !dhcpStatus.container?.service_active)) ? 'Starting...' : 'Stopped'"></span>
                             </p>
                             <p class="text-xs text-gray-500 mt-0.5">Kea Container</p>
                         </div>
