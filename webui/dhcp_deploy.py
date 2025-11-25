@@ -287,18 +287,23 @@ def start_dhcp_container() -> bool:
                 timeout=30,
             )
 
-            if result.returncode == 0:
-                logger.info("DHCP container started successfully via systemctl")
-                # Verify it's actually running
-                time.sleep(1)  # Give it a moment to start
+            # Even if systemctl returns non-zero, the service might have started
+            # (e.g., if called from inside a container where systemctl doesn't work)
+            # So we always check the status
+            logger.info("Attempted to start via systemctl, checking status...")
+            # Wait up to 60 seconds for Kea installation
+            for i in range(12):  # Check every 5 seconds for up to 60 seconds
+                time.sleep(5)
                 status = check_dhcp_container_status()
                 if status.get("container_running", False) or status.get("service_active", False):
+                    logger.info(f"DHCP container verified running after {i*5} seconds")
                     return True
-                else:
-                    logger.warning("systemctl start returned success but container is not running")
-                    return False
+                logger.debug(f"Waiting for container to start... ({i*5}s)")
 
-            logger.warning(f"systemctl start failed: {result.stderr}")
+            if result.returncode != 0:
+                logger.warning(f"systemctl start returned error: {result.stderr}")
+            else:
+                logger.warning("systemctl start succeeded but container not running after 60s")
         except Exception as e:
             logger.error(f"systemctl start failed with exception: {e}")
             # Check status even if systemctl failed
@@ -307,13 +312,17 @@ def start_dhcp_container() -> bool:
                 logger.info("DHCP container is running (verified after exception)")
                 return True
 
-        # Final verification - don't fail open, actually check if it's running
-        status = check_dhcp_container_status()
-        if status.get("container_running", False) or status.get("service_active", False):
-            logger.info("DHCP container is running (final verification)")
-            return True
+        # Final verification - wait a bit longer for Kea installation
+        logger.info("Performing final verification...")
+        for i in range(12):  # Check every 5 seconds for up to 60 seconds
+            time.sleep(5)
+            status = check_dhcp_container_status()
+            if status.get("container_running", False) or status.get("service_active", False):
+                logger.info(f"DHCP container verified running after {i*5} seconds (final check)")
+                return True
+            logger.debug(f"Final check: waiting for container... ({i*5}s)")
 
-        logger.error("Failed to start DHCP container - verification failed")
+        logger.error("Failed to start DHCP container - verification failed after 60s")
         return False
 
     except Exception as e:
