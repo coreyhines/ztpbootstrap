@@ -4,6 +4,7 @@ Simple Web UI for ZTP Bootstrap Service
 Lightweight Flask application for configuration and monitoring
 """
 
+import fcntl
 import json
 import logging
 import os
@@ -17,8 +18,20 @@ from functools import wraps
 from pathlib import Path
 
 import yaml
-from flask import Flask, jsonify, render_template, request, send_from_directory, session
+from flask import (
+    Flask,
+    jsonify,
+    make_response,
+    render_template,
+    request,
+    send_from_directory,
+    session,
+)
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
+
+# Debug flag - set via environment variable
+DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
 
 # Import DHCP modules
 try:
@@ -129,8 +142,23 @@ def safe_path_join(base_dir, filename):
 
 
 app = Flask(__name__)
+# Apply ProxyFix middleware to handle Nginx proxy headers correctly
+# x_for=1: Trust X-Forwarded-For
+# x_proto=1: Trust X-Forwarded-Proto
+# x_host=1: Trust X-Forwarded-Host
+# x_prefix=1: Trust X-Forwarded-Prefix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
 # Enable template auto-reload in production for development/testing
 app.config["TEMPLATES_AUTO_RELOAD"] = True
+# Trust proxy headers (needed when behind nginx reverse proxy)
+# This is critical for Flask to properly handle cookies and sessions behind nginx
+# app.config["PREFERRED_URL_SCHEME"] = "http"  # Handled by ProxyFix
+# Set APPLICATION_ROOT to empty string so Flask doesn't use request path for cookie path
+# This ensures session cookies work for both /ui/ and /api/ endpoints
+app.config["APPLICATION_ROOT"] = ""
+# Don't set SESSION_COOKIE_DOMAIN - let it default so cookies work for all subpaths
+# Flask needs to trust the proxy to properly set cookie paths
 
 # Configuration paths
 CONFIG_DIR = Path(os.environ.get("ZTP_CONFIG_DIR", "/opt/containerdata/ztpbootstrap"))
@@ -254,12 +282,22 @@ def reload_auth_config():
     """Reload authentication configuration from config.yaml"""
     global AUTH_CONFIG
     AUTH_CONFIG = load_auth_config()
+    # NOTE: Do NOT update app.secret_key here - changing the secret key during
+    # a request breaks Flask session cookie signing. The secret key should only
+    # be set once at startup. If the session_secret changes, the app must be
+    # restarted for it to take effect.
 
 
 # Configure Flask session
 app.secret_key = AUTH_CONFIG["session_secret"]
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+# Set cookie path to root so it works for both /ui/ and /api/ endpoints
+# This is critical when Flask is behind nginx proxy with different location blocks
+app.config["SESSION_COOKIE_PATH"] = "/"
+# Don't set domain - let it default so it works for both localhost and 127.0.0.1
+# Setting a domain can cause cookies to not be set in browsers
+app.config["SESSION_COOKIE_DOMAIN"] = None
 # Only set Secure flag if HTTPS is available
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("HTTPS_ENABLED", "false").lower() == "true"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(seconds=AUTH_CONFIG["session_timeout"])
@@ -454,6 +492,13 @@ def auth_login():
 
         password = data["password"]
 
+        # Debug logging (only in debug mode)
+        if DEBUG:
+            print(
+                f"Login attempt: password length={len(password)}, hash format={AUTH_CONFIG['admin_password_hash'][:30] if AUTH_CONFIG.get('admin_password_hash') else 'None'}...",
+                flush=True,
+            )
+
         # Verify password
         # Handle both Werkzeug format and fallback format from setup script
         password_hash = AUTH_CONFIG["admin_password_hash"]
@@ -478,24 +523,56 @@ def auth_login():
                 # Decode the base64 hash (handle padding if needed)
                 try:
                     stored_hash = base64.b64decode(hash_part)
-                except Exception:
+                except Exception as e:
+                    if DEBUG:
+                        print(
+                            f"Base64 decode error (first attempt): {e}, hash_part length: {len(hash_part)}",
+                            flush=True,
+                        )
                     # Add padding if needed (base64 strings must be multiple of 4)
                     missing_padding = len(hash_part) % 4
                     if missing_padding:
                         hash_part += "=" * (4 - missing_padding)
-                    stored_hash = base64.b64decode(hash_part)
+                    try:
+                        stored_hash = base64.b64decode(hash_part)
+                    except Exception as e2:
+                        if DEBUG:
+                            print(f"Base64 decode error (after padding): {e2}", flush=True)
+                        password_valid = False
+                        stored_hash = None
                 # Generate hash with same parameters (salt='ztpbootstrap', iterations=100000)
-                computed_hash = hashlib.pbkdf2_hmac(
-                    "sha256", password.encode("utf-8"), b"ztpbootstrap", 100000
-                )
-                password_valid = stored_hash == computed_hash
-            except Exception:
+                if stored_hash:
+                    computed_hash = hashlib.pbkdf2_hmac(
+                        "sha256", password.encode("utf-8"), b"ztpbootstrap", 100000
+                    )
+                    password_valid = stored_hash == computed_hash
+                    if DEBUG:
+                        print(
+                            f"Password verification (fallback format): valid={password_valid}, hash lengths match={len(stored_hash) == len(computed_hash)}",
+                            flush=True,
+                        )
+            except Exception as e:
+                if DEBUG:
+                    print(
+                        f"Exception during fallback password verification: {type(e).__name__}: {e}",
+                        flush=True,
+                    )
                 password_valid = False
         else:
             # Use Werkzeug's standard format
             try:
                 password_valid = check_password_hash(password_hash, password)
-            except (ValueError, TypeError):
+                if DEBUG:
+                    print(
+                        f"Password verification (Werkzeug format): valid={password_valid}",
+                        flush=True,
+                    )
+            except (ValueError, TypeError) as e:
+                if DEBUG:
+                    print(
+                        f"Exception during Werkzeug password verification: {type(e).__name__}: {e}",
+                        flush=True,
+                    )
                 password_valid = False
 
         if password_valid:
@@ -530,7 +607,8 @@ def auth_login():
 
             return jsonify({"error": "Invalid password", "code": "INVALID_PASSWORD"}), 401
     except Exception as e:
-        print(f"Login error: {type(e).__name__}: {e}", flush=True)
+        if DEBUG:
+            print(f"Login error: {type(e).__name__}: {e}", flush=True)
         return jsonify({"error": "Login failed", "code": "LOGIN_ERROR"}), 500
 
 
@@ -641,22 +719,52 @@ def auth_change_password():
                 # Werkzeug hashes contain special characters ($, :) that need proper handling
                 yaml_config["auth"]["admin_password_hash"] = str(new_password_hash).strip()
 
-                # Write back to file using atomic write (write to temp, then rename)
+                # Write back to file using atomic write with file locking (write to temp, then rename)
                 import shutil
                 import tempfile
 
                 temp_file = CONFIG_FILE.with_suffix(".yaml.tmp")
                 try:
-                    with open(temp_file, "w") as f:
-                        yaml.dump(
-                            yaml_config,
-                            f,
-                            default_flow_style=False,
-                            sort_keys=False,
-                            allow_unicode=True,
-                        )
-                    # Atomic rename
-                    temp_file.replace(CONFIG_FILE)
+                    # Use file locking to prevent race conditions
+                    with open(CONFIG_FILE, "r+") as lock_file:
+                        try:
+                            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except (IOError, OSError):
+                            # File is locked by another process, wait briefly and retry
+                            time.sleep(0.1)
+                            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+
+                        # Write to temp file while holding lock
+                        with open(temp_file, "w") as f:
+                            yaml.dump(
+                                yaml_config,
+                                f,
+                                default_flow_style=False,
+                                sort_keys=False,
+                                allow_unicode=True,
+                            )
+                        # Atomic rename (releases lock automatically)
+                        temp_file.replace(CONFIG_FILE)
+                except (IOError, OSError) as e:
+                    # File locking not available (Windows) or failed - use atomic write without lock
+                    if DEBUG:
+                        print(f"File locking not available, using atomic write: {e}", flush=True)
+                    try:
+                        with open(temp_file, "w") as f:
+                            yaml.dump(
+                                yaml_config,
+                                f,
+                                default_flow_style=False,
+                                sort_keys=False,
+                                allow_unicode=True,
+                            )
+                        # Atomic rename
+                        temp_file.replace(CONFIG_FILE)
+                    except Exception as e2:
+                        # Clean up temp file on error
+                        if temp_file.exists():
+                            temp_file.unlink()
+                        raise e2
                 except Exception as e:
                     # Clean up temp file on error
                     if temp_file.exists():
@@ -698,17 +806,23 @@ def auth_change_password():
                                 test_result = False
 
                 if not test_result:
-                    print(f"ERROR: New password hash verification failed after reload!", flush=True)
+                    if DEBUG:
+                        print(
+                            f"ERROR: New password hash verification failed after reload!",
+                            flush=True,
+                        )
 
                 return jsonify({"success": True})
             except Exception as e:
                 # Log detailed error for debugging
                 import traceback
 
-                print(
-                    f"Error updating password in config.yaml: {type(e).__name__}: {e}", flush=True
-                )
-                print(f"Traceback: {traceback.format_exc()}", flush=True)
+                if DEBUG:
+                    print(
+                        f"Error updating password in config.yaml: {type(e).__name__}: {e}",
+                        flush=True,
+                    )
+                    print(f"Traceback: {traceback.format_exc()}", flush=True)
                 return (
                     jsonify(
                         {
@@ -724,8 +838,9 @@ def auth_change_password():
         # Log detailed error for debugging
         import traceback
 
-        print(f"Change password error: {type(e).__name__}: {e}", flush=True)
-        print(f"Traceback: {traceback.format_exc()}", flush=True)
+        if DEBUG:
+            print(f"Change password error: {type(e).__name__}: {e}", flush=True)
+            print(f"Traceback: {traceback.format_exc()}", flush=True)
         return jsonify({"error": "Failed to change password", "code": "CHANGE_PASSWORD_ERROR"}), 500
 
 
@@ -1898,154 +2013,160 @@ def get_logs():
 
         elif log_source == "dhcp":
             # DHCP logs from Kea server
-            # Try multiple sources: Kea log file, journalctl, podman logs
-            log_paths = [
-                Path("/opt/containerdata/ztpbootstrap/dhcp/logs/kea.log"),  # Kea log file
-                CONFIG_DIR / "dhcp" / "logs" / "kea.log",  # Alternative path
-            ]
-
+            # Try multiple sources: podman logs, Kea log file, journalctl
+            logs = ""
             log_found = False
-            for log_path in log_paths:
-                if log_path.exists():
-                    try:
-                        with open(log_path, "r") as f:
-                            all_lines = f.readlines()
-                            recent_lines = (
-                                all_lines[-lines:] if len(all_lines) > lines else all_lines
-                            )
-                            # Parse and format Kea logs
-                            formatted_lines = []
-                            for line in recent_lines:
-                                # Kea logs are typically JSON or text format
-                                # Try to parse JSON first, fallback to text
-                                try:
-                                    log_entry = json.loads(line.strip())
-                                    # Format JSON log entry
-                                    timestamp = log_entry.get("timestamp", "")
-                                    level = log_entry.get("severity", "INFO")
-                                    message = log_entry.get("message", "")
-                                    # Extract relay agent info if present
-                                    relay_info = ""
-                                    if "relay" in log_entry:
-                                        relay = log_entry["relay"]
-                                        giaddr = relay.get("giaddr", "")
-                                        if giaddr:
-                                            relay_info = f"[RELAY: {giaddr}] "
-                                    formatted_lines.append(
-                                        f"{timestamp} [{level}] {relay_info}{message}"
-                                    )
-                                except (json.JSONDecodeError, ValueError):
-                                    # Plain text log, use as-is
-                                    formatted_lines.append(line.rstrip())
-                            logs = "\n".join(formatted_lines)
-                            log_found = True
-                            break
-                    except Exception as e:
-                        logs = f"Error reading DHCP log from {log_path}: {str(e)}"
-                        log_found = True
-                        break
-
-            if not log_found:
-                # Fallback 1: Try podman logs with sudo (for host access)
-                # Get both stdout and stderr from Kea container
+            try:
+                # First try: podman logs (most reliable for container logs)
+                # Try without sudo first (if running in container with podman socket access)
                 try:
-                    # Get stdout/stderr from container (includes Kea operational logs)
                     result = subprocess.run(
-                        [
-                            "sudo",
-                            "podman",
-                            "logs",
-                            "--tail",
-                            str(lines),
-                            "--timestamps",
-                            "ztpbootstrap-dhcp",
-                        ],
+                        ["podman", "logs", "--tail", str(lines), "ztpbootstrap-dhcp"],
                         capture_output=True,
                         text=True,
-                        timeout=10,
+                        timeout=5,
                     )
-                    if result.returncode == 0 and result.stdout.strip():
-                        logs = result.stdout
-                        # Also include stderr if present (Kea errors/warnings)
-                        if result.stderr.strip():
-                            logs = f"{logs}\n\n--- STDERR ---\n{result.stderr}"
+                    if result.returncode == 0 and result.stdout:
+                        # Filter out UI/API requests and format
+                        all_lines = result.stdout.split("\n")
+                        filtered_lines = []
+                        for line in all_lines:
+                            # Filter out control agent HTTP requests (UI/API)
+                            if "HTTP" in line and ("GET" in line or "POST" in line):
+                                continue
+                            # Only include DHCP-related log entries
+                            if any(
+                                keyword in line
+                                for keyword in [
+                                    "DHCP",
+                                    "LEASE",
+                                    "Kea",
+                                    "packet",
+                                    "subnet",
+                                    "lease",
+                                ]
+                            ):
+                                filtered_lines.append(line)
+                        logs = (
+                            "\n".join(filtered_lines[-lines:])
+                            if filtered_lines
+                            else "No device requests found in recent log entries (UI/API requests filtered out)"
+                        )
                         log_found = True
-                except FileNotFoundError:
-                    pass
-                except Exception as e:
-                    # Try without sudo as fallback
+                except (FileNotFoundError, subprocess.TimeoutExpired):
+                    # Try with sudo as fallback
                     try:
                         result = subprocess.run(
                             [
+                                "sudo",
                                 "podman",
                                 "logs",
                                 "--tail",
                                 str(lines),
-                                "--timestamps",
                                 "ztpbootstrap-dhcp",
                             ],
                             capture_output=True,
                             text=True,
                             timeout=10,
                         )
-                        if result.returncode == 0 and result.stdout.strip():
-                            logs = result.stdout
-                            if result.stderr.strip():
-                                logs = f"{logs}\n\n--- STDERR ---\n{result.stderr}"
+                        if result.returncode == 0 and result.stdout:
+                            all_lines = result.stdout.split("\n")
+                            filtered_lines = []
+                            for line in all_lines:
+                                if "HTTP" in line and ("GET" in line or "POST" in line):
+                                    continue
+                                if any(
+                                    keyword in line
+                                    for keyword in [
+                                        "DHCP",
+                                        "LEASE",
+                                        "Kea",
+                                        "packet",
+                                        "subnet",
+                                        "lease",
+                                    ]
+                                ):
+                                    filtered_lines.append(line)
+                            logs = (
+                                "\n".join(filtered_lines[-lines:])
+                                if filtered_lines
+                                else "No device requests found in recent log entries (UI/API requests filtered out)"
+                            )
                             log_found = True
                     except Exception:
                         pass
 
-            if not log_found:
-                # Fallback 2: Try journalctl for DHCP service (with sudo and journal path)
-                journal_paths = [
-                    Path("/run/systemd/journal"),
-                    Path("/run/log/journal"),
-                    Path("/var/log/journal"),
-                ]
-                journal_accessible = False
-                journal_path = None
-                for jpath in journal_paths:
-                    if jpath.exists():
-                        try:
-                            if os.access(jpath, os.R_OK):
-                                journal_accessible = True
-                                journal_path = jpath
+                # Fallback: Try Kea log file if podman logs didn't work
+                if not log_found:
+                    log_paths = [
+                        Path("/opt/containerdata/ztpbootstrap/dhcp/logs/kea.log"),
+                        CONFIG_DIR / "dhcp" / "logs" / "kea.log",
+                    ]
+                    for log_path in log_paths:
+                        if log_path.exists():
+                            try:
+                                with open(log_path, "r") as f:
+                                    all_lines = f.readlines()
+                                    recent_lines = (
+                                        all_lines[-lines:] if len(all_lines) > lines else all_lines
+                                    )
+                                    # Parse and format Kea logs
+                                    formatted_lines = []
+                                    for line in recent_lines:
+                                        # Kea logs are typically JSON or text format
+                                        # Try to parse JSON first, fallback to text
+                                        try:
+                                            log_entry = json.loads(line.strip())
+                                            # Format JSON log entry
+                                            timestamp = log_entry.get("timestamp", "")
+                                            level = log_entry.get("severity", "INFO")
+                                            message = log_entry.get("message", "")
+                                            # Extract relay agent info if present
+                                            relay_info = ""
+                                            if "relay" in log_entry:
+                                                relay = log_entry["relay"]
+                                                giaddr = relay.get("giaddr", "")
+                                                if giaddr:
+                                                    relay_info = f"[RELAY: {giaddr}] "
+                                            formatted_lines.append(
+                                                f"{timestamp} [{level}] {relay_info}{message}"
+                                            )
+                                        except (json.JSONDecodeError, ValueError):
+                                            # Plain text log, use as-is
+                                            formatted_lines.append(line.rstrip())
+                                    logs = "\n".join(formatted_lines)
+                                    log_found = True
+                                    break
+                            except Exception as e:
+                                logs = f"Error reading DHCP log from {log_path}: {str(e)}"
+                                log_found = True
                                 break
-                        except:
-                            pass
 
-                if journal_accessible and journal_path:
-                    try:
-                        # Try with sudo first
-                        result = subprocess.run(
-                            [
-                                "sudo",
-                                "journalctl",
-                                "-D",
-                                str(journal_path),
-                                "--system",
-                                "-u",
-                                "ztpbootstrap-dhcp.service",
-                                "-n",
-                                str(lines),
-                                "--no-pager",
-                                "--no-hostname",
-                            ],
-                            capture_output=True,
-                            text=True,
-                            timeout=5,
-                        )
-                        if result.returncode == 0 and result.stdout.strip():
-                            logs = result.stdout
-                            log_found = True
-                    except (FileNotFoundError, subprocess.TimeoutExpired):
-                        pass
-                    except Exception as e:
-                        # Try without sudo
+                if not log_found:
+                    # Fallback 2: Try journalctl for DHCP service (with sudo and journal path)
+                    journal_paths = [
+                        Path("/run/systemd/journal"),
+                        Path("/run/log/journal"),
+                        Path("/var/log/journal"),
+                    ]
+                    journal_accessible = False
+                    journal_path = None
+                    for jpath in journal_paths:
+                        if jpath.exists():
+                            try:
+                                if os.access(jpath, os.R_OK):
+                                    journal_accessible = True
+                                    journal_path = jpath
+                                    break
+                            except:
+                                pass
+
+                    if journal_accessible and journal_path:
                         try:
+                            # Try with sudo first
                             result = subprocess.run(
                                 [
+                                    "sudo",
                                     "journalctl",
                                     "-D",
                                     str(journal_path),
@@ -2064,33 +2185,36 @@ def get_logs():
                             if result.returncode == 0 and result.stdout.strip():
                                 logs = result.stdout
                                 log_found = True
-                        except Exception:
-                            logs = f"Error accessing DHCP logs via journalctl: {str(e)}"
-                            log_found = True
-                else:
-                    # Try standard journalctl without path
-                    try:
-                        result = subprocess.run(
-                            [
-                                "journalctl",
-                                "-u",
-                                "ztpbootstrap-dhcp.service",
-                                "-n",
-                                str(lines),
-                                "--no-pager",
-                            ],
-                            capture_output=True,
-                            text=True,
-                            timeout=5,
-                        )
-                        if result.returncode == 0 and result.stdout.strip():
-                            logs = result.stdout
-                            log_found = True
-                    except (FileNotFoundError, subprocess.TimeoutExpired):
-                        pass
-                    except Exception as e:
-                        logs = f"Error accessing DHCP logs via journalctl: {str(e)}"
-                        log_found = True
+                        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+                            pass
+                        except Exception as e:
+                            # Try without sudo
+                            try:
+                                result = subprocess.run(
+                                    [
+                                        "journalctl",
+                                        "-D",
+                                        str(journal_path),
+                                        "--system",
+                                        "-u",
+                                        "ztpbootstrap-dhcp.service",
+                                        "-n",
+                                        str(lines),
+                                        "--no-pager",
+                                        "--no-hostname",
+                                    ],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=5,
+                                )
+                                if result.returncode == 0 and result.stdout.strip():
+                                    logs = result.stdout
+                                    log_found = True
+                            except Exception:
+                                pass
+            except Exception as e:
+                logs = f"Error accessing DHCP logs: {str(e)}"
+                log_found = False
 
             if not log_found:
                 logs = "DHCP logs not found. DHCP server may not be running or logs not configured."
