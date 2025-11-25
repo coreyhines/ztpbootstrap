@@ -367,6 +367,7 @@ def stop_dhcp_container() -> bool:
         if container_host:
             podman_cmd.extend(["--url", container_host])
 
+        podman_success = False
         try:
             result = subprocess.run(
                 podman_cmd + ["stop", DHCP_CONTAINER_NAME],
@@ -379,13 +380,14 @@ def stop_dhcp_container() -> bool:
                 logger.info("DHCP container stopped successfully via podman")
                 return True
             elif "no such container" in result.stderr.lower():
-                logger.debug("Container doesn't exist, trying systemctl...")
+                logger.debug("Container doesn't exist via podman, trying systemctl...")
             else:
-                logger.debug(f"podman stop result: {result.stderr}")
+                logger.debug(f"podman stop failed: {result.stderr}")
         except Exception as e:
-            logger.debug(f"podman stop failed: {e}, trying systemctl...")
+            logger.debug(f"podman stop failed with exception: {e}, trying systemctl...")
 
-        # Fallback: Try systemctl (works on host system)
+        # Always try systemctl as fallback (works on host system and from containers with sudo)
+        logger.info("Attempting to stop DHCP service via systemctl...")
         if os.geteuid() == 0:
             result = subprocess.run(
                 ["systemctl", "stop", DHCP_SERVICE_NAME],
@@ -402,11 +404,14 @@ def stop_dhcp_container() -> bool:
             )
 
         if result.returncode != 0:
-            logger.warning(f"Failed to stop DHCP container: {result.stderr}")
+            logger.warning(f"Failed to stop DHCP container via systemctl: {result.stderr}")
             # Don't fail if service doesn't exist
-            return "not found" in result.stderr.lower() or "does not exist" in result.stderr.lower()
+            if "not found" in result.stderr.lower() or "does not exist" in result.stderr.lower():
+                logger.info("Service doesn't exist, considering stop successful")
+                return True
+            return False
 
-        logger.info("DHCP container stopped successfully")
+        logger.info("DHCP container stopped successfully via systemctl")
         return True
 
     except Exception as e:
