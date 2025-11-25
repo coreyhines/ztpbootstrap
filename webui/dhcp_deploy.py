@@ -234,45 +234,7 @@ def start_dhcp_container() -> bool:
             if not create_dhcp_container():
                 return False
 
-        # Try podman first (works from inside containers with podman socket access)
-        # Use CONTAINER_HOST environment variable if set, otherwise default
-        podman_cmd = ["podman"]
-        container_host = os.environ.get("CONTAINER_HOST")
-        if container_host:
-            podman_cmd.extend(["--url", container_host])
-
-        try:
-            # Try to start via podman (works from inside container with socket access)
-            result = subprocess.run(
-                podman_cmd + ["start", DHCP_CONTAINER_NAME],
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-
-            if result.returncode == 0:
-                logger.info("DHCP container started successfully via podman")
-                # Verify it's actually running - wait up to 60 seconds for Kea installation
-                for i in range(12):  # Check every 5 seconds for up to 60 seconds
-                    time.sleep(5)
-                    status = check_dhcp_container_status()
-                    if status.get("container_running", False) or status.get(
-                        "service_active", False
-                    ):
-                        logger.info(f"DHCP container verified running after {i*5} seconds")
-                        return True
-                    logger.debug(f"Waiting for container to start... ({i*5}s)")
-                logger.warning("podman start returned success but container not running after 60s")
-            elif "no such container" in result.stderr.lower():
-                # Container doesn't exist yet - need to start via systemctl to create it
-                logger.info("Container doesn't exist, will start via systemctl to create it...")
-            else:
-                logger.debug(f"podman start failed: {result.stderr}")
-        except Exception as e:
-            logger.debug(f"podman start failed: {e}, trying systemctl...")
-
-        # Fallback: Try systemctl to start the service (works on host system)
-        # This will fail inside containers but that's okay - we tried podman first
+        # Use systemctl to start the service (quadlets/systemd is our control mechanism)
         try:
             # First reload systemd to ensure the service file is recognized
             reload_result = subprocess.run(
@@ -284,6 +246,7 @@ def start_dhcp_container() -> bool:
             if reload_result.returncode != 0:
                 logger.debug(f"systemctl daemon-reload failed: {reload_result.stderr}")
 
+            # Start the service via systemctl
             result = subprocess.run(
                 ["sudo", "systemctl", "start", DHCP_SERVICE_NAME],
                 capture_output=True,
@@ -291,11 +254,11 @@ def start_dhcp_container() -> bool:
                 timeout=30,
             )
 
-            # Even if systemctl returns non-zero, the service might have started
-            # (e.g., if called from inside a container where systemctl doesn't work)
-            # So we always check the status
-            logger.info("Attempted to start via systemctl, checking status...")
-            # Wait up to 60 seconds for Kea installation
+            if result.returncode != 0:
+                logger.warning(f"systemctl start failed: {result.stderr}")
+
+            # Wait up to 60 seconds for Kea installation and verify it's running
+            logger.info("Starting DHCP service, waiting for Kea installation...")
             for i in range(12):  # Check every 5 seconds for up to 60 seconds
                 time.sleep(5)
                 status = check_dhcp_container_status()
@@ -305,9 +268,10 @@ def start_dhcp_container() -> bool:
                 logger.debug(f"Waiting for container to start... ({i*5}s)")
 
             if result.returncode != 0:
-                logger.warning(f"systemctl start returned error: {result.stderr}")
+                logger.error(f"systemctl start failed and container not running: {result.stderr}")
             else:
-                logger.warning("systemctl start succeeded but container not running after 60s")
+                logger.error("systemctl start succeeded but container not running after 60s")
+            return False
         except Exception as e:
             logger.error(f"systemctl start failed with exception: {e}")
             # Check status even if systemctl failed
@@ -315,19 +279,7 @@ def start_dhcp_container() -> bool:
             if status.get("container_running", False) or status.get("service_active", False):
                 logger.info("DHCP container is running (verified after exception)")
                 return True
-
-        # Final verification - wait a bit longer for Kea installation
-        logger.info("Performing final verification...")
-        for i in range(12):  # Check every 5 seconds for up to 60 seconds
-            time.sleep(5)
-            status = check_dhcp_container_status()
-            if status.get("container_running", False) or status.get("service_active", False):
-                logger.info(f"DHCP container verified running after {i*5} seconds (final check)")
-                return True
-            logger.debug(f"Final check: waiting for container... ({i*5}s)")
-
-        logger.error("Failed to start DHCP container - verification failed after 60s")
-        return False
+            return False
 
     except Exception as e:
         logger.error(f"Failed to start DHCP container: {e}")
