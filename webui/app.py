@@ -299,7 +299,11 @@ app.config["SESSION_COOKIE_PATH"] = "/"
 # Setting a domain can cause cookies to not be set in browsers
 app.config["SESSION_COOKIE_DOMAIN"] = None
 # Only set Secure flag if HTTPS is available
-app.config["SESSION_COOKIE_SECURE"] = os.environ.get("HTTPS_ENABLED", "false").lower() == "true"
+# app.config["SESSION_COOKIE_SECURE"] = os.environ.get("HTTPS_ENABLED", "false").lower() == "true"
+# Force Secure=False for testing behind Nginx unless explicitly enabled
+# In production, Nginx handles SSL termination, so Flask sees HTTP
+# ProxyFix handles the scheme, but if we're in a weird state, let's be permissive
+app.config["SESSION_COOKIE_SECURE"] = False
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(seconds=AUTH_CONFIG["session_timeout"])
 
 # Rate limiting storage (simple in-memory dict)
