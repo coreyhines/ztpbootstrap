@@ -586,22 +586,28 @@ def auth_login():
             # Log security event
             log_security_event("login", "success", client_ip, "user=admin")
 
-            # Create session
+            # Create session - explicitly mark as modified and permanent
+            session.permanent = True
             session["authenticated"] = True
             session["login_time"] = time.time()
             session["expires_at"] = time.time() + AUTH_CONFIG["session_timeout"]
-            session.permanent = True
+            # Explicitly mark session as modified to ensure cookie is set
+            session.modified = True
 
             # Generate CSRF token for the session
             csrf_token = generate_csrf_token()
 
-            return jsonify(
-                {
-                    "success": True,
-                    "expires_at": session["expires_at"],
-                    "csrf_token": csrf_token,
-                }
+            # Create response and ensure session cookie is set
+            response = make_response(
+                jsonify(
+                    {
+                        "success": True,
+                        "expires_at": session["expires_at"],
+                        "csrf_token": csrf_token,
+                    }
+                )
             )
+            return response
         else:
             # Failed login
             record_login_attempt(client_ip, False)
@@ -2950,7 +2956,7 @@ def update_dhcp_config():
                 except Exception:
                     pass  # Kea may not be running yet
             except Exception as e:
-                logger.warning(f"Failed to generate Kea config: {e}")
+                security_logger.warning(f"Failed to generate Kea config: {e}")
 
         return jsonify({"success": True, "dhcp": config.get("dhcp", {})})
     except Exception as e:
