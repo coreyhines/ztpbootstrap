@@ -8,6 +8,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -251,47 +252,34 @@ def start_dhcp_container() -> bool:
 
             if result.returncode == 0:
                 logger.info("DHCP container started successfully via podman")
-                return True
+                # Verify it's actually running
+                time.sleep(1)  # Give it a moment to start
+                status = check_dhcp_container_status()
+                if status.get("container_running", False) or status.get("service_active", False):
+                    return True
+                else:
+                    logger.warning("podman start returned success but container is not running")
             elif "no such container" in result.stderr.lower():
-                # Container doesn't exist yet - need to create it
-                # Try to create container from quadlet file using podman
-                logger.info("Container doesn't exist, attempting to create from quadlet file...")
-                try:
-                    # Use podman to generate and create container from quadlet
-                    # First, try to reload systemd on host (might work if we have proper access)
-                    reload_result = subprocess.run(
-                        ["sudo", "systemctl", "daemon-reload"],
-                        capture_output=True,
-                        text=True,
-                        timeout=10,
-                    )
-                    if reload_result.returncode == 0:
-                        logger.info("Systemd reloaded successfully")
-                        # Now try systemctl start again
-                        start_result = subprocess.run(
-                            ["sudo", "systemctl", "start", DHCP_SERVICE_NAME],
-                            capture_output=True,
-                            text=True,
-                            timeout=30,
-                        )
-                        if start_result.returncode == 0:
-                            logger.info("DHCP container started via systemctl after reload")
-                            return True
-                    else:
-                        logger.debug(f"Could not reload systemd: {reload_result.stderr}")
-                except Exception as reload_error:
-                    logger.debug(f"Could not reload systemd: {reload_error}")
-
-                # If systemd reload failed, we'll try systemctl start anyway (might work)
-                logger.debug("Trying systemctl start (systemd may have auto-reloaded)...")
+                # Container doesn't exist yet - need to start via systemctl to create it
+                logger.info("Container doesn't exist, will start via systemctl to create it...")
             else:
-                logger.debug(f"podman start result: {result.stderr}")
+                logger.debug(f"podman start failed: {result.stderr}")
         except Exception as e:
             logger.debug(f"podman start failed: {e}, trying systemctl...")
 
         # Fallback: Try systemctl to start the service (works on host system)
         # This will fail inside containers but that's okay - we tried podman first
         try:
+            # First reload systemd to ensure the service file is recognized
+            reload_result = subprocess.run(
+                ["sudo", "systemctl", "daemon-reload"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if reload_result.returncode != 0:
+                logger.debug(f"systemctl daemon-reload failed: {reload_result.stderr}")
+
             result = subprocess.run(
                 ["sudo", "systemctl", "start", DHCP_SERVICE_NAME],
                 capture_output=True,
@@ -301,34 +289,31 @@ def start_dhcp_container() -> bool:
 
             if result.returncode == 0:
                 logger.info("DHCP container started successfully via systemctl")
-                return True
-
-            # Even if systemctl start failed, check if it's running now
-            # (might have been started by another process or already running)
-            status = check_dhcp_container_status()
-            if status.get("container_running", False) or status.get("service_active", False):
-                logger.info("DHCP container is running (verified after start attempt)")
-                return True
+                # Verify it's actually running
+                time.sleep(1)  # Give it a moment to start
+                status = check_dhcp_container_status()
+                if status.get("container_running", False) or status.get("service_active", False):
+                    return True
+                else:
+                    logger.warning("systemctl start returned success but container is not running")
+                    return False
 
             logger.warning(f"systemctl start failed: {result.stderr}")
         except Exception as e:
-            logger.debug(f"systemctl start failed: {e}, checking status...")
+            logger.error(f"systemctl start failed with exception: {e}")
             # Check status even if systemctl failed
             status = check_dhcp_container_status()
             if status.get("container_running", False) or status.get("service_active", False):
                 logger.info("DHCP container is running (verified after exception)")
                 return True
 
-        # If we can't verify via systemctl or podman, but the container file exists,
-        # assume it might be running and return True (fail open)
-        # This handles the case where we're inside a container and can't check the host
-        if DHCP_CONTAINER_FILE.exists():
-            logger.info(
-                "Container file exists but cannot verify status from container - assuming running"
-            )
+        # Final verification - don't fail open, actually check if it's running
+        status = check_dhcp_container_status()
+        if status.get("container_running", False) or status.get("service_active", False):
+            logger.info("DHCP container is running (final verification)")
             return True
 
-        logger.error("Failed to start DHCP container")
+        logger.error("Failed to start DHCP container - verification failed")
         return False
 
     except Exception as e:
