@@ -492,19 +492,7 @@ def check_dhcp_container_status() -> Dict[str, any]:
         # Don't use lease file as a fallback - it can exist even when service is stopped
         # Trust systemctl and podman checks only
 
-        # Final fallback: If container file exists, assume it might be running
-        # This handles cases where we can't verify status from inside a container
-        if not result["container_running"] and not result["service_active"]:
-            try:
-                if DHCP_CONTAINER_FILE.exists():
-                    # File exists, so service was created - assume it might be running
-                    # This is a "fail open" approach for containerized WebUI
-                    result["exists"] = True
-                    logger.debug(
-                        "Container file exists but cannot verify status - assuming may be running"
-                    )
-            except Exception:
-                pass
+        # Don't assume running just because file exists - trust systemctl and podman checks
 
         # Infer container file existence: if container is running or service is active,
         # the file must exist (systemd wouldn't be able to start the service without it)
