@@ -252,13 +252,17 @@ def start_dhcp_container() -> bool:
 
             if result.returncode == 0:
                 logger.info("DHCP container started successfully via podman")
-                # Verify it's actually running
-                time.sleep(1)  # Give it a moment to start
-                status = check_dhcp_container_status()
-                if status.get("container_running", False) or status.get("service_active", False):
-                    return True
-                else:
-                    logger.warning("podman start returned success but container is not running")
+                # Verify it's actually running - wait up to 60 seconds for Kea installation
+                for i in range(12):  # Check every 5 seconds for up to 60 seconds
+                    time.sleep(5)
+                    status = check_dhcp_container_status()
+                    if status.get("container_running", False) or status.get(
+                        "service_active", False
+                    ):
+                        logger.info(f"DHCP container verified running after {i*5} seconds")
+                        return True
+                    logger.debug(f"Waiting for container to start... ({i*5}s)")
+                logger.warning("podman start returned success but container not running after 60s")
             elif "no such container" in result.stderr.lower():
                 # Container doesn't exist yet - need to start via systemctl to create it
                 logger.info("Container doesn't exist, will start via systemctl to create it...")
