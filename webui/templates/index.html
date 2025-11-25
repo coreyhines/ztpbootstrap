@@ -822,8 +822,8 @@
                             </div>
                             <div class="flex items-center space-x-2">
                                 <span class="px-3 py-1 text-xs font-semibold rounded-full"
-                                      :class="dhcpStatus.container && dhcpStatus.container.container_running ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'"
-                                      x-text="dhcpStatus.container && dhcpStatus.container.container_running ? 'Container Running' : 'Container Stopped'"></span>
+                                      :class="(dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'"
+                                      x-text="(dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'Container Running' : 'Container Stopped'"></span>
                                 <span class="px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800"
                                       x-text="dhcpStatus.networking_mode === 'host' ? 'Host Network' : 'MacVLAN'"></span>
                             </div>
