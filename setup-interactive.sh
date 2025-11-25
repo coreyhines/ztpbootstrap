@@ -1695,7 +1695,13 @@ build_webui_image() {
     fi
 
     # Check if image already exists
-    if podman image exists "$image_tag" 2>/dev/null; then
+    # Use sudo for image check since systemd services run as root
+    local check_cmd="podman image exists $image_tag"
+    if [[ $EUID -ne 0 ]]; then
+        check_cmd="sudo podman image exists $image_tag"
+    fi
+
+    if $check_cmd 2>/dev/null; then
         log "Image $image_tag already exists"
         if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
             # Non-interactive: skip rebuild unless forced
@@ -1714,26 +1720,18 @@ build_webui_image() {
     log "This will install Python, podman, and systemd in the image for faster container startup."
     log "Image tag: $image_tag"
 
-    # Build the image
+    # Build the image - always use sudo since systemd services run as root
     local build_cmd="podman build -t $image_tag -f $containerfile $repo_dir"
     if [[ $EUID -ne 0 ]]; then
-        # Non-root: podman should work in rootless mode
-        if $build_cmd 2>&1; then
-            log "✓ Successfully built image: $image_tag"
-            return 0
-        else
-            warn "Failed to build image. Will use base Fedora image (packages will install at runtime)."
-            return 1
-        fi
+        build_cmd="sudo podman build -t $image_tag -f $containerfile $repo_dir"
+    fi
+
+    if $build_cmd 2>&1; then
+        log "✓ Successfully built image: $image_tag"
+        return 0
     else
-        # Root: use podman directly
-        if $build_cmd 2>&1; then
-            log "✓ Successfully built image: $image_tag"
-            return 0
-        else
-            warn "Failed to build image. Will use base Fedora image (packages will install at runtime)."
-            return 1
-        fi
+        warn "Failed to build image. Will use base Fedora image (packages will install at runtime)."
+        return 1
     fi
 }
 
@@ -1805,11 +1803,34 @@ create_pod_files_from_config() {
                 log "Set Network=host in pod file"
             else
                 # Validate network exists before setting static IPs
-                if ! podman network exists "$network" 2>/dev/null; then
+                # Use sudo for podman if not root (networks created with sudo may not be visible to non-root)
+                # Note: Networks created with sudo are stored in /etc/containers/networks (root)
+                # while user networks are in ~/.local/share/containers/storage/networks
+                local network_exists=false
+                local podman_cmd="podman"
+                if [[ $EUID -ne 0 ]]; then
+                    # Try with sudo first (for root-created networks), then without
+                    if sudo -n podman network exists "$network" 2>/dev/null; then
+                        network_exists=true
+                        podman_cmd="sudo podman"
+                    elif podman network exists "$network" 2>/dev/null; then
+                        network_exists=true
+                    fi
+                else
+                    if podman network exists "$network" 2>/dev/null; then
+                        network_exists=true
+                    fi
+                fi
+                if [[ "$network_exists" != "true" ]]; then
                     warn "Network '$network' does not exist. Static IP addresses cannot be assigned."
-                    warn "Please create the network first using:"
+                    warn ""
+                    warn "Quick fix: Run the DHCP testing setup script to auto-create the network:"
+                    warn "  sudo ./setup-dhcp-testing.sh"
+                    warn ""
+                    warn "Or create the network manually:"
                     warn "  podman network create --driver macvlan --subnet <subnet> --gateway <gateway> -o parent=<interface> $network"
-                    warn "Or run: ./check-macvlan.sh for instructions"
+                    warn ""
+                    warn "For detailed instructions, run: ./check-macvlan.sh"
                     if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]] && [[ "$ipv4" != "" ]]; then
                         warn "Removing IPv4 address from pod file (network doesn't exist)"
                         ipv4=""
@@ -1821,7 +1842,7 @@ create_pod_files_from_config() {
                 else
                     # Network exists - validate IP addresses are in the network's subnet
                     local network_subnet
-                    network_subnet=$(podman network inspect "$network" 2>/dev/null | grep -i "\"Subnet\"" | head -1 | sed -n 's/.*"Subnet": *"\([^"]*\)".*/\1/p' || echo "")
+                    network_subnet=$($podman_cmd network inspect "$network" 2>/dev/null | grep -i "\"Subnet\"" | head -1 | sed -n 's/.*"Subnet": *"\([^"]*\)".*/\1/p' || echo "")
 
                     if [[ -n "$network_subnet" ]]; then
                         log "Network '$network' exists with subnet: $network_subnet"
@@ -1868,7 +1889,7 @@ create_pod_files_from_config() {
                         if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]] && [[ "$ipv6" != "" ]]; then
                             # For IPv6, we'll just check if the network supports IPv6
                             local has_ipv6_subnet
-                            has_ipv6_subnet=$(podman network inspect "$network" 2>/dev/null | grep -i "ipv6" || echo "")
+                            has_ipv6_subnet=$($podman_cmd network inspect "$network" 2>/dev/null | grep -i "ipv6" || echo "")
                             if [[ -z "$has_ipv6_subnet" ]]; then
                                 warn "Network '$network' does not appear to support IPv6"
                                 warn "Removing IPv6 address from pod file"
@@ -2102,8 +2123,128 @@ create_pod_files_from_config() {
     return 0
 }
 
+# Auto-create macvlan network if needed for DHCP testing
+auto_create_macvlan_network() {
+    local network_name="$1"
+    local ipv4_address="${2:-}"
+
+    log "Attempting to auto-create macvlan network '$network_name'..."
+
+    # Find the primary ethernet interface
+    local eth_iface
+    eth_iface=$(ip -o link show 2>/dev/null | grep -E '^[0-9]+: (eth|ens|enp|enx)' | head -1 | cut -d: -f2 | tr -d ' ' || echo "")
+
+    if [[ -z "$eth_iface" ]]; then
+        # Try to find any non-loopback interface
+        eth_iface=$(ip -o link show 2>/dev/null | grep -v '^[0-9]*: lo' | grep -E '^[0-9]+: ' | head -1 | cut -d: -f2 | tr -d ' ' || echo "")
+    fi
+
+    if [[ -z "$eth_iface" ]]; then
+        warn "Could not detect network interface for macvlan network creation"
+        return 1
+    fi
+
+    log "Detected network interface: $eth_iface"
+
+    # Get subnet from interface (always prioritize interface detection)
+    local subnet
+    # First, try to get subnet from the detected interface
+    subnet=$(ip -4 addr show "$eth_iface" 2>/dev/null | grep -oP 'inet \K[\d.]+/[\d]+' | head -1 || echo "")
+
+    # If subnet detected from interface, use it (this is the authoritative source)
+    if [[ -n "$subnet" ]]; then
+        log "Detected subnet from interface $eth_iface: $subnet"
+
+        # If we have an IPv4 address configured, verify it's in the subnet
+        if [[ -n "$ipv4_address" ]]; then
+            # Basic check: compare first three octets
+            local subnet_base
+            subnet_base=$(echo "$subnet" | cut -d'/' -f1 | cut -d'.' -f1-3)
+            local ip_base
+            ip_base=$(echo "$ipv4_address" | cut -d'.' -f1-3)
+            if [[ "$subnet_base" != "$ip_base" ]]; then
+                warn "IP address $ipv4_address is not in detected subnet $subnet"
+                warn "The macvlan network will use subnet $subnet"
+                warn "Consider updating config IP to match subnet (e.g., ${subnet_base}.10)"
+            fi
+        fi
+    elif [[ -n "$ipv4_address" ]]; then
+        # No subnet detected from interface, create one based on the IP address
+        # Extract network portion (assume /24 for simplicity)
+        if [[ "$ipv4_address" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\. ]]; then
+            subnet="${BASH_REMATCH[1]}.0/24"
+            log "Created subnet from IP address: $subnet"
+        else
+            # Fallback: use common private subnets
+            if [[ "$ipv4_address" =~ ^10\. ]]; then
+                subnet="10.0.0.0/24"
+            elif [[ "$ipv4_address" =~ ^192\.168\. ]]; then
+                subnet="192.168.1.0/24"
+            elif [[ "$ipv4_address" =~ ^172\.(1[6-9]|2[0-9]|3[01])\. ]]; then
+                subnet="172.16.0.0/24"
+            else
+                subnet="192.168.1.0/24"
+            fi
+            warn "Could not detect subnet from interface, using default: $subnet"
+        fi
+    else
+        # No IP address and no subnet detected, use default
+        subnet="192.168.1.0/24"
+        warn "Could not detect subnet from interface, using default: $subnet"
+    fi
+
+    # Get gateway
+    local gateway
+    gateway=$(ip route show default 2>/dev/null | grep "$eth_iface" | awk '{print $3}' | head -1 || echo "")
+    if [[ -z "$gateway" ]]; then
+        # Try to get gateway from default route
+        gateway=$(ip route show default 2>/dev/null | awk '{print $3}' | head -1 || echo "")
+    fi
+
+    if [[ -z "$gateway" ]]; then
+        # Extract gateway from subnet (first IP)
+        local subnet_base
+        subnet_base=$(echo "$subnet" | cut -d'/' -f1)
+        local last_octet
+        last_octet=$(echo "$subnet_base" | cut -d'.' -f4)
+        gateway=$(echo "$subnet_base" | sed "s/\.[0-9]*$/.1/")
+        warn "Could not detect gateway, using first IP in subnet: $gateway"
+    fi
+
+    log "Detected subnet: $subnet, gateway: $gateway"
+
+    # Create the network (requires root/sudo)
+    local podman_cmd="podman"
+    if [[ $EUID -ne 0 ]]; then
+        podman_cmd="sudo podman"
+    fi
+
+    log "Creating macvlan network '$network_name' on interface $eth_iface..."
+    if $podman_cmd network create -d macvlan \
+        --subnet="$subnet" \
+        --gateway="$gateway" \
+        -o parent="$eth_iface" \
+        "$network_name" 2>&1; then
+        log "✓ Successfully created macvlan network '$network_name'"
+        return 0
+    else
+        warn "Failed to create macvlan network '$network_name'"
+        warn "This may be due to:"
+        warn "  - Insufficient privileges (macvlan requires root)"
+        warn "  - Interface does not support macvlan"
+        warn "  - Network already exists with different configuration"
+        warn ""
+        warn "You may need to create it manually:"
+        warn "  $podman_cmd network create -d macvlan --subnet=$subnet --gateway=$gateway -o parent=$eth_iface $network_name"
+        return 1
+    fi
+}
+
 start_services_after_install() {
     log "Starting new services..."
+
+    # Initialize flag to track if services were actually started
+    export SERVICES_STARTED=true
 
     # Validate network exists before starting services (if not using host network)
     local repo_dir
@@ -2123,17 +2264,90 @@ start_services_after_install() {
 
         # Check if we need to validate the network
         if [[ "$host_network" != "true" ]] && [[ -n "$network" ]]; then
-            if ! podman network exists "$network" 2>/dev/null; then
-                error "Cannot start services: Network '$network' does not exist."
-                error ""
-                error "Please create the macvlan network first:"
-                error "  podman network create --driver macvlan --subnet <subnet> --gateway <gateway> -o parent=<interface> $network"
-                error ""
-                error "Or run: ./check-macvlan.sh for detailed instructions"
-                error ""
-                error "Example:"
-                error "  podman network create --driver macvlan --subnet 10.0.0.0/24 --gateway 10.0.0.1 -o parent=eth0 $network"
-                return 1
+            # Use sudo for podman if not root (networks created with sudo may not be visible to non-root)
+            # Note: Networks created with sudo are stored in /etc/containers/networks (root)
+            # while user networks are in ~/.local/share/containers/storage/networks
+            local network_exists=false
+            if [[ $EUID -ne 0 ]]; then
+                # Try with sudo first (for root-created networks), then without
+                if sudo -n podman network exists "$network" 2>/dev/null; then
+                    network_exists=true
+                elif podman network exists "$network" 2>/dev/null; then
+                    network_exists=true
+                fi
+            else
+                if podman network exists "$network" 2>/dev/null; then
+                    network_exists=true
+                fi
+            fi
+            if [[ "$network_exists" != "true" ]]; then
+                # Check if DHCP is enabled (macvlan needed for DHCP client testing)
+                local dhcp_enabled=false
+                if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+                    dhcp_enabled=$(yq eval '.dhcp.enabled // false' "$config_file" 2>/dev/null || echo "false")
+                fi
+
+                # In non-interactive mode, try to auto-create network if DHCP is enabled
+                if [[ "${NON_INTERACTIVE:-false}" == "true" ]] && [[ "$dhcp_enabled" == "true" ]]; then
+                    log "DHCP is enabled and network '$network' does not exist."
+                    log "Attempting to auto-create macvlan network for DHCP client testing..."
+
+                    # Get IPv4 address from config for subnet detection
+                    local ipv4_address
+                    ipv4_address=$(yq eval '.network.ipv4 // ""' "$config_file" 2>/dev/null || echo "")
+
+                    if auto_create_macvlan_network "$network" "$ipv4_address"; then
+                        log "✓ Macvlan network created successfully"
+                    else
+                        warn "⚠️  Failed to auto-create network. Skipping service startup."
+                        warn ""
+                        warn "Setup completed successfully, but services were not started."
+                        warn ""
+                        warn "Quick fix: Run the DHCP testing setup script:"
+                        warn "  sudo ./setup-dhcp-testing.sh"
+                        warn ""
+                        warn "Or create the network manually:"
+                        warn "  podman network create --driver macvlan --subnet <subnet> --gateway <gateway> -o parent=<interface> $network"
+                        warn ""
+                        warn "For detailed instructions, run: ./check-macvlan.sh"
+                        warn ""
+                        warn "After creating the network, start services:"
+                        warn "  sudo systemctl start ztpbootstrap-pod"
+                        warn "  sudo systemctl start ztpbootstrap-nginx"
+                        warn "  sudo systemctl start ztpbootstrap-webui"
+                        warn ""
+                        export SERVICES_STARTED=false
+                        return 0
+                    fi
+                elif [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
+                    # DHCP not enabled, skip gracefully
+                    warn "⚠️  Network '$network' does not exist. Skipping service startup."
+                    warn ""
+                    warn "Setup completed successfully, but services were not started."
+                    warn "Note: Macvlan network is only required for DHCP client testing."
+                    warn ""
+                    warn "Quick fix: Run the DHCP testing setup script:"
+                    warn "  sudo ./setup-dhcp-testing.sh"
+                    warn ""
+                    warn "Or create the network manually:"
+                    warn "  podman network create --driver macvlan --subnet <subnet> --gateway <gateway> -o parent=<interface> $network"
+                    warn ""
+                    warn "For detailed instructions, run: ./check-macvlan.sh"
+                    warn ""
+                    export SERVICES_STARTED=false
+                    return 0
+                else
+                    error "Cannot start services: Network '$network' does not exist."
+                    error ""
+                    error "Please create the macvlan network first:"
+                    error "  podman network create --driver macvlan --subnet <subnet> --gateway <gateway> -o parent=<interface> $network"
+                    error ""
+                    error "Or run: ./check-macvlan.sh for detailed instructions"
+                    error ""
+                    error "Example:"
+                    error "  podman network create --driver macvlan --subnet 10.0.0.0/24 --gateway 10.0.0.1 -o parent=eth0 $network"
+                    return 1
+                fi
             else
                 log "✓ Network '$network' exists"
             fi
@@ -4967,10 +5181,12 @@ main() {
         if [[ "$START_SERVICES" == "true" ]]; then
             start_services_after_install
             echo ""
-            log "Services have been started. You can check status with:"
-            log "  systemctl status ztpbootstrap-pod"
-            log "  systemctl status ztpbootstrap-nginx"
-            log "  systemctl status ztpbootstrap-webui"
+            if [[ "${SERVICES_STARTED:-true}" == "true" ]]; then
+                log "Services have been started. You can check status with:"
+                log "  systemctl status ztpbootstrap-pod"
+                log "  systemctl status ztpbootstrap-nginx"
+                log "  systemctl status ztpbootstrap-webui"
+            fi
             # If password was reset, verify hash was written and remind about webui restart
             if [[ -n "${ADMIN_PASSWORD_HASH:-}" ]]; then
                 echo ""
