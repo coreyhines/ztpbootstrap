@@ -18,16 +18,7 @@ from functools import wraps
 from pathlib import Path
 
 import yaml
-from flask import (
-    Flask,
-    jsonify,
-    make_response,
-    render_template,
-    request,
-    send_from_directory,
-    session,
-)
-from werkzeug.middleware.proxy_fix import ProxyFix
+from flask import Flask, jsonify, render_template, request, send_from_directory, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 # Debug flag - set via environment variable
@@ -154,23 +145,8 @@ def safe_path_join(base_dir, filename):
 
 
 app = Flask(__name__)
-# Apply ProxyFix middleware to handle Nginx proxy headers correctly
-# x_for=1: Trust X-Forwarded-For
-# x_proto=1: Trust X-Forwarded-Proto
-# x_host=1: Trust X-Forwarded-Host
-# x_prefix=1: Trust X-Forwarded-Prefix
-app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
-
 # Enable template auto-reload in production for development/testing
 app.config["TEMPLATES_AUTO_RELOAD"] = True
-# Trust proxy headers (needed when behind nginx reverse proxy)
-# This is critical for Flask to properly handle cookies and sessions behind nginx
-# app.config["PREFERRED_URL_SCHEME"] = "http"  # Handled by ProxyFix
-# Set APPLICATION_ROOT to empty string so Flask doesn't use request path for cookie path
-# This ensures session cookies work for both /ui/ and /api/ endpoints
-app.config["APPLICATION_ROOT"] = ""
-# Don't set SESSION_COOKIE_DOMAIN - let it default so cookies work for all subpaths
-# Flask needs to trust the proxy to properly set cookie paths
 
 # Configuration paths
 CONFIG_DIR = Path(os.environ.get("ZTP_CONFIG_DIR", "/opt/containerdata/ztpbootstrap"))
@@ -319,18 +295,8 @@ def reload_auth_config():
 app.secret_key = AUTH_CONFIG["session_secret"]
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-# Set cookie path to root so it works for both /ui/ and /api/ endpoints
-# This is critical when Flask is behind nginx proxy with different location blocks
-app.config["SESSION_COOKIE_PATH"] = "/"
-# Don't set domain - let it default so it works for both localhost and 127.0.0.1
-# Setting a domain can cause cookies to not be set in browsers
-app.config["SESSION_COOKIE_DOMAIN"] = None
 # Only set Secure flag if HTTPS is available
-# app.config["SESSION_COOKIE_SECURE"] = os.environ.get("HTTPS_ENABLED", "false").lower() == "true"
-# Force Secure=False for testing behind Nginx unless explicitly enabled
-# In production, Nginx handles SSL termination, so Flask sees HTTP
-# ProxyFix handles the scheme, but if we're in a weird state, let's be permissive
-app.config["SESSION_COOKIE_SECURE"] = False
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("HTTPS_ENABLED", "false").lower() == "true"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(seconds=AUTH_CONFIG["session_timeout"])
 
 # Rate limiting storage (simple in-memory dict)
@@ -613,28 +579,22 @@ def auth_login():
             # Log security event
             log_security_event("login", "success", client_ip, "user=admin")
 
-            # Create session - explicitly mark as modified and permanent
-            session.permanent = True
+            # Create session
             session["authenticated"] = True
             session["login_time"] = time.time()
             session["expires_at"] = time.time() + AUTH_CONFIG["session_timeout"]
-            # Explicitly mark session as modified to ensure cookie is set
-            session.modified = True
+            session.permanent = True
 
             # Generate CSRF token for the session
             csrf_token = generate_csrf_token()
 
-            # Create response and ensure session cookie is set
-            response = make_response(
-                jsonify(
-                    {
-                        "success": True,
-                        "expires_at": session["expires_at"],
-                        "csrf_token": csrf_token,
-                    }
-                )
+            return jsonify(
+                {
+                    "success": True,
+                    "expires_at": session["expires_at"],
+                    "csrf_token": csrf_token,
+                }
             )
-            return response
         else:
             # Failed login
             record_login_attempt(client_ip, False)

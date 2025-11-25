@@ -995,7 +995,7 @@
                                     </div>
                                     <div class="flex justify-between items-center py-1 border-b border-gray-100">
                                         <span class="text-gray-600 font-medium">DNS Servers:</span>
-                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.dns_servers_str || (dhcpConfig.ipv4.dns_servers && dhcpConfig.ipv4.dns_servers.length > 0 ? dhcpConfig.ipv4.dns_servers.join(', ') : 'Not configured')"></span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv4.dns_servers_str ? dhcpConfig.ipv4.dns_servers_str.replace(/[.,\s]+$/, '') : (dhcpConfig.ipv4.dns_servers && dhcpConfig.ipv4.dns_servers.length > 0 ? dhcpConfig.ipv4.dns_servers.map(s => s.replace(/[.,\s]+$/, '')).join(', ') : 'Not configured'))"></span>
                                     </div>
                                     <div class="flex justify-between items-center py-1 border-b border-gray-100" x-show="dhcpConfig.ipv4.domain">
                                         <span class="text-gray-600 font-medium">Domain:</span>
@@ -1003,7 +1003,7 @@
                                     </div>
                                     <div class="flex justify-between items-center py-1" x-show="dhcpConfig.ipv4.ntp_servers_str || (dhcpConfig.ipv4.ntp_servers && dhcpConfig.ipv4.ntp_servers.length > 0)">
                                         <span class="text-gray-600 font-medium">NTP Servers:</span>
-                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.ntp_servers_str || (dhcpConfig.ipv4.ntp_servers ? dhcpConfig.ipv4.ntp_servers.join(', ') : 'Not configured')"></span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv4.ntp_servers_str ? dhcpConfig.ipv4.ntp_servers_str.replace(/[.,\s]+$/, '') : (dhcpConfig.ipv4.ntp_servers && dhcpConfig.ipv4.ntp_servers.length > 0 ? dhcpConfig.ipv4.ntp_servers.map(s => s.replace(/[.,\s]+$/, '')).join(', ') : 'Not configured'))"></span>
                                     </div>
                                 </div>
                             </div>
@@ -1029,7 +1029,7 @@
                                     </div>
                                     <div class="flex justify-between items-center py-1 border-b border-gray-100">
                                         <span class="text-gray-600 font-medium">DNS Servers:</span>
-                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv6.dns_servers_str || (dhcpConfig.ipv6.dns_servers && dhcpConfig.ipv6.dns_servers.length > 0 ? dhcpConfig.ipv6.dns_servers.join(', ') : 'Not configured')"></span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv6.dns_servers_str ? dhcpConfig.ipv6.dns_servers_str.replace(/[.,\s]+$/, '') : (dhcpConfig.ipv6.dns_servers && dhcpConfig.ipv6.dns_servers.length > 0 ? dhcpConfig.ipv6.dns_servers.map(s => s.replace(/[.,\s]+$/, '')).join(', ') : 'Not configured'))"></span>
                                     </div>
                                     <div class="flex justify-between items-center py-1" x-show="dhcpConfig.ipv6.domain">
                                         <span class="text-gray-600 font-medium">Domain:</span>
