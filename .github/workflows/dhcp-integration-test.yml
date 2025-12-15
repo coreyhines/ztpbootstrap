@@ -1,442 +1,456 @@
+---
 name: DHCP Integration Tests
 
-on:
+'on':
   push:
-    branches: [ main, develop ]
+    branches:
+      - main
+      - develop
+      - feature/*
+      - copilot/*
   pull_request:
-    branches: [ main, develop ]
+    branches:
+      - main
+      - develop
+      - feature/*
+      - copilot/*
   workflow_dispatch:
 
 jobs:
   dhcp-server-tests:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.10'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y podman
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
 
-    - name: Install Python dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install poetry
-        poetry config virtualenvs.create false
-        poetry install --no-interaction --no-ansi
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry
+          poetry config virtualenvs.create false
+          poetry install --no-interaction --no-ansi
 
-    - name: Create DHCP test network
-      run: |
-        sudo podman network create dhcp-test-net --subnet=192.168.100.0/24 --gateway=192.168.100.1
+      - name: Create DHCP test network
+        run: |
+          sudo podman network create dhcp-test-net --subnet=192.168.100.0/24 --gateway=192.168.100.1
 
-    - name: Build DHCP server container
-      run: |
-        cat > Dockerfile.dhcp-server << 'EOF'
-        FROM alpine:latest
-        
-        RUN apk add --no-cache \
-            dhcp-server-vanilla \
-            bash \
-            iproute2 \
-            tcpdump
-        
-        # Create dhcpd configuration
-        RUN mkdir -p /var/lib/dhcp
-        
-        COPY dhcpd.conf /etc/dhcp/dhcpd.conf
-        
-        # Create lease file
-        RUN touch /var/lib/dhcp/dhcpd.leases
-        
-        EXPOSE 67/udp
-        
-        CMD ["/usr/sbin/dhcpd", "-f", "-d", "-cf", "/etc/dhcp/dhcpd.conf"]
-        EOF
+      - name: Build DHCP server container
+        run: |
+          cat > Dockerfile.dhcp-server << 'EOF'
+          FROM alpine:latest
 
-    - name: Create DHCPv4 configuration
-      run: |
-        cat > dhcpd.conf << 'EOF'
-        # DHCPv4 configuration
-        default-lease-time 600;
-        max-lease-time 7200;
-        authoritative;
-        
-        subnet 192.168.100.0 netmask 255.255.255.0 {
-          range 192.168.100.100 192.168.100.200;
-          option routers 192.168.100.1;
-          option domain-name-servers 8.8.8.8, 8.8.4.4;
-          option domain-name "test.local";
-        }
-        
-        # Option 43 for vendor-specific information
-        option space vendor-opts;
-        option vendor-opts.ztpserver code 1 = text;
-        
-        class "arista" {
-          match if substring(option vendor-class-identifier, 0, 6) = "Arista";
-          option vendor-class-identifier "Arista";
-          vendor-option-space vendor-opts;
-          option vendor-opts.ztpserver "http://192.168.100.1:8080/bootstrap";
-        }
-        EOF
+          RUN apk add --no-cache \
+              dhcp-server-vanilla \
+              bash \
+              iproute2 \
+              tcpdump
 
-    - name: Build and start DHCP server
-      run: |
-        sudo podman build -t dhcp-server -f Dockerfile.dhcp-server .
-        sudo podman run -d \
-          --name dhcp-test-server \
-          --network dhcp-test-net \
-          --ip 192.168.100.10 \
-          --cap-add=NET_ADMIN \
-          --cap-add=NET_RAW \
-          dhcp-server
+          # Create dhcpd configuration
+          RUN mkdir -p /var/lib/dhcp
 
-    - name: Wait for DHCP server to start
-      run: |
-        sleep 5
-        sudo podman logs dhcp-test-server
+          COPY dhcpd.conf /etc/dhcp/dhcpd.conf
 
-    - name: Verify DHCP server is running
-      run: |
-        sudo podman ps -a
-        sudo podman exec dhcp-test-server ps aux | grep dhcpd || echo "DHCP process check"
+          # Create lease file
+          RUN touch /var/lib/dhcp/dhcpd.leases
 
-    - name: Create DHCP client container
-      run: |
-        cat > Dockerfile.dhcp-client << 'EOF'
-        FROM alpine:latest
-        
-        RUN apk add --no-cache \
-            bash \
-            iproute2 \
-            tcpdump \
-            curl
-        
-        CMD ["/bin/sh", "-c", "while true; do sleep 1000; done"]
-        EOF
+          EXPOSE 67/udp
 
-    - name: Build and start DHCP client
-      run: |
-        sudo podman build -t dhcp-client -f Dockerfile.dhcp-client .
-        sudo podman run -d \
-          --name dhcp-test-client \
-          --network dhcp-test-net \
-          --cap-add=NET_ADMIN \
-          --cap-add=NET_RAW \
-          dhcp-client
+          CMD ["/usr/sbin/dhcpd", "-f", "-d", "-cf", "/etc/dhcp/dhcpd.conf"]
+          EOF
 
-    - name: Wait for client to start
-      run: |
-        sleep 3
-        sudo podman logs dhcp-test-client
+      - name: Create DHCPv4 configuration
+        run: |
+          cat > dhcpd.conf << 'EOF'
+          # DHCPv4 configuration
+          default-lease-time 600;
+          max-lease-time 7200;
+          authoritative;
 
-    - name: Check network connectivity
-      run: |
-        echo "=== DHCP Server network info ==="
-        sudo podman exec dhcp-test-server ip addr show
-        sudo podman exec dhcp-test-server ip route show
-        
-        echo "=== DHCP Client network info ==="
-        sudo podman exec dhcp-test-client ip addr show
-        sudo podman exec dhcp-test-client ip route show
-        
-        echo "=== Testing ping from client to server ==="
-        sudo podman exec dhcp-test-client ping -c 3 192.168.100.10 || echo "Ping failed"
+          subnet 192.168.100.0 netmask 255.255.255.0 {
+            range 192.168.100.100 192.168.100.200;
+            option routers 192.168.100.1;
+            option domain-name-servers 8.8.8.8, 8.8.4.4;
+            option domain-name "test.local";
+          }
 
-    - name: Start tcpdump on server
-      run: |
-        sudo podman exec -d dhcp-test-server tcpdump -i eth0 -w /tmp/dhcp-capture.pcap port 67 or port 68
+          # Option 43 for vendor-specific information
+          option space vendor-opts;
+          option vendor-opts.ztpserver code 1 = text;
 
-    - name: Test DHCP lease acquisition
-      run: |
-        echo "=== Installing DHCP client ==="
-        sudo podman exec dhcp-test-client sh -c 'apk add --no-cache dhcpcd'
-        
-        echo "=== Bringing interface down and up ==="
-        sudo podman exec dhcp-test-client ip addr flush dev eth0
-        
-        echo "=== Running DHCP client ==="
-        sudo podman exec dhcp-test-client sh -c 'dhcpcd -4 -t 30 eth0 2>&1' | tee /tmp/dhcp-output.txt || true
-        
-        echo "=== Checking IP address ==="
-        sudo podman exec dhcp-test-client ip addr show eth0
-        
-        echo "=== Checking routes ==="
-        sudo podman exec dhcp-test-client ip route show
+          class "arista" {
+            match if substring(option vendor-class-identifier, 0, 6) = "Arista";
+            option vendor-class-identifier "Arista";
+            vendor-option-space vendor-opts;
+            option vendor-opts.ztpserver "http://192.168.100.1:8080/bootstrap";
+          }
+          EOF
 
-    - name: Check DHCP server logs
-      run: |
-        echo "=== DHCP Server Logs ==="
-        sudo podman logs dhcp-test-server
+      - name: Build and start DHCP server
+        run: |
+          sudo podman build -t dhcp-server -f Dockerfile.dhcp-server .
+          sudo podman run -d \
+            --name dhcp-test-server \
+            --network dhcp-test-net \
+            --ip 192.168.100.10 \
+            --cap-add=NET_ADMIN \
+            --cap-add=NET_RAW \
+            dhcp-server
 
-    - name: Check DHCP lease file
-      run: |
-        echo "=== DHCP Leases ==="
-        sudo podman exec dhcp-test-server cat /var/lib/dhcp/dhcpd.leases || echo "No lease file"
+      - name: Wait for DHCP server to start
+        run: |
+          sleep 5
+          sudo podman logs dhcp-test-server
 
-    - name: Save tcpdump capture
-      if: always()
-      run: |
-        sudo podman exec dhcp-test-server killall tcpdump || true
-        sleep 2
-        sudo podman cp dhcp-test-server:/tmp/dhcp-capture.pcap ./dhcp-capture.pcap || echo "No capture file"
-        if [ -f ./dhcp-capture.pcap ]; then
-          sudo tcpdump -r ./dhcp-capture.pcap -n || echo "Cannot read capture"
-        fi
+      - name: Verify DHCP server is running
+        run: |
+          sudo podman ps -a
+          sudo podman exec dhcp-test-server ps aux | grep dhcpd || echo "DHCP process check"
 
-    - name: Verify DHCP lease
-      run: |
-        echo "=== Verifying DHCP configuration ==="
-        IP=$(sudo podman exec dhcp-test-client ip addr show eth0 | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
-        echo "Client IP: $IP"
-        
-        if [ -z "$IP" ] || [ "$IP" = "192.168.100.2" ]; then
-          echo "ERROR: Client did not receive DHCP lease from expected range"
-          exit 1
-        fi
-        
-        # Check if IP is in expected range (192.168.100.100-200)
-        OCTET=$(echo $IP | cut -d'.' -f4)
-        if [ "$OCTET" -lt 100 ] || [ "$OCTET" -gt 200 ]; then
-          echo "ERROR: IP $IP is not in expected DHCP range (192.168.100.100-200)"
-          exit 1
-        fi
-        
-        echo "SUCCESS: Client received valid DHCP lease: $IP"
+      - name: Create DHCP client container
+        run: |
+          cat > Dockerfile.dhcp-client << 'EOF'
+          FROM alpine:latest
 
-    - name: Test DHCP Option 43
-      run: |
-        echo "=== Testing DHCP with Arista vendor class ==="
-        
-        # Release current lease
-        sudo podman exec dhcp-test-client dhcpcd -k eth0 || true
-        sleep 2
-        
-        # Request with Arista vendor class identifier
-        sudo podman exec dhcp-test-client dhcpcd -4 eth0
-        
-        # Check for vendor-specific options in logs
-        sudo podman logs dhcp-test-server | grep -i "vendor" || echo "No vendor option logs"
+          RUN apk add --no-cache \
+              bash \
+              iproute2 \
+              tcpdump \
+              curl
 
-    - name: Cleanup IPv4 tests
-      if: always()
-      run: |
-        sudo podman stop dhcp-test-client dhcp-test-server || true
-        sudo podman rm dhcp-test-client dhcp-test-server || true
-        sudo podman network rm dhcp-test-net || true
+          CMD ["/bin/sh", "-c", "while true; do sleep 1000; done"]
+          EOF
+
+      - name: Build and start DHCP client
+        run: |
+          sudo podman build -t dhcp-client -f Dockerfile.dhcp-client .
+          sudo podman run -d \
+            --name dhcp-test-client \
+            --network dhcp-test-net \
+            --cap-add=NET_ADMIN \
+            --cap-add=NET_RAW \
+            dhcp-client
+
+      - name: Wait for client to start
+        run: |
+          sleep 3
+          sudo podman logs dhcp-test-client
+
+      - name: Check network connectivity
+        run: |
+          echo "=== DHCP Server network info ==="
+          sudo podman exec dhcp-test-server ip addr show
+          sudo podman exec dhcp-test-server ip route show
+
+          echo "=== DHCP Client network info ==="
+          sudo podman exec dhcp-test-client ip addr show
+          sudo podman exec dhcp-test-client ip route show
+
+          echo "=== Testing ping from client to server ==="
+          sudo podman exec dhcp-test-client ping -c 3 192.168.100.10 || echo "Ping failed"
+
+      - name: Start tcpdump on server
+        run: |
+          sudo podman exec -d dhcp-test-server tcpdump -i eth0 -w /tmp/dhcp-capture.pcap port 67 or port 68
+
+      - name: Test DHCP lease acquisition
+        run: |
+          echo "=== Installing DHCP client ==="
+          sudo podman exec dhcp-test-client sh -c 'apk add --no-cache dhcpcd'
+
+          echo "=== Bringing interface down and up ==="
+          sudo podman exec dhcp-test-client ip addr flush dev eth0
+
+          echo "=== Running DHCP client ==="
+          sudo podman exec dhcp-test-client sh -c 'dhcpcd -4 -t 30 eth0 2>&1' | tee /tmp/dhcp-output.txt || true
+
+          echo "=== Checking IP address ==="
+          sudo podman exec dhcp-test-client ip addr show eth0
+
+          echo "=== Checking routes ==="
+          sudo podman exec dhcp-test-client ip route show
+
+      - name: Check DHCP server logs
+        run: |
+          echo "=== DHCP Server Logs ==="
+          sudo podman logs dhcp-test-server
+
+      - name: Check DHCP lease file
+        run: |
+          echo "=== DHCP Leases ==="
+          sudo podman exec dhcp-test-server cat /var/lib/dhcp/dhcpd.leases || echo "No lease file"
+
+      - name: Save tcpdump capture
+        if: always()
+        run: |
+          sudo podman exec dhcp-test-server killall tcpdump || true
+          sleep 2
+          sudo podman cp dhcp-test-server:/tmp/dhcp-capture.pcap ./dhcp-capture.pcap || echo "No capture file"
+          if [ -f ./dhcp-capture.pcap ]; then
+            sudo tcpdump -r ./dhcp-capture.pcap -n || echo "Cannot read capture"
+          fi
+
+      - name: Verify DHCP lease
+        run: |
+          echo "=== Verifying DHCP configuration ==="
+          IP=$(sudo podman exec dhcp-test-client ip addr show eth0 | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
+          echo "Client IP: $IP"
+
+          if [ -z "$IP" ] || [ "$IP" = "192.168.100.2" ]; then
+            echo "ERROR: Client did not receive DHCP lease from expected range"
+            exit 1
+          fi
+
+          # Check if IP is in expected range (192.168.100.100-200)
+          OCTET=$(echo $IP | cut -d'.' -f4)
+          if [ "$OCTET" -lt 100 ] || [ "$OCTET" -gt 200 ]; then
+            echo "ERROR: IP $IP is not in expected DHCP range (192.168.100.100-200)"
+            exit 1
+          fi
+
+          echo "SUCCESS: Client received valid DHCP lease: $IP"
+
+      - name: Test DHCP Option 43
+        run: |
+          echo "=== Testing DHCP with Arista vendor class ==="
+
+          # Release current lease
+          sudo podman exec dhcp-test-client dhcpcd -k eth0 || true
+          sleep 2
+
+          # Request with Arista vendor class identifier
+          sudo podman exec dhcp-test-client dhcpcd -4 eth0
+
+          # Check for vendor-specific options in logs
+          sudo podman logs dhcp-test-server | grep -i "vendor" || echo "No vendor option logs"
+
+      - name: Cleanup IPv4 tests
+        if: always()
+        run: |
+          sudo podman stop dhcp-test-client dhcp-test-server || true
+          sudo podman rm dhcp-test-client dhcp-test-server || true
+          sudo podman network rm dhcp-test-net || true
 
   dhcp-ipv6-tests:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y podman
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
 
-    - name: Create DHCPv6 test network
-      run: |
-        sudo podman network create dhcp6-test-net --ipv6 --subnet=fd00:cafe::/64
+      - name: Create DHCPv6 test network
+        run: |
+          sudo podman network create dhcp6-test-net --ipv6 --subnet=fd00:cafe::/64
 
-    - name: Build DHCPv6 server container
-      run: |
-        cat > Dockerfile.dhcp6-server << 'EOF'
-        FROM alpine:latest
-        
-        RUN apk add --no-cache \
-            dhcp-server-vanilla \
-            bash \
-            iproute2 \
-            tcpdump
-        
-        COPY dhcpd6.conf /etc/dhcp/dhcpd6.conf
-        
-        RUN touch /var/lib/dhcp/dhcpd6.leases
-        
-        EXPOSE 547/udp
-        
-        CMD ["/usr/sbin/dhcpd", "-6", "-f", "-d", "-cf", "/etc/dhcp/dhcpd6.conf"]
-        EOF
+      - name: Build DHCPv6 server container
+        run: |
+          cat > Dockerfile.dhcp6-server << 'EOF'
+          FROM alpine:latest
 
-    - name: Create DHCPv6 configuration
-      run: |
-        cat > dhcpd6.conf << 'EOF'
-        # DHCPv6 configuration
-        default-lease-time 600;
-        max-lease-time 7200;
-        
-        subnet6 fd00:cafe::/64 {
-          range6 fd00:cafe::100 fd00:cafe::200;
-          option dhcp6.name-servers fd00:cafe::1;
-          option dhcp6.domain-search "test.local";
-        }
-        EOF
+          RUN apk add --no-cache \
+              dhcp-server-vanilla \
+              bash \
+              iproute2 \
+              tcpdump
 
-    - name: Build and start DHCPv6 server
-      run: |
-        sudo podman build -t dhcp6-server -f Dockerfile.dhcp6-server .
-        sudo podman run -d \
-          --name dhcp6-test-server \
-          --network dhcp6-test-net \
-          --cap-add=NET_ADMIN \
-          --cap-add=NET_RAW \
-          dhcp6-server
+          COPY dhcpd6.conf /etc/dhcp/dhcpd6.conf
 
-    - name: Wait for DHCPv6 server to start
-      run: |
-        sleep 5
-        sudo podman logs dhcp6-test-server
+          RUN touch /var/lib/dhcp/dhcpd6.leases
 
-    - name: Create DHCPv6 client container
-      run: |
-        cat > Dockerfile.dhcp6-client << 'EOF'
-        FROM alpine:latest
-        
-        RUN apk add --no-cache \
-            bash \
-            iproute2 \
-            tcpdump
-        
-        CMD ["/bin/sh", "-c", "while true; do sleep 1000; done"]
-        EOF
+          EXPOSE 547/udp
 
-    - name: Build and start DHCPv6 client
-      run: |
-        sudo podman build -t dhcp6-client -f Dockerfile.dhcp6-client .
-        sudo podman run -d \
-          --name dhcp-test-client \
-          --network dhcp6-test-net \
-          --cap-add=NET_ADMIN \
-          --cap-add=NET_RAW \
-          dhcp6-client
+          CMD ["/usr/sbin/dhcpd", "-6", "-f", "-d", "-cf", "/etc/dhcp/dhcpd6.conf"]
+          EOF
 
-    - name: Test DHCPv6 lease acquisition
-      run: |
-        echo "=== Installing DHCPv6 client ==="
-        sudo podman exec dhcp-test-client sh -c 'which dhcpcd || apk add --no-cache dhcpcd'
-        
-        echo "=== Running DHCPv6 client ==="
-        sudo podman exec dhcp-test-client sh -c 'dhcpcd -6 -t 30 eth0 2>&1' | tee /tmp/dhcp6-output.txt || true
-        
-        echo "=== Checking IPv6 address ==="
-        sudo podman exec dhcp-test-client ip -6 addr show eth0
+      - name: Create DHCPv6 configuration
+        run: |
+          cat > dhcpd6.conf << 'EOF'
+          # DHCPv6 configuration
+          default-lease-time 600;
+          max-lease-time 7200;
 
-    - name: Check DHCPv6 server logs
-      run: |
-        echo "=== DHCPv6 Server Logs ==="
-        sudo podman logs dhcp6-test-server
+          subnet6 fd00:cafe::/64 {
+            range6 fd00:cafe::100 fd00:cafe::200;
+            option dhcp6.name-servers fd00:cafe::1;
+            option dhcp6.domain-search "test.local";
+          }
+          EOF
 
-    - name: Verify DHCPv6 lease
-      run: |
-        echo "=== Verifying DHCPv6 configuration ==="
-        IPV6=$(sudo podman exec dhcp-test-client ip -6 addr show eth0 | grep "inet6 fd00:cafe" | grep -v "fe80" | awk '{print $2}' | cut -d'/' -f1)
-        echo "Client IPv6: $IPV6"
-        
-        if [ -z "$IPV6" ]; then
-          echo "WARNING: Client did not receive DHCPv6 lease"
-          echo "This may be expected in container environments without proper IPv6 routing"
-        else
-          echo "SUCCESS: Client received DHCPv6 lease: $IPV6"
-        fi
+      - name: Build and start DHCPv6 server
+        run: |
+          sudo podman build -t dhcp6-server -f Dockerfile.dhcp6-server .
+          sudo podman run -d \
+            --name dhcp6-test-server \
+            --network dhcp6-test-net \
+            --cap-add=NET_ADMIN \
+            --cap-add=NET_RAW \
+            dhcp6-server
 
-    - name: Cleanup IPv6 tests
-      if: always()
-      run: |
-        sudo podman stop dhcp-test-client dhcp6-test-server || true
-        sudo podman rm dhcp-test-client dhcp6-test-server || true
-        sudo podman network rm dhcp6-test-net || true
+      - name: Wait for DHCPv6 server to start
+        run: |
+          sleep 5
+          sudo podman logs dhcp6-test-server
+
+      - name: Create DHCPv6 client container
+        run: |
+          cat > Dockerfile.dhcp6-client << 'EOF'
+          FROM alpine:latest
+
+          RUN apk add --no-cache \
+              bash \
+              iproute2 \
+              tcpdump
+
+          CMD ["/bin/sh", "-c", "while true; do sleep 1000; done"]
+          EOF
+
+      - name: Build and start DHCPv6 client
+        run: |
+          sudo podman build -t dhcp6-client -f Dockerfile.dhcp6-client .
+          sudo podman run -d \
+            --name dhcp-test-client \
+            --network dhcp6-test-net \
+            --cap-add=NET_ADMIN \
+            --cap-add=NET_RAW \
+            dhcp6-client
+
+      - name: Test DHCPv6 lease acquisition
+        run: |
+          echo "=== Installing DHCPv6 client ==="
+          sudo podman exec dhcp-test-client sh -c 'which dhcpcd || apk add --no-cache dhcpcd'
+
+          echo "=== Running DHCPv6 client ==="
+          sudo podman exec dhcp-test-client sh -c 'dhcpcd -6 -t 30 eth0 2>&1' | tee /tmp/dhcp6-output.txt || true
+
+          echo "=== Checking IPv6 address ==="
+          sudo podman exec dhcp-test-client ip -6 addr show eth0
+
+      - name: Check DHCPv6 server logs
+        run: |
+          echo "=== DHCPv6 Server Logs ==="
+          sudo podman logs dhcp6-test-server
+
+      - name: Verify DHCPv6 lease
+        run: |
+          echo "=== Verifying DHCPv6 configuration ==="
+          IPV6=$(sudo podman exec dhcp-test-client ip -6 addr show eth0 \
+            | grep "inet6 fd00:cafe" | grep -v "fe80" \
+            | awk '{print $2}' | cut -d'/' -f1)
+          echo "Client IPv6: $IPV6"
+
+          if [ -z "$IPV6" ]; then
+            echo "WARNING: Client did not receive DHCPv6 lease"
+            echo "This may be expected in container environments without proper IPv6 routing"
+          else
+            echo "SUCCESS: Client received DHCPv6 lease: $IPV6"
+          fi
+
+      - name: Cleanup IPv6 tests
+        if: always()
+        run: |
+          sudo podman stop dhcp-test-client dhcp6-test-server || true
+          sudo podman rm dhcp-test-client dhcp6-test-server || true
+          sudo podman network rm dhcp6-test-net || true
 
   dhcp-relay-tests:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y podman
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
 
-    - name: Create networks for relay test
-      run: |
-        # Server network
-        sudo podman network create dhcp-server-net --subnet=192.168.1.0/24 --gateway=192.168.1.1
-        # Client network
-        sudo podman network create dhcp-client-net --subnet=192.168.2.0/24 --gateway=192.168.2.1
+      - name: Create networks for relay test
+        run: |
+          # Server network
+          sudo podman network create dhcp-server-net --subnet=192.168.1.0/24 --gateway=192.168.1.1
+          # Client network
+          sudo podman network create dhcp-client-net --subnet=192.168.2.0/24 --gateway=192.168.2.1
 
-    - name: Build DHCP server for relay
-      run: |
-        cat > dhcpd-relay.conf << 'EOF'
-        # DHCP configuration for relay testing
-        default-lease-time 600;
-        max-lease-time 7200;
-        authoritative;
-        
-        subnet 192.168.1.0 netmask 255.255.255.0 {
-          # Server subnet - no range needed
-        }
-        
-        subnet 192.168.2.0 netmask 255.255.255.0 {
-          range 192.168.2.100 192.168.2.200;
-          option routers 192.168.2.1;
-          option domain-name-servers 8.8.8.8;
-        }
-        EOF
+      - name: Build DHCP server for relay
+        run: |
+          cat > dhcpd-relay.conf << 'EOF'
+          # DHCP configuration for relay testing
+          default-lease-time 600;
+          max-lease-time 7200;
+          authoritative;
 
-    - name: Start DHCP relay server
-      run: |
-        sudo podman run -d \
-          --name dhcp-relay-server \
-          --network dhcp-server-net \
-          --ip 192.168.1.10 \
-          --cap-add=NET_ADMIN \
-          --cap-add=NET_RAW \
-          -v $(pwd)/dhcpd-relay.conf:/etc/dhcp/dhcpd.conf:ro \
-          alpine:latest sh -c "apk add --no-cache dhcp-server-vanilla && touch /var/lib/dhcp/dhcpd.leases && /usr/sbin/dhcpd -f -d -cf /etc/dhcp/dhcpd.conf"
+          subnet 192.168.1.0 netmask 255.255.255.0 {
+            # Server subnet - no range needed
+          }
 
-    - name: Verify relay server started
-      run: |
-        sleep 5
-        sudo podman logs dhcp-relay-server
-        sudo podman exec dhcp-relay-server ps aux | grep dhcpd
+          subnet 192.168.2.0 netmask 255.255.255.0 {
+            range 192.168.2.100 192.168.2.200;
+            option routers 192.168.2.1;
+            option domain-name-servers 8.8.8.8;
+          }
+          EOF
 
-    - name: Test DHCP relay release
-      run: |
-        echo "=== Testing DHCP relay with release ==="
-        
-        # Start a client on the client network
-        sudo podman run -d \
-          --name dhcp-relay-client \
-          --network dhcp-client-net \
-          --cap-add=NET_ADMIN \
-          --cap-add=NET_RAW \
-          alpine:latest sh -c "while true; do sleep 1000; done"
-        
-        sleep 2
-        
-        # Release any existing lease
-        sudo podman exec dhcp-relay-client dhcpcd -6 -k eth0 || true
-        
-        # Try to acquire lease
-        sudo podman exec dhcp-relay-client dhcpcd -6 eth0 || true
-        
-        echo "=== Client IP configuration ==="
-        sudo podman exec dhcp-relay-client ip addr show eth0
+      - name: Start DHCP relay server
+        run: |
+          sudo podman run -d \
+            --name dhcp-relay-server \
+            --network dhcp-server-net \
+            --ip 192.168.1.10 \
+            --cap-add=NET_ADMIN \
+            --cap-add=NET_RAW \
+            -v $(pwd)/dhcpd-relay.conf:/etc/dhcp/dhcpd.conf:ro \
+            alpine:latest sh -c \
+              "apk add --no-cache dhcp-server-vanilla && \
+               touch /var/lib/dhcp/dhcpd.leases && \
+               /usr/sbin/dhcpd -f -d -cf /etc/dhcp/dhcpd.conf"
 
-    - name: Cleanup relay tests
-      if: always()
-      run: |
-        sudo podman stop dhcp-relay-server dhcp-relay-client || true
-        sudo podman rm dhcp-relay-server dhcp-relay-client || true
-        sudo podman network rm dhcp-server-net dhcp-client-net || true
+      - name: Verify relay server started
+        run: |
+          sleep 5
+          sudo podman logs dhcp-relay-server
+          sudo podman exec dhcp-relay-server ps aux | grep dhcpd
+
+      - name: Test DHCP relay release
+        run: |
+          echo "=== Testing DHCP relay with release ==="
+
+          # Start a client on the client network
+          sudo podman run -d \
+            --name dhcp-relay-client \
+            --network dhcp-client-net \
+            --cap-add=NET_ADMIN \
+            --cap-add=NET_RAW \
+            alpine:latest sh -c "while true; do sleep 1000; done"
+
+          sleep 2
+
+          # Release any existing lease
+          sudo podman exec dhcp-relay-client dhcpcd -6 -k eth0 || true
+
+          # Try to acquire lease
+          sudo podman exec dhcp-relay-client dhcpcd -6 eth0 || true
+
+          echo "=== Client IP configuration ==="
+          sudo podman exec dhcp-relay-client ip addr show eth0
+
+      - name: Cleanup relay tests
+        if: always()
+        run: |
+          sudo podman stop dhcp-relay-server dhcp-relay-client || true
+          sudo podman rm dhcp-relay-server dhcp-relay-client || true
+          sudo podman network rm dhcp-server-net dhcp-client-net || true
