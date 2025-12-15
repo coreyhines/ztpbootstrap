@@ -1691,6 +1691,10 @@
                             // Load leases when entering status tab
                             this.loadDhcpLeases();
                         }
+                        if (newTab === 'reservations') {
+                            // Load reservations when entering reservations tab
+                            this.loadDhcpReservations();
+                        }
                     });
 
                     // Watch for DHCP tab changes
