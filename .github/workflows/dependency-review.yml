@@ -1,8 +1,9 @@
+---
 name: Dependency Review
 
-on:
+'on':
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
 
 permissions:
   contents: read
@@ -14,10 +15,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-      
+
       - name: Dependency Review
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: moderate
           deny-licenses: GPL-2.0, GPL-3.0
-          deny-ghsas: HIGH, CRITICAL
