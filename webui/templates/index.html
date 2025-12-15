@@ -1454,7 +1454,7 @@
                 },
                 dhcpLeases: [],
                 dhcpReservations: [],
-                activeDhcpTab: localStorage.getItem('ztpbootstrap-activeDhcpTab') || 'config', // 'config' or 'status'
+                activeDhcpTab: localStorage.getItem('ztpbootstrap-activeDhcpTab') || 'config', // 'config', 'reservations', 'status', or 'logs'
                 // Reservation form state
                 showReservationForm: false,
                 newReservation: {
@@ -3396,9 +3396,10 @@
 
                 normalizeOui(oui) {
                     // Normalize OUI to XX:XX:XX format
+                    // OUI (Organizationally Unique Identifier) is 24 bits = 6 hex characters
                     if (!oui) return null;
                     const cleaned = oui.replace(/[^0-9a-fA-F]/g, '').toUpperCase();
-                    if (cleaned.length !== 6) return null;
+                    if (cleaned.length !== 6) return null; // Must be exactly 6 hex characters (24 bits)
                     return `${cleaned.slice(0,2)}:${cleaned.slice(2,4)}:${cleaned.slice(4,6)}`;
                 }
             }
