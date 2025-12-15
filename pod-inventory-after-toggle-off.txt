@@ -1,0 +1,33 @@
+=== POD INVENTORY - AFTER TOGGLE OFF (BEFORE FIX) ===
+Timestamp: 2025-11-25 20:59:44 UTC
+
+=== Issue Identified ===
+The UI toggle was flipping back on after disabling because:
+- The sync logic was: `dhcpConfig.enabled = data.enabled || (container_running)`
+- Even if config said `enabled: false`, if container was still running, it set enabled to true
+- This caused the toggle to flip back on immediately after disabling
+
+=== Systemd Services ===
+  ztpbootstrap-dhcp.service      loaded active running ZTP Bootstrap DHCP Server (Kea)
+  (Service still running - disable didn't stop it)
+
+=== Config File State ===
+dhcp:
+  enabled: true
+  (Config shows enabled: true - disable endpoint may not have been called or failed)
+
+=== Container State ===
+Container ID: f7e0914c8535
+Status: running
+StartedAt: 2025-11-25T20:53:00.59364703Z
+(Container still running)
+
+=== Root Cause ===
+1. Toggle sync logic incorrectly uses container running state
+2. Disable endpoint may not have been called or failed silently
+3. Service has Restart=on-failure which might restart it
+
+=== Fix Applied ===
+Changed sync logic to only use config enabled value:
+- OLD: `dhcpConfig.enabled = data.enabled || (container_running)`
+- NEW: `dhcpConfig.enabled = data.enabled`

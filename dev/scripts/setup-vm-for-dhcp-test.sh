@@ -146,10 +146,11 @@ import yaml
 import hashlib
 import secrets
 
-# Generate admin password hash
+# Generate admin password hash with a proper random byte salt
 password = "admin"
-salt = secrets.token_hex(16)
-hash_obj = hashlib.pbkdf2_hmac('sha256', password.encode(), salt.encode(), 100000)
+salt_bytes = secrets.token_bytes(16)
+salt = salt_bytes.hex()
+hash_obj = hashlib.pbkdf2_hmac("sha256", password.encode(), salt_bytes, 100000)
 password_hash = f"pbkdf2:sha256:100000${salt}${hash_obj.hex()}"
 
 config = {

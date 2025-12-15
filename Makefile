@@ -57,7 +57,7 @@ test-quick: ## Run quick tests (syntax, unit tests - no running services require
 	fi
 	@echo "Running Python unit tests..."
 	@if command -v python3 >/dev/null 2>&1; then \
-		cd tests/unit && python3 -m unittest test_dhcp_*.py 2>/dev/null || echo "Python unit tests failed or modules not available"; \
+		cd tests/unit && python3 -m unittest discover -s . -p "test_*.py" 2>/dev/null || echo "Python unit tests failed or modules not available"; \
 	else \
 		echo "python3 not installed, skipping Python unit tests"; \
 	fi

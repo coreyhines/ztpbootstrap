@@ -1,0 +1,78 @@
+=== POD INVENTORY - BEFORE TOGGLE ===
+Timestamp: 2025-11-25 20:57:53 UTC
+
+=== Systemd Services ===
+  ztpbootstrap-dhcp-test.service loaded active running DHCP Test Client Container (Isolated Network)
+  ztpbootstrap-dhcp.service      loaded active running ZTP Bootstrap DHCP Server (Kea)
+  ztpbootstrap-nginx.service     loaded active running ZTP Bootstrap Nginx Container
+  ztpbootstrap-pod.service       loaded active running ZTP Bootstrap Service Pod
+  ztpbootstrap-webui.service     loaded active running ZTP Bootstrap Web UI Container
+
+=== Podman Containers ===
+CONTAINER ID  NAMES                   STATUS                  IMAGE
+28b8754570b0  ztpbootstrap-infra      Up 3 hours
+ba997536a53b  ztpbootstrap-nginx      Up 3 hours (healthy)    docker.io/library/nginx:alpine
+a3e2f279643c  ztpbootstrap-dhcp-test  Up 3 hours              registry.fedoraproject.org/fedora:latest
+f7e0914c8535  ztpbootstrap-dhcp       Up 4 minutes            docker.cloudsmith.io/isc/docker/kea-dhcp4:2.6.3
+bef02ba112af  ztpbootstrap-webui      Up 3 minutes (healthy)  localhost/ztpbootstrap-webui:local
+
+=== DHCP Service Status ===
+● ztpbootstrap-dhcp.service - ZTP Bootstrap DHCP Server (Kea)
+     Loaded: loaded (/etc/containers/systemd/ztpbootstrap/ztpbootstrap-dhcp.container; generated)
+    Drop-In: /usr/lib/systemd/system/service.d
+             └─10-timeout-abort.conf
+     Active: active (running) since Tue 2025-11-25 20:53:00 UTC; 4min 54s ago
+   Main PID: 76919 (conmon)
+      Tasks: 9 (limit: 4528)
+     Memory: 11.3M (peak: 20.1M)
+        CPU: 1.120s
+
+=== DHCP Container Status ===
+State: running
+Running: true
+StartedAt: 2025-11-25T20:53:00.59364703Z
+
+=== Container Processes ===
+PID   USER     TIME  COMMAND
+    1 root      0:00 {kea-ctrl-agent} /usr/bin/qemu-x86_64-static /usr/sbin/kea-ctrl-agent -c /etc/kea/kea-ctrl-agent.conf
+    3 root      0:00 [kea-dhcp4]
+    5 root      0:00 [sh]
+
+=== Socket Files ===
+/var/run/kea/ directory exists
+- kea-ctrl-agent.kea-ctrl-agent.pid (2 bytes)
+- logger_lockfile (0 bytes)
+Note: kea-dhcp4-ctrl.sock NOT present (kea-dhcp4 may not be fully started)
+
+=== Kea Config Files ===
+-rw-r--r--. 1 root root  339 Nov 25 20:56 /opt/containerdata/ztpbootstrap/dhcp/kea-ctrl-agent.conf
+-rw-r--r--. 1 root root 1.2K Nov 25 20:56 /opt/containerdata/ztpbootstrap/dhcp/kea-dhcp4.conf
+-rw-r--r--. 1 root root  800 Nov 25 20:56 /opt/containerdata/ztpbootstrap/dhcp/kea-dhcp6.conf
+
+=== Network Interfaces ===
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 - inet 127.0.0.1/8
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 - inet 172.16.0.15/24
+
+=== Pod Network ===
+Name: ztpbootstrap
+State: Running
+InfraContainerID: 28b8754570b00b3765d37219a68909ffa860e8b6e5b4475ba3244c365095c37f
+Containers in pod:
+  - ztpbootstrap-infra: running
+  - ztpbootstrap-nginx: running
+  - ztpbootstrap-dhcp: running
+  - ztpbootstrap-webui: running
+
+=== WebUI Status ===
+● ztpbootstrap-webui.service - ZTP Bootstrap Web UI Container
+     Loaded: loaded
+     Active: active (running) since Tue 2025-11-25 20:54:27 UTC; 3min 30s ago
+   Main PID: 77703 (conmon)
+      Tasks: 2 (limit: 4528)
+     Memory: 56.5M (peak: 105.1M)
+        CPU: 5.673s
+
+=== Recent DHCP Logs ===
+Last 5 log entries show kea-ctrl-agent receiving lease-get-all commands
+No errors in recent logs
+kea-dhcp4 process exists but socket file not created (may indicate config issue)

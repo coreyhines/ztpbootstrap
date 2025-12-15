@@ -101,11 +101,11 @@ try:
     config['network']['http_port'] = 8080
     config['network']['https_port'] = 8443
 
-    # Set admin password for authentication
+    # Set admin password for authentication using a securely salted hash
+    from werkzeug.security import generate_password_hash
+
     test_password = "admin"
-    password_hash = "pbkdf2:sha256:" + base64.b64encode(
-        hashlib.pbkdf2_hmac('sha256', test_password.encode(), b'ztpbootstrap', 100000)
-    ).decode()
+    password_hash = generate_password_hash(test_password)
 
     if 'auth' not in config:
         config['auth'] = {}

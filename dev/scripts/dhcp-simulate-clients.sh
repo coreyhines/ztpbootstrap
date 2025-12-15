@@ -75,9 +75,10 @@ for i in $(seq 1 "${NUM_CLIENTS}"); do
     ns="dhcp-client-${i}"
     veth_host="veth-host-${i}"
     veth_client="veth-client-${i}"
-    mac="02:00:00:00:00:$(printf "%02x" "${i}")"
+    host_mac="02:00:00:00:00:$(printf "%02x" "${i}")"
+    client_mac="06:00:00:00:00:$(printf "%02x" "${i}")"
 
-    log_info "Creating namespace ${ns} with MAC ${mac}..."
+    log_info "Creating namespace ${ns} with host MAC ${host_mac} and client MAC ${client_mac}..."
 
     # Create namespace
     ip netns add "${ns}" || {
@@ -94,11 +95,11 @@ for i in $(seq 1 "${NUM_CLIENTS}"); do
 
     # Configure host-side veth
     ip link set "${veth_host}" up
-    ip link set "${veth_host}" address "${mac}"
+    ip link set "${veth_host}" address "${host_mac}"
 
     # Configure client-side veth in namespace
     ip netns exec "${ns}" ip link set "${veth_client}" up
-    ip netns exec "${ns}" ip link set "${veth_client}" address "${mac}"
+    ip netns exec "${ns}" ip link set "${veth_client}" address "${client_mac}"
 
     # Add host-side veth to bridge or connect to main interface
     # For simplicity, we'll use macvlan or just connect directly
