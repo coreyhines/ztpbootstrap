@@ -173,6 +173,9 @@ jobs:
     
     - name: Start Kea DHCP container
       run: |
+        # Start Kea container with all three services (dhcp4, dhcp6, ctrl-agent)
+        # This matches the command from systemd/ztpbootstrap-dhcp.container
+        # The exec on the last command makes ctrl-agent the main process (PID 1)
         sudo podman run -d \
           --name ztpbootstrap-dhcp \
           --pod ztpbootstrap \
@@ -218,10 +221,8 @@ jobs:
     - name: Test DHCP lease acquisition
       id: dhcp-test
       run: |
-        set +e  # Don't exit on error, we want to capture the output
-        
         echo "=== Running DHCP Discovery ==="
-        sudo podman exec dhcp-test-client sh -c 'dhclient -v eth0 2>&1' | tee /tmp/dhcp-output.txt
+        sudo podman exec dhcp-test-client sh -c 'dhclient -v eth0 2>&1' | tee /tmp/dhcp-output.txt || true
         
         echo ""
         echo "=== Checking IP Assignment ==="
@@ -230,6 +231,12 @@ jobs:
         
         if [ -z "$CLIENT_IP" ]; then
           echo "ERROR: No IP address assigned"
+          exit 1
+        fi
+        
+        # Validate IP address format before extracting octets
+        if ! echo "$CLIENT_IP" | grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$'; then
+          echo "ERROR: Invalid IP address format: $CLIENT_IP"
           exit 1
         fi
         
