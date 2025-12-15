@@ -20,7 +20,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
         with:
-          fetch-depth: 0  # Full history needed for secret detection
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+          fetch-tags: true
+          fetch-refs: |
+            +refs/heads/*:refs/remotes/origin/*
 
       - name: Run Gitleaks Secret Detection
         uses: gitleaks/gitleaks-action@v2
