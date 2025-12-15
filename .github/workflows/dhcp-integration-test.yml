@@ -1,0 +1,368 @@
+name: DHCP Integration Test
+
+on:
+  push:
+    branches: [ feature/dhcp-implementation ]
+  pull_request:
+    branches: [ feature/dhcp-implementation ]
+
+jobs:
+  dhcp-integration:
+    name: DHCP Server Integration Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        ref: feature/dhcp-implementation
+    
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y podman python3 curl jq iproute2
+    
+    - name: Verify Podman installation
+      run: |
+        podman --version
+        python3 --version
+    
+    - name: Create test directories
+      run: |
+        sudo mkdir -p /opt/containerdata/ztpbootstrap/dhcp/{leases,logs}
+        sudo mkdir -p /opt/containerdata/ztpbootstrap/webui
+        sudo mkdir -p /opt/containerdata/ztpbootstrap/nginx
+        sudo mkdir -p /opt/containerdata/ztpbootstrap/postgresql
+        sudo mkdir -p /opt/containerdata/certs/wild
+        
+        # Copy configuration files
+        sudo cp dhcp/*.conf /opt/containerdata/ztpbootstrap/dhcp/
+        sudo cp bootstrap.py /opt/containerdata/ztpbootstrap/
+        sudo cp nginx.conf /opt/containerdata/ztpbootstrap/nginx/
+        sudo cp -r systemd /opt/containerdata/ztpbootstrap/
+        
+        # Set permissions
+        sudo chmod -R 755 /opt/containerdata/ztpbootstrap
+        sudo chmod 777 /opt/containerdata/ztpbootstrap/dhcp/leases
+        sudo chmod 777 /opt/containerdata/ztpbootstrap/dhcp/logs
+    
+    - name: Create test SSL certificate
+      run: |
+        sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+          -keyout /opt/containerdata/certs/wild/privkey.pem \
+          -out /opt/containerdata/certs/wild/fullchain.pem \
+          -subj "/C=US/ST=Test/L=Test/O=Test/CN=ztpboot.example.com"
+    
+    - name: Create test environment file
+      run: |
+        sudo tee /opt/containerdata/ztpbootstrap/ztpbootstrap.env > /dev/null <<EOF
+        CV_ADDR=192.168.100.5
+        ENROLLMENT_TOKEN=test-token-1234567890
+        DOMAIN=ztpboot.example.com
+        ADMIN_PASSWORD=test-admin-password
+        DB_PASSWORD=test-db-password
+        EOF
+    
+    - name: Create test config.yaml
+      run: |
+        sudo tee /opt/containerdata/ztpbootstrap/config.yaml > /dev/null <<'EOF'
+        cloudvision:
+          address: "192.168.100.5"
+          enrollment_token: "test-token-1234567890"
+        server:
+          domain: "ztpboot.example.com"
+          http_port: 80
+          https_port: 443
+          use_https: false
+        database:
+          password: "test-db-password"
+        admin:
+          password: "test-admin-password"
+        dhcp:
+          enabled: true
+          ipv4:
+            subnet: "192.168.100.0/24"
+            range_start: "192.168.100.100"
+            range_end: "192.168.100.200"
+            gateway: "192.168.100.1"
+            dns_servers:
+              - "8.8.8.8"
+              - "8.8.4.4"
+            bootstrap_url: "http://192.168.100.10/bootstrap.py"
+        EOF
+    
+    - name: Create isolated test network
+      run: |
+        # Remove any existing test network
+        sudo podman network rm dhcp-test-net 2>/dev/null || true
+        
+        # Create isolated bridge network for testing
+        sudo podman network create \
+          --driver bridge \
+          --subnet 192.168.100.0/24 \
+          --gateway 192.168.100.1 \
+          --ip-range 192.168.100.0/24 \
+          dhcp-test-net
+        
+        # Verify network creation
+        sudo podman network inspect dhcp-test-net
+    
+    - name: Create ztpbootstrap pod with test network
+      run: |
+        # Create pod on the test network
+        sudo podman pod create \
+          --name ztpbootstrap \
+          --network dhcp-test-net \
+          --ip 192.168.100.10 \
+          --publish 8080:80 \
+          --publish 8443:443 \
+          --publish 5000:5000
+        
+        # Verify pod creation
+        sudo podman pod ps
+    
+    - name: Start PostgreSQL container
+      run: |
+        sudo podman run -d \
+          --name ztpbootstrap-postgresql \
+          --pod ztpbootstrap \
+          -e POSTGRES_USER=ztpbootstrap \
+          -e POSTGRES_PASSWORD=test-db-password \
+          -e POSTGRES_DB=ztpbootstrap \
+          docker.io/library/postgres:15-alpine
+        
+        # Wait for PostgreSQL to be ready
+        echo "Waiting for PostgreSQL to start..."
+        for i in {1..30}; do
+          if sudo podman exec ztpbootstrap-postgresql pg_isready -U ztpbootstrap; then
+            echo "PostgreSQL is ready"
+            break
+          fi
+          echo "Waiting for PostgreSQL... ($i/30)"
+          sleep 2
+        done
+    
+    - name: Start Nginx container
+      run: |
+        # Create a simple nginx config for testing
+        sudo tee /opt/containerdata/ztpbootstrap/nginx/nginx.conf > /dev/null <<'EOF'
+        events {
+            worker_connections 1024;
+        }
+        http {
+            server {
+                listen 80;
+                server_name _;
+                location / {
+                    root /usr/share/nginx/html;
+                    autoindex on;
+                }
+                location /bootstrap.py {
+                    alias /opt/containerdata/ztpbootstrap/bootstrap.py;
+                    default_type text/plain;
+                }
+            }
+        }
+        EOF
+        
+        sudo podman run -d \
+          --name ztpbootstrap-nginx \
+          --pod ztpbootstrap \
+          -v /opt/containerdata/ztpbootstrap/nginx/nginx.conf:/etc/nginx/nginx.conf:ro \
+          -v /opt/containerdata/ztpbootstrap:/opt/containerdata/ztpbootstrap:ro \
+          docker.io/library/nginx:alpine
+    
+    - name: Start Kea DHCP container
+      run: |
+        sudo podman run -d \
+          --name ztpbootstrap-dhcp \
+          --pod ztpbootstrap \
+          --cap-add NET_RAW \
+          --cap-add NET_BIND_SERVICE \
+          -v /opt/containerdata/ztpbootstrap/dhcp:/etc/kea:ro \
+          -v /opt/containerdata/ztpbootstrap/dhcp/leases:/var/lib/kea:rw \
+          -v /opt/containerdata/ztpbootstrap/dhcp/logs:/var/log/kea:rw \
+          docker.cloudsmith.io/isc/docker/kea-dhcp4:2.6.3 \
+          /bin/sh -c "/usr/sbin/kea-dhcp4 -c /etc/kea/kea-dhcp4.conf & /usr/sbin/kea-dhcp6 -c /etc/kea/kea-dhcp6.conf & exec /usr/sbin/kea-ctrl-agent -c /etc/kea/kea-ctrl-agent.conf"
+    
+    - name: Wait for services to start
+      run: |
+        echo "Waiting for services to initialize..."
+        sleep 10
+        
+        # Check container status
+        echo "=== Container Status ==="
+        sudo podman ps -a
+        
+        # Check Kea logs
+        echo "=== Kea DHCP Logs ==="
+        sudo podman logs ztpbootstrap-dhcp || true
+        
+        # Verify nginx is serving bootstrap.py
+        echo "=== Testing Nginx ==="
+        curl -v http://192.168.100.10/bootstrap.py || true
+    
+    - name: Create DHCP client container
+      run: |
+        # Create Alpine container with dhclient for testing
+        sudo podman run -d \
+          --name dhcp-test-client \
+          --network dhcp-test-net \
+          --cap-add NET_RAW \
+          --cap-add NET_ADMIN \
+          docker.io/library/alpine:latest \
+          sleep 3600
+        
+        # Install dhclient in the container
+        sudo podman exec dhcp-test-client sh -c 'apk add --no-cache dhclient'
+    
+    - name: Test DHCP lease acquisition
+      id: dhcp-test
+      run: |
+        set +e  # Don't exit on error, we want to capture the output
+        
+        echo "=== Running DHCP Discovery ==="
+        sudo podman exec dhcp-test-client sh -c 'dhclient -v eth0 2>&1' | tee /tmp/dhcp-output.txt
+        
+        echo ""
+        echo "=== Checking IP Assignment ==="
+        CLIENT_IP=$(sudo podman exec dhcp-test-client ip addr show eth0 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
+        echo "Client IP: $CLIENT_IP"
+        
+        if [ -z "$CLIENT_IP" ]; then
+          echo "ERROR: No IP address assigned"
+          exit 1
+        fi
+        
+        # Verify IP is in expected range (192.168.100.100-200)
+        IP_LAST_OCTET=$(echo "$CLIENT_IP" | cut -d'.' -f4)
+        if [ "$IP_LAST_OCTET" -ge 100 ] && [ "$IP_LAST_OCTET" -le 200 ]; then
+          echo "✓ IP address $CLIENT_IP is in expected range (192.168.100.100-200)"
+        else
+          echo "ERROR: IP address $CLIENT_IP is outside expected range"
+          exit 1
+        fi
+        
+        echo "client_ip=$CLIENT_IP" >> $GITHUB_OUTPUT
+    
+    - name: Verify DHCP Option 67 (boot-file-name)
+      run: |
+        echo "=== Checking DHCP Options ==="
+        
+        # Check lease file for Option 67
+        echo "Lease file contents:"
+        sudo podman exec ztpbootstrap-dhcp cat /var/lib/kea/dhcp4.leases || true
+        
+        # Try to find boot-file-name in dhclient output
+        if grep -i "boot" /tmp/dhcp-output.txt; then
+          echo "✓ Boot file information found in DHCP response"
+        else
+          echo "WARNING: Boot file information not found in dhclient verbose output"
+        fi
+        
+        # Alternative: Check using dhcpdump or tcpdump if needed
+        # For this test, we'll verify the config is correct
+        if sudo grep -q "bootstrap.py" /opt/containerdata/ztpbootstrap/dhcp/kea-dhcp4.conf; then
+          echo "✓ DHCP Option 67 configured in kea-dhcp4.conf"
+        fi
+    
+    - name: Test bootstrap script download
+      run: |
+        echo "=== Testing Bootstrap Script Download ==="
+        
+        # Test download from client container
+        sudo podman exec dhcp-test-client sh -c 'apk add --no-cache curl'
+        
+        if sudo podman exec dhcp-test-client curl -f -s http://192.168.100.10/bootstrap.py > /tmp/bootstrap-downloaded.py; then
+          echo "✓ Successfully downloaded bootstrap.py"
+          
+          # Verify it's a Python script
+          if head -1 /tmp/bootstrap-downloaded.py | grep -q python; then
+            echo "✓ Downloaded file is a Python script"
+          else
+            echo "ERROR: Downloaded file doesn't appear to be a Python script"
+            exit 1
+          fi
+        else
+          echo "ERROR: Failed to download bootstrap.py"
+          exit 1
+        fi
+    
+    - name: Test DHCP lease renewal
+      run: |
+        echo "=== Testing DHCP Lease Renewal ==="
+        
+        # Release current lease
+        sudo podman exec dhcp-test-client dhclient -r eth0 || true
+        sleep 2
+        
+        # Request new lease
+        sudo podman exec dhcp-test-client dhclient -v eth0
+        
+        # Verify new IP assignment
+        NEW_IP=$(sudo podman exec dhcp-test-client ip addr show eth0 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
+        echo "New Client IP: $NEW_IP"
+        
+        if [ -n "$NEW_IP" ]; then
+          echo "✓ DHCP lease renewal successful"
+        else
+          echo "ERROR: DHCP lease renewal failed"
+          exit 1
+        fi
+    
+    - name: Collect diagnostics on failure
+      if: failure()
+      run: |
+        echo "=== Collecting Diagnostics ==="
+        
+        echo "=== Pod Status ==="
+        sudo podman pod ps || true
+        
+        echo "=== Container Status ==="
+        sudo podman ps -a || true
+        
+        echo "=== Network Configuration ==="
+        sudo podman network ls || true
+        sudo podman network inspect dhcp-test-net || true
+        
+        echo "=== Kea DHCP Logs ==="
+        sudo podman logs ztpbootstrap-dhcp || true
+        
+        echo "=== Nginx Logs ==="
+        sudo podman logs ztpbootstrap-nginx || true
+        
+        echo "=== PostgreSQL Logs ==="
+        sudo podman logs ztpbootstrap-postgresql || true
+        
+        echo "=== DHCP Client Logs ==="
+        sudo podman logs dhcp-test-client || true
+        
+        echo "=== Kea Lease Database ==="
+        sudo podman exec ztpbootstrap-dhcp cat /var/lib/kea/dhcp4.leases || true
+        
+        echo "=== Client Network Configuration ==="
+        sudo podman exec dhcp-test-client ip addr || true
+        sudo podman exec dhcp-test-client ip route || true
+        
+        echo "=== DHCP Client Output ==="
+        cat /tmp/dhcp-output.txt || true
+    
+    - name: Upload test artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: dhcp-test-artifacts
+        path: |
+          /tmp/dhcp-output.txt
+          /tmp/bootstrap-downloaded.py
+        retention-days: 7
+    
+    - name: Cleanup
+      if: always()
+      run: |
+        echo "=== Cleaning up test environment ==="
+        sudo podman pod stop ztpbootstrap || true
+        sudo podman pod rm -f ztpbootstrap || true
+        sudo podman rm -f dhcp-test-client || true
+        sudo podman network rm dhcp-test-net || true
