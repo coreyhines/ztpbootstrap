@@ -87,8 +87,6 @@ safe_remove_directory() {
         rm -rf "$dir" 2>/dev/null || true
     fi
 }
-    exit 1
-}
 
 info() {
     echo -e "${CYAN}[?]${NC} $1"
