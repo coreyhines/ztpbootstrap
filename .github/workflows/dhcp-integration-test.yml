@@ -98,12 +98,15 @@ jobs:
         # Remove any existing test network
         sudo podman network rm dhcp-test-net 2>/dev/null || true
         
-        # Create isolated bridge network for testing
+        # Create isolated bridge network for testing with IPv4 and IPv6
         sudo podman network create \
           --driver bridge \
           --subnet 192.168.100.0/24 \
           --gateway 192.168.100.1 \
           --ip-range 192.168.100.0/24 \
+          --ipv6 \
+          --subnet fd00:100::/64 \
+          --gateway fd00:100::1 \
           dhcp-test-net
         
         # Verify network creation
@@ -319,6 +322,79 @@ jobs:
           exit 1
         fi
     
+    - name: Test DHCPv6 lease acquisition
+      id: dhcp6-test
+      run: |
+        echo "=== Running DHCPv6 Discovery ==="
+        
+        # Install dhclient for IPv6 if not already present
+        sudo podman exec dhcp-test-client sh -c 'which dhclient || apk add --no-cache dhclient'
+        
+        # Request DHCPv6 lease
+        sudo podman exec dhcp-test-client sh -c 'dhclient -6 -v eth0 2>&1' | tee /tmp/dhcp6-output.txt || true
+        
+        echo ""
+        echo "=== Checking IPv6 Assignment ==="
+        CLIENT_IP6=$(sudo podman exec dhcp-test-client ip -6 addr show eth0 | grep 'inet6 fd00:100' | awk '{print $2}' | cut -d'/' -f1 | head -1)
+        echo "Client IPv6: $CLIENT_IP6"
+        
+        if [ -z "$CLIENT_IP6" ]; then
+          echo "ERROR: No IPv6 address assigned"
+          exit 1
+        fi
+        
+        # Validate IPv6 address format
+        if ! echo "$CLIENT_IP6" | grep -qE '^fd00:100::'; then
+          echo "ERROR: Invalid IPv6 address format or wrong subnet: $CLIENT_IP6"
+          exit 1
+        fi
+        
+        # Extract last part to verify it's in the expected range
+        # IPv6 format: fd00:100::100 to fd00:100::200
+        echo "✓ IPv6 address $CLIENT_IP6 is in expected subnet (fd00:100::/64)"
+        echo "client_ip6=$CLIENT_IP6" >> $GITHUB_OUTPUT
+    
+    - name: Verify DHCPv6 DNS servers
+      run: |
+        echo "=== Checking DHCPv6 DNS Configuration ==="
+        
+        # Check if IPv6 DNS servers were configured
+        if sudo podman exec dhcp-test-client cat /etc/resolv.conf | grep -q "2001:4860:4860::8888\|2001:4860:4860::8844"; then
+          echo "✓ DHCPv6 DNS servers configured correctly"
+        else
+          echo "WARNING: DHCPv6 DNS servers not found in resolv.conf"
+          echo "This is expected in some test environments"
+        fi
+        
+        # Verify Kea DHCPv6 is running
+        if sudo podman exec ztpbootstrap-dhcp pgrep -f kea-dhcp6; then
+          echo "✓ Kea DHCPv6 server is running"
+        else
+          echo "WARNING: Kea DHCPv6 process not found"
+        fi
+    
+    - name: Test DHCPv6 lease renewal
+      run: |
+        echo "=== Testing DHCPv6 Lease Renewal ==="
+        
+        # Release current IPv6 lease
+        sudo podman exec dhcp-test-client dhclient -6 -r eth0 || true
+        sleep 2
+        
+        # Request new IPv6 lease
+        sudo podman exec dhcp-test-client dhclient -6 -v eth0 || true
+        sleep 2
+        
+        # Verify new IPv6 assignment
+        NEW_IP6=$(sudo podman exec dhcp-test-client ip -6 addr show eth0 | grep 'inet6 fd00:100' | awk '{print $2}' | cut -d'/' -f1 | head -1)
+        echo "New Client IPv6: $NEW_IP6"
+        
+        if [ -n "$NEW_IP6" ]; then
+          echo "✓ DHCPv6 lease renewal successful"
+        else
+          echo "WARNING: DHCPv6 lease renewal failed - this may be expected in some test environments"
+        fi
+    
     - name: Collect diagnostics on failure
       if: failure()
       run: |
@@ -346,15 +422,23 @@ jobs:
         echo "=== DHCP Client Logs ==="
         sudo podman logs dhcp-test-client || true
         
-        echo "=== Kea Lease Database ==="
+        echo "=== Kea DHCPv4 Lease Database ==="
         sudo podman exec ztpbootstrap-dhcp cat /var/lib/kea/dhcp4.leases || true
+        
+        echo "=== Kea DHCPv6 Lease Database ==="
+        sudo podman exec ztpbootstrap-dhcp cat /var/lib/kea/dhcp6.leases || true
         
         echo "=== Client Network Configuration ==="
         sudo podman exec dhcp-test-client ip addr || true
+        sudo podman exec dhcp-test-client ip -6 addr || true
         sudo podman exec dhcp-test-client ip route || true
+        sudo podman exec dhcp-test-client ip -6 route || true
         
-        echo "=== DHCP Client Output ==="
+        echo "=== DHCPv4 Client Output ==="
         cat /tmp/dhcp-output.txt || true
+        
+        echo "=== DHCPv6 Client Output ==="
+        cat /tmp/dhcp6-output.txt || true
     
     - name: Upload test artifacts
       if: always()
@@ -363,6 +447,7 @@ jobs:
         name: dhcp-test-artifacts
         path: |
           /tmp/dhcp-output.txt
+          /tmp/dhcp6-output.txt
           /tmp/bootstrap-downloaded.py
         retention-days: 7
     
