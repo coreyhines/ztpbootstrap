@@ -23,12 +23,14 @@ DHCPv4 (IPv4) server configuration. This is the primary DHCP server configuratio
 
 ### kea-dhcp6.conf
 
-DHCPv6 (IPv6) server configuration. This is a minimal stub configuration and is disabled for CI testing.
+DHCPv6 (IPv6) server configuration. Provides IPv6 address allocation for dual-stack networks.
 
 **Key settings:**
-- **Interfaces**: Empty (disabled)
-- **Subnets**: Empty (no IPv6 subnets configured)
+- **Subnet**: `fd00:100::/64` (for CI testing, ULA prefix)
+- **IP Pool**: `fd00:100::100 - fd00:100::200`
+- **DNS Servers**: `2001:4860:4860::8888`, `2001:4860:4860::8844` (Google Public DNS IPv6)
 - **Lease Database**: `/var/lib/kea/dhcp6.leases` (memfile, persistent)
+- **Interface**: `eth0`
 
 ### kea-ctrl-agent.conf
 
@@ -58,6 +60,8 @@ dhcp/
 The default configuration is optimized for CI testing with an isolated test network. For production deployments, you should customize the following:
 
 #### Testing Configuration (Default)
+
+**IPv4:**
 ```json
 {
   "subnet4": [
@@ -74,7 +78,24 @@ The default configuration is optimized for CI testing with an isolated test netw
 }
 ```
 
+**IPv6:**
+```json
+{
+  "subnet6": [
+    {
+      "subnet": "fd00:100::/64",
+      "pools": [{"pool": "fd00:100::100 - fd00:100::200"}],
+      "option-data": [
+        {"name": "dns-servers", "data": "2001:4860:4860::8888, 2001:4860:4860::8844"}
+      ]
+    }
+  ]
+}
+```
+
 #### Production Configuration Example
+
+**IPv4:**
 ```json
 {
   "subnet4": [
@@ -85,6 +106,21 @@ The default configuration is optimized for CI testing with an isolated test netw
         {"name": "routers", "data": "10.0.0.1"},
         {"name": "domain-name-servers", "data": "10.0.0.1, 1.1.1.1"},
         {"name": "boot-file-name", "code": 67, "data": "https://ztpboot.example.com/bootstrap.py"}
+      ]
+    }
+  ]
+}
+```
+
+**IPv6:**
+```json
+{
+  "subnet6": [
+    {
+      "subnet": "2001:db8::/64",
+      "pools": [{"pool": "2001:db8::100 - 2001:db8::200"}],
+      "option-data": [
+        {"name": "dns-servers", "data": "2001:db8::1, 2606:4700:4700::1111"}
       ]
     }
   ]
@@ -207,13 +243,19 @@ The container requires these capabilities:
 
 The CI workflow `.github/workflows/dhcp-integration-test.yml` performs automated integration testing:
 
-1. **Creates isolated test network** - Podman bridge network on `192.168.100.0/24`
+1. **Creates isolated test network** - Dual-stack Podman bridge network:
+   - IPv4: `192.168.100.0/24`
+   - IPv6: `fd00:100::/64`
 2. **Deploys full service** - Starts all containers (nginx, webui, postgresql, dhcp)
-3. **Runs DHCP client tests** - Alpine container with dhclient
-4. **Verifies lease assignment** - Checks IP is in expected range
+3. **Runs DHCPv4 client tests** - Alpine container with dhclient
+4. **Verifies IPv4 lease assignment** - Checks IP is in expected range (192.168.100.100-200)
 5. **Verifies Option 67** - Confirms boot-file-name is delivered
 6. **Tests bootstrap download** - Downloads and validates bootstrap.py
-7. **Tests lease renewal** - Verifies DHCP renewal works
+7. **Tests DHCPv4 lease renewal** - Verifies DHCP renewal works
+8. **Runs DHCPv6 client tests** - Tests IPv6 address assignment
+9. **Verifies IPv6 lease assignment** - Checks IPv6 is in expected subnet (fd00:100::/64)
+10. **Verifies DHCPv6 DNS servers** - Confirms DNS configuration
+11. **Tests DHCPv6 lease renewal** - Verifies IPv6 renewal works
 
 ### Running Integration Tests Locally
 
