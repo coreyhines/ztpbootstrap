@@ -2,9 +2,9 @@ name: DHCP Integration Test
 
 on:
   push:
-    branches: [ feature/dhcp-implementation ]
+    branches: [ feature/dhcp-implementation, copilot/add-dhcp-server-integration-tests ]
   pull_request:
-    branches: [ feature/dhcp-implementation ]
+    branches: [ feature/dhcp-implementation, copilot/add-dhcp-server-integration-tests ]
 
 jobs:
   dhcp-integration:
@@ -15,8 +15,6 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      with:
-        ref: feature/dhcp-implementation
     
     - name: Install dependencies
       run: |
