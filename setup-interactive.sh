@@ -48,7 +48,44 @@ warn() {
 
 error() {
     echo -e "${RED}[ERROR]${NC} $1"
-    exit 1
+}
+
+# Safe directory removal with validation (Issue #18)
+safe_remove_directory() {
+    local dir="$1"
+    local use_sudo="${2:-false}"
+    
+    # Path must not be empty
+    if [[ -z "$dir" ]]; then
+        error "Cannot remove empty path"
+        return 1
+    fi
+    
+    # Path must not be /
+    if [[ "$dir" == "/" ]]; then
+        error "Cannot remove root directory"
+        return 1
+    fi
+    
+    # Path must be under /opt or /etc (whitelist approach)
+    if [[ ! "$dir" =~ ^(/opt/|/etc/) ]]; then
+        error "Path $dir is not in allowed locations (/opt/ or /etc/)"
+        return 1
+    fi
+    
+    # Path must exist and be a directory
+    if [[ ! -d "$dir" ]]; then
+        # Directory doesn't exist, nothing to remove
+        return 0
+    fi
+    
+    # Perform removal
+    log "Safely removing directory: $dir"
+    if [[ "$use_sudo" == "true" ]]; then
+        sudo rm -rf "$dir" 2>/dev/null || true
+    else
+        rm -rf "$dir" 2>/dev/null || true
+    fi
 }
 
 info() {
@@ -66,8 +103,14 @@ prompt_with_default() {
     # In non-interactive mode, check environment variable first, then use default value
     if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
         # Check if the variable is already set in environment (for non-interactive mode)
-        local env_value
-        env_value=$(eval "echo \${${var_name}:-}")
+        # Use nameref instead of eval for safer variable access (Issue #4)
+        local env_value=""
+        if declare -p "$var_name" &>/dev/null; then
+            # Variable exists, get its value using nameref (Bash 4.3+)
+            declare -n env_ref="$var_name"
+            env_value="${env_ref:-}"
+        fi
+        
         if [[ -n "$env_value" ]]; then
             value="$env_value"
             if [[ "$is_secret" == "true" ]]; then
@@ -89,7 +132,8 @@ prompt_with_default() {
                 log "Non-interactive: $prompt_text = ${value:-<empty>}"
             fi
         fi
-        eval "$var_name=\"$value\""
+        # Use declare instead of eval for safer variable assignment (Issue #4)
+        declare -g "$var_name=$value"
         return 0
     fi
 
@@ -137,7 +181,8 @@ prompt_with_default() {
         fi
     fi
 
-    eval "$var_name='$value'"
+    # Use declare instead of eval for safer variable assignment (Issue #4)
+    declare -g "$var_name=$value"
 }
 
 # Prompt for yes/no with default
@@ -149,9 +194,10 @@ prompt_yes_no() {
     # In non-interactive mode, use default value without prompting
     if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
         if [[ "$default_value" == "y" ]] || [[ "$default_value" == "Y" ]]; then
-            eval "$var_name='true'"
+            # Use declare instead of eval for safer variable assignment (Issue #4)
+            declare -g "$var_name=true"
         else
-            eval "$var_name='false'"
+            declare -g "$var_name=false"
         fi
         log "Non-interactive: $prompt_text = $default_value"
         return 0
@@ -169,8 +215,8 @@ prompt_yes_no() {
         read -r response
         response="${response:-$default_value}"
         case "$response" in
-            [Yy]* ) eval "$var_name='true'"; break;;
-            [Nn]* ) eval "$var_name='false'"; break;;
+            [Yy]* ) declare -g "$var_name=true"; break;;
+            [Nn]* ) declare -g "$var_name=false"; break;;
             * ) echo "Please answer yes or no.";;
         esac
     done
@@ -396,10 +442,8 @@ restore_backup() {
     if [[ -d "${backup_path}/containerdata_ztpbootstrap" ]]; then
         log "Restoring service directory..."
         if [[ $EUID -eq 0 ]]; then
-            # Remove existing directory if it exists
-            if [[ -d "/opt/containerdata/ztpbootstrap" ]]; then
-                rm -rf "/opt/containerdata/ztpbootstrap" 2>/dev/null || true
-            fi
+            # Remove existing directory if it exists (Issue #18 - using safe removal)
+            safe_remove_directory "/opt/containerdata/ztpbootstrap" false
             # Restore from backup
             if cp -r "${backup_path}/containerdata_ztpbootstrap" "/opt/containerdata/ztpbootstrap" 2>/dev/null; then
                 log "✓ Restored service directory"
@@ -408,10 +452,8 @@ restore_backup() {
                 return 1
             fi
         else
-            # Remove existing directory if it exists
-            if [[ -d "/opt/containerdata/ztpbootstrap" ]]; then
-                sudo rm -rf "/opt/containerdata/ztpbootstrap" 2>/dev/null || true
-            fi
+            # Remove existing directory if it exists (Issue #18 - using safe removal)
+            safe_remove_directory "/opt/containerdata/ztpbootstrap" true
             # Restore from backup
             if sudo cp -r "${backup_path}/containerdata_ztpbootstrap" "/opt/containerdata/ztpbootstrap" 2>/dev/null; then
                 log "✓ Restored service directory"
@@ -428,10 +470,8 @@ restore_backup() {
     if [[ -d "${backup_path}/etc_containers_systemd_ztpbootstrap" ]]; then
         log "Restoring systemd directory..."
         if [[ $EUID -eq 0 ]]; then
-            # Remove existing directory if it exists
-            if [[ -d "/etc/containers/systemd/ztpbootstrap" ]]; then
-                rm -rf "/etc/containers/systemd/ztpbootstrap" 2>/dev/null || true
-            fi
+            # Remove existing directory if it exists (Issue #18 - using safe removal)
+            safe_remove_directory "/etc/containers/systemd/ztpbootstrap" false
             # Create parent directory
             mkdir -p "/etc/containers/systemd" 2>/dev/null || true
             # Restore from backup
@@ -442,10 +482,8 @@ restore_backup() {
                 return 1
             fi
         else
-            # Remove existing directory if it exists
-            if [[ -d "/etc/containers/systemd/ztpbootstrap" ]]; then
-                sudo rm -rf "/etc/containers/systemd/ztpbootstrap" 2>/dev/null || true
-            fi
+            # Remove existing directory if it exists (Issue #18 - using safe removal)
+            safe_remove_directory "/etc/containers/systemd/ztpbootstrap" true
             # Create parent directory
             sudo mkdir -p "/etc/containers/systemd" 2>/dev/null || true
             # Restore from backup

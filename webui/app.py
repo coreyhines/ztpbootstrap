@@ -24,6 +24,18 @@ from werkzeug.security import check_password_hash, generate_password_hash
 # Debug flag - set via environment variable
 DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
 
+# Import security and utility modules
+try:
+    from config_manager import ConfigManager
+    from dhcp_validation import validate_dhcp_config
+    from rate_limiter import rate_limiter
+except ImportError as e:
+    print(f"Warning: Security/utility modules not available: {e}", flush=True)
+    # Create fallback if needed
+    rate_limiter = None
+    ConfigManager = None
+    validate_dhcp_config = None
+
 # Import DHCP modules
 try:
     from dhcp_config import generate_kea_config
@@ -152,6 +164,9 @@ if not NGINX_ACCESS_LOG.exists():
 if not NGINX_ERROR_LOG.exists():
     NGINX_ERROR_LOG = CONFIG_DIR / "logs" / "ztpbootstrap_error.log"
 
+# Initialize ConfigManager for thread-safe config updates (Issue #1)
+config_manager = ConfigManager(CONFIG_FILE) if ConfigManager else None
+
 # ============================================================================
 # Security Event Logging Configuration
 # ============================================================================
@@ -242,9 +257,20 @@ def load_auth_config():
         # Hash the plain text password from environment
         config["admin_password_hash"] = generate_password_hash(env_password)
 
-    # Generate session secret if not provided
+    # Generate session secret if not provided and persist it (Issue #8)
     if not config["session_secret"]:
         config["session_secret"] = secrets.token_hex(32)
+        # Persist the generated session secret to config file
+        try:
+            if config_manager and CONFIG_FILE.exists():
+                # Only update the auth section's session_secret
+                current_config = config_manager.read_config()
+                if "auth" not in current_config:
+                    current_config["auth"] = {}
+                current_config["auth"]["session_secret"] = config["session_secret"]
+                config_manager.write_config(current_config)
+        except Exception as e:
+            print(f"Warning: Failed to persist session secret: {e}")
 
     return config
 
@@ -659,12 +685,17 @@ def auth_change_password():
                 401,
             )
 
-        # Generate new password hash
-        # Try werkzeug first, fall back to hashlib if not available
+        # Generate new password hash using Werkzeug (secure with random salt)
+        # This migrates legacy passwords to secure format (Issue #2)
         try:
             new_password_hash = generate_password_hash(new_password)
+            # Log migration if old password was legacy format
+            if password_hash and password_hash.startswith("pbkdf2:sha256:") and "$" not in password_hash:
+                security_logger.info(f"IP={request.remote_addr} | event=password_migration | outcome=success | details=Migrated from legacy hardcoded-salt format to Werkzeug format")
         except (ImportError, NameError):
             # Fallback to hashlib format (same as setup script)
+            # WARNING: This uses hardcoded salt and should be migrated (Issue #2)
+            security_logger.warning(f"IP={request.remote_addr} | event=password_change | outcome=warning | details=Using legacy password format with hardcoded salt")
             import base64
             import hashlib
 
@@ -2742,17 +2773,20 @@ def mark_logs():
                 except Exception as e:
                     errors.append(f"Failed to write MARK to access log: {str(e)}")
             else:
-                # Try to write via podman exec
+                # Try to write via podman exec using safer approach (Issue #3)
+                # Use tee instead of shell echo to avoid command injection
                 try:
                     result = subprocess.run(
                         [
                             "podman",
                             "exec",
+                            "-i",
                             "ztpbootstrap-nginx",
-                            "sh",
-                            "-c",
-                            f'echo "{mark_line.strip()}" >> /var/log/nginx/ztpbootstrap_access.log',
+                            "tee",
+                            "-a",
+                            "/var/log/nginx/ztpbootstrap_access.log",
                         ],
+                        input=mark_line,
                         capture_output=True,
                         text=True,
                         timeout=5,
@@ -2771,17 +2805,20 @@ def mark_logs():
                 except Exception as e:
                     errors.append(f"Failed to write MARK to error log: {str(e)}")
             else:
-                # Try to write via podman exec
+                # Try to write via podman exec using safer approach (Issue #3)
+                # Use tee instead of shell echo to avoid command injection
                 try:
                     result = subprocess.run(
                         [
                             "podman",
                             "exec",
+                            "-i",
                             "ztpbootstrap-nginx",
-                            "sh",
-                            "-c",
-                            f'echo "{mark_line.strip()}" >> /var/log/nginx/ztpbootstrap_error.log',
+                            "tee",
+                            "-a",
+                            "/var/log/nginx/ztpbootstrap_error.log",
                         ],
+                        input=mark_line,
                         capture_output=True,
                         text=True,
                         timeout=5,
@@ -2863,25 +2900,45 @@ def get_dhcp_config():
 @app.route("/api/dhcp/config", methods=["PUT"])
 @require_auth
 def update_dhcp_config():
-    """Update DHCP configuration"""
+    """Update DHCP configuration (Issue #1, #5, #7 fixed)"""
     try:
         data = request.get_json()
         if not data or "dhcp" not in data:
             return jsonify({"error": "Invalid request: dhcp config required"}), 400
 
-        # Load current config
-        if CONFIG_FILE.exists():
-            with open(CONFIG_FILE, "r") as f:
-                config = yaml.safe_load(f)
+        client_ip = request.remote_addr
+        
+        # Validate DHCP configuration (Issue #5, #7)
+        if validate_dhcp_config:
+            is_valid, error_msg = validate_dhcp_config(data["dhcp"])
+            if not is_valid:
+                log_security_event("dhcp_config_update", "failure", client_ip, f"validation_error={error_msg}")
+                return jsonify({"error": f"Invalid DHCP configuration: {error_msg}"}), 400
+
+        # Use ConfigManager for thread-safe update (Issue #1)
+        if config_manager:
+            success, error_msg = config_manager.update_section("dhcp", data["dhcp"])
+            if not success:
+                log_security_event("dhcp_config_update", "failure", client_ip, f"update_error={error_msg}")
+                return jsonify({"error": f"Failed to update configuration: {error_msg}"}), 500
+            
+            # Read back the updated config
+            config = config_manager.read_config()
         else:
-            config = {}
+            # Fallback to old method if ConfigManager not available
+            if CONFIG_FILE.exists():
+                with open(CONFIG_FILE, "r") as f:
+                    config = yaml.safe_load(f)
+            else:
+                config = {}
+            
+            config["dhcp"] = data["dhcp"]
+            
+            with open(CONFIG_FILE, "w") as f:
+                yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
-        # Update DHCP section
-        config["dhcp"] = data["dhcp"]
-
-        # Write back to file
-        with open(CONFIG_FILE, "w") as f:
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        # Log successful update
+        log_security_event("dhcp_config_update", "success", client_ip, "config_updated")
 
         # Generate Kea config files if DHCP is enabled
         if config.get("dhcp", {}).get("enabled", False):
@@ -2920,6 +2977,7 @@ def update_dhcp_config():
 
         return jsonify({"success": True, "dhcp": config.get("dhcp", {})})
     except Exception as e:
+        log_security_event("dhcp_config_update", "failure", request.remote_addr, f"exception={str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -3012,28 +3070,53 @@ def get_dhcp_status():
 @app.route("/api/dhcp/enable", methods=["POST"])
 @require_auth
 def enable_dhcp():
-    """Enable DHCP (creates container if needed)"""
+    """Enable DHCP (creates container if needed) (Issue #1, #9 fixed)"""
+    # Rate limiting: max 5 calls per minute (Issue #9)
+    if rate_limiter:
+        is_allowed, info = rate_limiter.check_rate_limit(max_calls=5, window=60)
+        if not is_allowed:
+            return jsonify({
+                "error": "Rate limit exceeded. Please try again later.",
+                "code": "RATE_LIMIT_EXCEEDED",
+                "retry_after": info.get("retry_after", 60)
+            }), 429
+    
     try:
+        client_ip = request.remote_addr
+        
         # Check for port conflicts (warning only, don't block)
         # In VM environments (like QEMU), other DHCP servers may be running
         # We'll attempt to start Kea anyway - it will fail with a clear error if it can't bind
         port_conflicts = check_dhcp_port_conflicts()
 
-        # Load config
-        if not CONFIG_FILE.exists():
-            return jsonify({"error": "Config file not found"}), 404
+        # Load and update config using ConfigManager (Issue #1)
+        if config_manager:
+            config = config_manager.read_config()
+            if "dhcp" not in config:
+                config["dhcp"] = {}
+            config["dhcp"]["enabled"] = True
+            
+            # Update just the dhcp section atomically
+            success, error_msg = config_manager.update_section("dhcp", config["dhcp"])
+            if not success:
+                log_security_event("dhcp_enable", "failure", client_ip, f"config_update_error={error_msg}")
+                return jsonify({"error": f"Failed to update configuration: {error_msg}"}), 500
+        else:
+            # Fallback to old method
+            if not CONFIG_FILE.exists():
+                return jsonify({"error": "Config file not found"}), 404
 
-        with open(CONFIG_FILE, "r") as f:
-            config = yaml.safe_load(f)
+            with open(CONFIG_FILE, "r") as f:
+                config = yaml.safe_load(f)
 
-        # Enable DHCP in config
-        if "dhcp" not in config:
-            config["dhcp"] = {}
-        config["dhcp"]["enabled"] = True
+            # Enable DHCP in config
+            if "dhcp" not in config:
+                config["dhcp"] = {}
+            config["dhcp"]["enabled"] = True
 
-        # Write config
-        with open(CONFIG_FILE, "w") as f:
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+            # Write config
+            with open(CONFIG_FILE, "w") as f:
+                yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
         # Generate Kea config
         kea_config = generate_kea_config(config)
@@ -3070,6 +3153,9 @@ def enable_dhcp():
 
         networking_mode = detect_networking_mode(config)
 
+        # Log successful DHCP enable (Issue #10)
+        log_security_event("dhcp_enable", "success", client_ip, "dhcp_container_started")
+
         return jsonify(
             {
                 "success": True,
@@ -3078,23 +3164,46 @@ def enable_dhcp():
             }
         )
     except Exception as e:
+        log_security_event("dhcp_enable", "failure", request.remote_addr, f"exception={str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/dhcp/disable", methods=["POST"])
 @require_auth
 def disable_dhcp():
-    """Disable DHCP"""
+    """Disable DHCP (Issue #1, #9, #10 fixed)"""
+    # Rate limiting: max 5 calls per minute (Issue #9)
+    if rate_limiter:
+        is_allowed, info = rate_limiter.check_rate_limit(max_calls=5, window=60)
+        if not is_allowed:
+            return jsonify({
+                "error": "Rate limit exceeded. Please try again later.",
+                "code": "RATE_LIMIT_EXCEEDED",
+                "retry_after": info.get("retry_after", 60)
+            }), 429
+    
     try:
-        # Load config
-        if CONFIG_FILE.exists():
-            with open(CONFIG_FILE, "r") as f:
-                config = yaml.safe_load(f)
-            config["dhcp"]["enabled"] = False
+        client_ip = request.remote_addr
+        
+        # Load and update config using ConfigManager (Issue #1)
+        if config_manager:
+            config = config_manager.read_config()
+            if "dhcp" in config:
+                config["dhcp"]["enabled"] = False
+                success, error_msg = config_manager.update_section("dhcp", config["dhcp"])
+                if not success:
+                    log_security_event("dhcp_disable", "failure", client_ip, f"config_update_error={error_msg}")
+                    return jsonify({"error": f"Failed to update configuration: {error_msg}"}), 500
+        else:
+            # Fallback to old method
+            if CONFIG_FILE.exists():
+                with open(CONFIG_FILE, "r") as f:
+                    config = yaml.safe_load(f)
+                config["dhcp"]["enabled"] = False
 
-            # Write config
-            with open(CONFIG_FILE, "w") as f:
-                yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+                # Write config
+                with open(CONFIG_FILE, "w") as f:
+                    yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
         # Stop container
         stop_dhcp_container()
@@ -3102,8 +3211,12 @@ def disable_dhcp():
         # Optionally remove container (or leave it for future use)
         # remove_dhcp_container()
 
+        # Log successful DHCP disable (Issue #10)
+        log_security_event("dhcp_disable", "success", client_ip, "dhcp_container_stopped")
+
         return jsonify({"success": True})
     except Exception as e:
+        log_security_event("dhcp_disable", "failure", request.remote_addr, f"exception={str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
