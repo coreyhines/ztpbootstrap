@@ -685,12 +685,17 @@ def auth_change_password():
                 401,
             )
 
-        # Generate new password hash
-        # Try werkzeug first, fall back to hashlib if not available
+        # Generate new password hash using Werkzeug (secure with random salt)
+        # This migrates legacy passwords to secure format (Issue #2)
         try:
             new_password_hash = generate_password_hash(new_password)
+            # Log migration if old password was legacy format
+            if password_hash and password_hash.startswith("pbkdf2:sha256:") and "$" not in password_hash:
+                security_logger.info(f"IP={request.remote_addr} | event=password_migration | outcome=success | details=Migrated from legacy hardcoded-salt format to Werkzeug format")
         except (ImportError, NameError):
             # Fallback to hashlib format (same as setup script)
+            # WARNING: This uses hardcoded salt and should be migrated (Issue #2)
+            security_logger.warning(f"IP={request.remote_addr} | event=password_change | outcome=warning | details=Using legacy password format with hardcoded salt")
             import base64
             import hashlib
 
@@ -2768,17 +2773,20 @@ def mark_logs():
                 except Exception as e:
                     errors.append(f"Failed to write MARK to access log: {str(e)}")
             else:
-                # Try to write via podman exec
+                # Try to write via podman exec using safer approach (Issue #3)
+                # Use tee instead of shell echo to avoid command injection
                 try:
                     result = subprocess.run(
                         [
                             "podman",
                             "exec",
+                            "-i",
                             "ztpbootstrap-nginx",
-                            "sh",
-                            "-c",
-                            f'echo "{mark_line.strip()}" >> /var/log/nginx/ztpbootstrap_access.log',
+                            "tee",
+                            "-a",
+                            "/var/log/nginx/ztpbootstrap_access.log",
                         ],
+                        input=mark_line,
                         capture_output=True,
                         text=True,
                         timeout=5,
@@ -2797,17 +2805,20 @@ def mark_logs():
                 except Exception as e:
                     errors.append(f"Failed to write MARK to error log: {str(e)}")
             else:
-                # Try to write via podman exec
+                # Try to write via podman exec using safer approach (Issue #3)
+                # Use tee instead of shell echo to avoid command injection
                 try:
                     result = subprocess.run(
                         [
                             "podman",
                             "exec",
+                            "-i",
                             "ztpbootstrap-nginx",
-                            "sh",
-                            "-c",
-                            f'echo "{mark_line.strip()}" >> /var/log/nginx/ztpbootstrap_error.log',
+                            "tee",
+                            "-a",
+                            "/var/log/nginx/ztpbootstrap_error.log",
                         ],
+                        input=mark_line,
                         capture_output=True,
                         text=True,
                         timeout=5,
