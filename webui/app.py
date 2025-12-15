@@ -175,6 +175,8 @@ config_manager = ConfigManager(CONFIG_FILE) if ConfigManager else None
 security_logger = logging.getLogger("security")
 security_logger.setLevel(logging.INFO)
 
+logger = logging.getLogger(__name__)
+
 # Create logs directory if it doesn't exist
 SECURITY_LOG_DIR = CONFIG_DIR / "logs"
 SECURITY_LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -690,12 +692,20 @@ def auth_change_password():
         try:
             new_password_hash = generate_password_hash(new_password)
             # Log migration if old password was legacy format
-            if password_hash and password_hash.startswith("pbkdf2:sha256:") and "$" not in password_hash:
-                security_logger.info(f"IP={request.remote_addr} | event=password_migration | outcome=success | details=Migrated from legacy hardcoded-salt format to Werkzeug format")
+            if (
+                password_hash
+                and password_hash.startswith("pbkdf2:sha256:")
+                and "$" not in password_hash
+            ):
+                security_logger.info(
+                    f"IP={request.remote_addr} | event=password_migration | outcome=success | details=Migrated from legacy hardcoded-salt format to Werkzeug format"
+                )
         except (ImportError, NameError):
             # Fallback to hashlib format (same as setup script)
             # WARNING: This uses hardcoded salt and should be migrated (Issue #2)
-            security_logger.warning(f"IP={request.remote_addr} | event=password_change | outcome=warning | details=Using legacy password format with hardcoded salt")
+            security_logger.warning(
+                f"IP={request.remote_addr} | event=password_change | outcome=warning | details=Using legacy password format with hardcoded salt"
+            )
             import base64
             import hashlib
 
@@ -2907,21 +2917,25 @@ def update_dhcp_config():
             return jsonify({"error": "Invalid request: dhcp config required"}), 400
 
         client_ip = request.remote_addr
-        
+
         # Validate DHCP configuration (Issue #5, #7)
         if validate_dhcp_config:
             is_valid, error_msg = validate_dhcp_config(data["dhcp"])
             if not is_valid:
-                log_security_event("dhcp_config_update", "failure", client_ip, f"validation_error={error_msg}")
+                log_security_event(
+                    "dhcp_config_update", "failure", client_ip, f"validation_error={error_msg}"
+                )
                 return jsonify({"error": f"Invalid DHCP configuration: {error_msg}"}), 400
 
         # Use ConfigManager for thread-safe update (Issue #1)
         if config_manager:
             success, error_msg = config_manager.update_section("dhcp", data["dhcp"])
             if not success:
-                log_security_event("dhcp_config_update", "failure", client_ip, f"update_error={error_msg}")
+                log_security_event(
+                    "dhcp_config_update", "failure", client_ip, f"update_error={error_msg}"
+                )
                 return jsonify({"error": f"Failed to update configuration: {error_msg}"}), 500
-            
+
             # Read back the updated config
             config = config_manager.read_config()
         else:
@@ -2931,9 +2945,9 @@ def update_dhcp_config():
                     config = yaml.safe_load(f)
             else:
                 config = {}
-            
+
             config["dhcp"] = data["dhcp"]
-            
+
             with open(CONFIG_FILE, "w") as f:
                 yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
@@ -2950,9 +2964,19 @@ def update_dhcp_config():
 
                 if "Dhcp4" in kea_config:
                     dhcp4_file = dhcp_config_dir / "kea-dhcp4.conf"
-                    with open(dhcp4_file, "w") as f:
-                        # Kea expects the config wrapped in a top-level "Dhcp4" key
-                        json.dump({"Dhcp4": kea_config["Dhcp4"]}, f, indent=2)
+                    # Validate JSON before writing
+                    try:
+                        config_json = {"Dhcp4": kea_config["Dhcp4"]}
+                        # Test JSON serialization
+                        json_str = json.dumps(config_json, indent=2)
+                        # Validate it can be parsed back
+                        json.loads(json_str)
+                        # Write the validated JSON
+                        with open(dhcp4_file, "w") as f:
+                            f.write(json_str)
+                    except (TypeError, ValueError) as e:
+                        logger.error(f"Invalid JSON in DHCP4 config: {e}")
+                        raise
 
                 if "Dhcp6" in kea_config:
                     dhcp6_file = dhcp_config_dir / "kea-dhcp6.conf"
@@ -2977,7 +3001,9 @@ def update_dhcp_config():
 
         return jsonify({"success": True, "dhcp": config.get("dhcp", {})})
     except Exception as e:
-        log_security_event("dhcp_config_update", "failure", request.remote_addr, f"exception={str(e)}")
+        log_security_event(
+            "dhcp_config_update", "failure", request.remote_addr, f"exception={str(e)}"
+        )
         return jsonify({"error": str(e)}), 500
 
 
@@ -3075,15 +3101,20 @@ def enable_dhcp():
     if rate_limiter:
         is_allowed, info = rate_limiter.check_rate_limit(max_calls=5, window=60)
         if not is_allowed:
-            return jsonify({
-                "error": "Rate limit exceeded. Please try again later.",
-                "code": "RATE_LIMIT_EXCEEDED",
-                "retry_after": info.get("retry_after", 60)
-            }), 429
-    
+            return (
+                jsonify(
+                    {
+                        "error": "Rate limit exceeded. Please try again later.",
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "retry_after": info.get("retry_after", 60),
+                    }
+                ),
+                429,
+            )
+
     try:
         client_ip = request.remote_addr
-        
+
         # Check for port conflicts (warning only, don't block)
         # In VM environments (like QEMU), other DHCP servers may be running
         # We'll attempt to start Kea anyway - it will fail with a clear error if it can't bind
@@ -3095,11 +3126,13 @@ def enable_dhcp():
             if "dhcp" not in config:
                 config["dhcp"] = {}
             config["dhcp"]["enabled"] = True
-            
+
             # Update just the dhcp section atomically
             success, error_msg = config_manager.update_section("dhcp", config["dhcp"])
             if not success:
-                log_security_event("dhcp_enable", "failure", client_ip, f"config_update_error={error_msg}")
+                log_security_event(
+                    "dhcp_enable", "failure", client_ip, f"config_update_error={error_msg}"
+                )
                 return jsonify({"error": f"Failed to update configuration: {error_msg}"}), 500
         else:
             # Fallback to old method
@@ -3125,9 +3158,19 @@ def enable_dhcp():
 
         if "Dhcp4" in kea_config:
             dhcp4_file = dhcp_config_dir / "kea-dhcp4.conf"
-            with open(dhcp4_file, "w") as f:
-                # Kea expects the config wrapped in a top-level "Dhcp4" key
-                json.dump({"Dhcp4": kea_config["Dhcp4"]}, f, indent=2)
+            # Validate JSON before writing
+            try:
+                config_json = {"Dhcp4": kea_config["Dhcp4"]}
+                # Test JSON serialization
+                json_str = json.dumps(config_json, indent=2)
+                # Validate it can be parsed back
+                json.loads(json_str)
+                # Write the validated JSON
+                with open(dhcp4_file, "w") as f:
+                    f.write(json_str)
+            except (TypeError, ValueError) as e:
+                logger.error(f"Invalid JSON in DHCP4 config: {e}")
+                raise
 
         if "Dhcp6" in kea_config:
             dhcp6_file = dhcp_config_dir / "kea-dhcp6.conf"
@@ -3144,12 +3187,76 @@ def enable_dhcp():
         # Create container if needed
         container_status = check_dhcp_container_status()
         if not container_status["exists"]:
+            logger.info("Container file does not exist, creating it...")
             if not create_dhcp_container():
-                return jsonify({"error": "Failed to create DHCP container"}), 500
+                logger.error("Failed to create DHCP container file")
+                return (
+                    jsonify(
+                        {
+                            "error": "Failed to create DHCP container file. Check logs for details. The container file may need to be manually copied to /etc/containers/systemd/ztpbootstrap/ztpbootstrap-dhcp.container"
+                        }
+                    ),
+                    500,
+                )
 
         # Start container
+        logger.info("Starting DHCP container...")
         if not start_dhcp_container():
-            return jsonify({"error": "Failed to start DHCP container"}), 500
+            logger.error("Failed to start DHCP container")
+            # Check if container is actually running despite the failure
+            final_status = check_dhcp_container_status()
+            if final_status.get("container_running", False):
+                logger.info("Container is running despite start_dhcp_container returning False")
+                # Container is running, so return success
+                networking_mode = detect_networking_mode(config)
+                return jsonify(
+                    {
+                        "success": True,
+                        "networking_mode": networking_mode,
+                        "port_conflicts": port_conflicts,
+                        "warning": "Container started but systemctl commands may have failed. Container is running.",
+                    }
+                )
+
+            # Container file was created but we couldn't start it automatically
+            # Check if file exists in temp location (might not be in systemd directory)
+            from dhcp_deploy import TEMP_DHCP_CONTAINER_FILE
+
+            temp_file_exists = TEMP_DHCP_CONTAINER_FILE.exists()
+
+            if temp_file_exists:
+                # File exists in temp location but needs to be copied to systemd directory
+                networking_mode = detect_networking_mode(config)
+                return jsonify(
+                    {
+                        "success": True,
+                        "networking_mode": networking_mode,
+                        "port_conflicts": port_conflicts,
+                        "warning": f"DHCP container file created in temp location, but could not be copied to systemd directory automatically. Please run: sudo cp {TEMP_DHCP_CONTAINER_FILE} /etc/containers/systemd/ztpbootstrap/ztpbootstrap-dhcp.container && sudo systemctl daemon-reload && sudo systemctl start ztpbootstrap-dhcp.service",
+                        "manual_start_required": True,
+                        "temp_file_location": str(TEMP_DHCP_CONTAINER_FILE),
+                    }
+                )
+            else:
+                # File should be in systemd directory but we can't start it
+                networking_mode = detect_networking_mode(config)
+                return jsonify(
+                    {
+                        "success": True,
+                        "networking_mode": networking_mode,
+                        "port_conflicts": port_conflicts,
+                        "warning": "DHCP container file created successfully, but automatic start failed due to Podman socket permission issues. Please run 'sudo systemctl daemon-reload && sudo systemctl start ztpbootstrap-dhcp.service' on the host to start the service manually.",
+                        "manual_start_required": True,
+                    }
+                )
+
+            # Container file doesn't exist and we couldn't start - this is a real error
+            return (
+                jsonify(
+                    {"error": "Failed to create and start DHCP container. Check logs for details."}
+                ),
+                500,
+            )
 
         networking_mode = detect_networking_mode(config)
 
@@ -3176,15 +3283,20 @@ def disable_dhcp():
     if rate_limiter:
         is_allowed, info = rate_limiter.check_rate_limit(max_calls=5, window=60)
         if not is_allowed:
-            return jsonify({
-                "error": "Rate limit exceeded. Please try again later.",
-                "code": "RATE_LIMIT_EXCEEDED",
-                "retry_after": info.get("retry_after", 60)
-            }), 429
-    
+            return (
+                jsonify(
+                    {
+                        "error": "Rate limit exceeded. Please try again later.",
+                        "code": "RATE_LIMIT_EXCEEDED",
+                        "retry_after": info.get("retry_after", 60),
+                    }
+                ),
+                429,
+            )
+
     try:
         client_ip = request.remote_addr
-        
+
         # Load and update config using ConfigManager (Issue #1)
         if config_manager:
             config = config_manager.read_config()
@@ -3192,7 +3304,9 @@ def disable_dhcp():
                 config["dhcp"]["enabled"] = False
                 success, error_msg = config_manager.update_section("dhcp", config["dhcp"])
                 if not success:
-                    log_security_event("dhcp_disable", "failure", client_ip, f"config_update_error={error_msg}")
+                    log_security_event(
+                        "dhcp_disable", "failure", client_ip, f"config_update_error={error_msg}"
+                    )
                     return jsonify({"error": f"Failed to update configuration: {error_msg}"}), 500
         else:
             # Fallback to old method
@@ -3205,8 +3319,26 @@ def disable_dhcp():
                 with open(CONFIG_FILE, "w") as f:
                     yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
-        # Stop container
-        stop_dhcp_container()
+        # Stop container and verify it stopped
+        stop_success = stop_dhcp_container()
+
+        # Verify container is actually stopped
+        container_status = check_dhcp_container_status()
+        container_still_running = container_status.get(
+            "container_running", False
+        ) or container_status.get("service_active", False)
+
+        if not stop_success or container_still_running:
+            logger.warning("Failed to stop DHCP container or container still running")
+            # Config is updated, but container didn't stop
+            # Return success with warning so UI doesn't revert, but include status
+            return jsonify(
+                {
+                    "success": True,
+                    "warning": "DHCP has been disabled in configuration, but the container may still be running. Please check the status.",
+                    "container_status": container_status,
+                }
+            )
 
         # Optionally remove container (or leave it for future use)
         # remove_dhcp_container()

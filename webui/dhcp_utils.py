@@ -5,6 +5,7 @@ Network detection, validation, and helper functions for DHCP configuration
 """
 
 import ipaddress
+import json
 import logging
 import re
 import socket
@@ -522,8 +523,118 @@ def get_interfaces_for_kea(networking_mode: str, subnet: Optional[str] = None) -
         List of interface names
     """
     if networking_mode == "host":
+        # When using host networking, try to detect macvlan interface
+        # for DHCP isolation while keeping web UI accessible
+        macvlan_interface = detect_macvlan_interface(subnet)
+        if macvlan_interface:
+            # Bind to macvlan interface for DHCP isolation
+            return [macvlan_interface]
+        # Fallback to detecting all host interfaces
         return detect_host_interfaces(subnet)
     else:
         # For macvlan, Kea will bind to the pod's network interface
         # Return empty list to let Kea use default (all interfaces)
         return []
+
+
+def detect_macvlan_interface(subnet: Optional[str] = None) -> Optional[str]:
+    """
+    Detect macvlan interface for DHCP isolation when using host networking.
+
+    Args:
+        subnet: Optional subnet to match against
+
+    Returns:
+        Interface name if found, None otherwise
+    """
+    try:
+        # Find ip command
+        ip_cmd = None
+        for ip_path in ["/usr/sbin/ip", "/sbin/ip", "ip"]:
+            try:
+                test_result = subprocess.run(
+                    [ip_path, "--version"],
+                    capture_output=True,
+                    timeout=1,
+                )
+                if test_result.returncode == 0:
+                    ip_cmd = ip_path
+                    break
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                continue
+
+        if not ip_cmd:
+            return None
+
+        # Check if ztpbootstrap-net exists and get its subnet
+        try:
+            result = subprocess.run(
+                ["podman", "network", "inspect", "ztpbootstrap-net"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if result.returncode == 0:
+                network_info = json.loads(result.stdout)
+                if network_info:
+                    # Extract subnet from network config
+                    network_config = network_info[0].get("subnets", [])
+                    if network_config:
+                        network_subnet = network_config[0].get("subnet", "")
+                        if network_subnet:
+                            # Find interface with IP in this subnet
+                            addr_result = subprocess.run(
+                                [ip_cmd, "addr", "show"],
+                                capture_output=True,
+                                text=True,
+                                timeout=2,
+                            )
+                            if addr_result.returncode == 0:
+                                current_interface = None
+                                for line in addr_result.stdout.split("\n"):
+                                    # Interface line: "2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP>"
+                                    if_match = re.match(r"^\d+:\s+(\S+):", line)
+                                    if if_match:
+                                        current_interface = if_match.group(1)
+                                    # IP line: "    inet 172.16.0.10/24 ..."
+                                    elif current_interface and "inet" in line:
+                                        ip_match = re.search(r"inet\s+(\S+)", line)
+                                        if ip_match:
+                                            ip_str = ip_match.group(1).split("/")[0]
+                                            try:
+                                                import ipaddress
+
+                                                ip = ipaddress.ip_address(ip_str)
+                                                network = ipaddress.ip_network(
+                                                    network_subnet, strict=False
+                                                )
+                                                if ip in network:
+                                                    # Found interface with IP in macvlan subnet
+                                                    return current_interface
+                                            except (ValueError, AttributeError):
+                                                continue
+        except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
+            pass
+
+        # Fallback: look for interfaces with "macvlan" in name or type
+        link_result = subprocess.run(
+            [ip_cmd, "link", "show"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        if link_result.returncode == 0:
+            for line in link_result.stdout.split("\n"):
+                # Look for macvlan interfaces
+                if "macvlan" in line.lower() or "@" in line:
+                    match = re.match(r"^\d+:\s+(\S+):", line)
+                    if match:
+                        iface = match.group(1)
+                        # Skip veth pairs (they're container interfaces)
+                        if not iface.startswith("veth") and iface != "lo":
+                            return iface
+
+    except Exception as e:
+        logger.debug(f"Failed to detect macvlan interface: {e}")
+
+    return None

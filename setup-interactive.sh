@@ -54,31 +54,31 @@ error() {
 safe_remove_directory() {
     local dir="$1"
     local use_sudo="${2:-false}"
-    
+
     # Path must not be empty
     if [[ -z "$dir" ]]; then
         error "Cannot remove empty path"
         return 1
     fi
-    
+
     # Path must not be /
     if [[ "$dir" == "/" ]]; then
         error "Cannot remove root directory"
         return 1
     fi
-    
+
     # Path must be under /opt or /etc (whitelist approach)
     if [[ ! "$dir" =~ ^(/opt/|/etc/) ]]; then
         error "Path $dir is not in allowed locations (/opt/ or /etc/)"
         return 1
     fi
-    
+
     # Path must exist and be a directory
     if [[ ! -d "$dir" ]]; then
         # Directory doesn't exist, nothing to remove
         return 0
     fi
-    
+
     # Perform removal
     log "Safely removing directory: $dir"
     if [[ "$use_sudo" == "true" ]]; then
@@ -110,7 +110,7 @@ prompt_with_default() {
             declare -n env_ref="$var_name"
             env_value="${env_ref:-}"
         fi
-        
+
         if [[ -n "$env_value" ]]; then
             value="$env_value"
             if [[ "$is_secret" == "true" ]]; then
@@ -279,10 +279,35 @@ create_backup() {
     log "Creating backup of existing installation..."
     log "Backup location: $backup_path"
 
+    # Ensure backup base directory exists and has correct ownership
+    if [[ -d "$backup_dir" ]] && [[ ! -w "$backup_dir" ]]; then
+        # Directory exists but not writable - try to fix ownership
+        if [[ $EUID -ne 0 ]]; then
+            if sudo chown -R "$USER:$(id -gn)" "$backup_dir" 2>/dev/null; then
+                log "Fixed ownership of backup directory"
+            else
+                warn "Backup directory exists but is not writable. Attempting with sudo..."
+            fi
+        else
+            chown -R "$USER:$(id -gn)" "$backup_dir" 2>/dev/null || true
+        fi
+    fi
+
     # Create backup directory structure
     if ! mkdir -p "$backup_path" 2>/dev/null; then
-        error "Failed to create backup directory: $backup_path"
-        return 1
+        # Try with sudo if regular mkdir failed
+        if [[ $EUID -ne 0 ]]; then
+            if sudo mkdir -p "$backup_path" 2>/dev/null; then
+                sudo chown -R "$USER:$(id -gn)" "$backup_path" 2>/dev/null || true
+                log "Created backup directory with sudo"
+            else
+                error "Failed to create backup directory: $backup_path"
+                return 1
+            fi
+        else
+            error "Failed to create backup directory: $backup_path"
+            return 1
+        fi
     fi
 
     # Backup service directory
