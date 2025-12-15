@@ -36,13 +36,15 @@ jobs:
       - name: Build DHCP server container
         run: |
           cat > Dockerfile.dhcp-server << 'EOF'
-          FROM alpine:latest
+          FROM ubuntu:22.04
 
-          RUN apk add --no-cache \
-              dhcp-server-vanilla \
-              bash \
-              iproute2 \
-              tcpdump
+          RUN apt-get update && \
+              DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                isc-dhcp-server \
+                bash \
+                iproute2 \
+                tcpdump && \
+              rm -rf /var/lib/apt/lists/*
 
           # Create dhcpd configuration
           RUN mkdir -p /var/lib/dhcp
@@ -248,13 +250,15 @@ jobs:
       - name: Build DHCPv6 server container
         run: |
           cat > Dockerfile.dhcp6-server << 'EOF'
-          FROM alpine:latest
+          FROM ubuntu:22.04
 
-          RUN apk add --no-cache \
-              dhcp-server-vanilla \
-              bash \
-              iproute2 \
-              tcpdump
+          RUN apt-get update && \
+              DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                isc-dhcp-server \
+                bash \
+                iproute2 \
+                tcpdump && \
+              rm -rf /var/lib/apt/lists/*
 
           COPY dhcpd6.conf /etc/dhcp/dhcpd6.conf
 
@@ -402,10 +406,12 @@ jobs:
             --cap-add=NET_ADMIN \
             --cap-add=NET_RAW \
             -v $(pwd)/dhcpd-relay.conf:/etc/dhcp/dhcpd.conf:ro \
-            alpine:latest sh -c \
-              "apk add --no-cache dhcp-server-vanilla && \
-               touch /var/lib/dhcp/dhcpd.leases && \
-               /usr/sbin/dhcpd -f -d -cf /etc/dhcp/dhcpd.conf"
+            ubuntu:22.04 sh -c "\
+              apt-get update && \
+              DEBIAN_FRONTEND=noninteractive apt-get install -y isc-dhcp-server && \
+              mkdir -p /var/lib/dhcp && \
+              touch /var/lib/dhcp/dhcpd.leases && \
+              /usr/sbin/dhcpd -f -d -cf /etc/dhcp/dhcpd.conf"
 
       - name: Verify relay server started
         run: |
