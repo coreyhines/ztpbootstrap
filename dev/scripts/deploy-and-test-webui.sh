@@ -59,6 +59,7 @@ ssh -o StrictHostKeyChecking=no -p "${VM_PORT}" "${VM_USER}@${VM_HOST}" "mkdir -
 FILES_TO_COPY=(
     "webui/app.py"
     "webui/templates/index.html"
+    "webui/dhcp_deploy.py"
 )
 
 for file in "${FILES_TO_COPY[@]}"; do
@@ -87,6 +88,7 @@ ssh -o StrictHostKeyChecking=no -p "${VM_PORT}" "${VM_USER}@${VM_HOST}" << 'ENDS
         sudo mkdir -p "${CONTAINER_DIR}/templates"
         sudo cp ~/ztpbootstrap/webui/app.py "${CONTAINER_DIR}/app.py" 2>/dev/null || true
         sudo cp ~/ztpbootstrap/webui/templates/index.html "${CONTAINER_DIR}/templates/index.html" 2>/dev/null || true
+        sudo cp ~/ztpbootstrap/webui/dhcp_deploy.py "${CONTAINER_DIR}/dhcp_deploy.py" 2>/dev/null || true
         echo "✓ Files copied to container directory"
     else
         echo "⚠ Container directory not found, will copy from repo on restart"

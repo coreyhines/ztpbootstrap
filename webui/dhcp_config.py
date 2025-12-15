@@ -72,15 +72,34 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         Kea DHCPv4 configuration dict
     """
     ipv4_config = dhcp_config.get("ipv4", {})
-    subnet = ipv4_config.get("subnet", "")
-    range_start = ipv4_config.get("range_start", "")
-    range_end = ipv4_config.get("range_end", "")
-    gateway = ipv4_config.get("gateway", "")
+    subnet = str(ipv4_config.get("subnet", "")).strip()
+    range_start = str(ipv4_config.get("range_start", "")).strip()
+    range_end = str(ipv4_config.get("range_end", "")).strip()
+    gateway = str(ipv4_config.get("gateway", "")).strip()
+
+    # Validate required fields
+    if not subnet or not range_start or not range_end:
+        raise ValueError("IPv4 subnet, range_start, and range_end are required")
 
     # Get interfaces for Kea to bind to
     interfaces = get_interfaces_for_kea(networking_mode, subnet)
 
     # Build interfaces-config
+    # Ensure interfaces is always a list of strings
+    if not interfaces:
+        interfaces = []
+    elif not isinstance(interfaces, list):
+        # If it's a string, convert to list
+        interfaces = [str(interfaces)] if interfaces else []
+    else:
+        # Ensure all items are strings
+        interfaces = [str(iface) for iface in interfaces if iface]
+
+    # Filter out any None, empty, or invalid values
+    interfaces = [
+        iface.strip() for iface in interfaces if iface and iface.strip() and isinstance(iface, str)
+    ]
+
     interfaces_config = {}
     if interfaces:
         interfaces_config["interfaces"] = interfaces
@@ -97,10 +116,13 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     }
 
     # Add gateway/router option
-    if gateway:
-        subnet_config["option-data"] = [{"name": "routers", "data": gateway}]
+    if gateway and gateway.strip():
+        if "option-data" not in subnet_config:
+            subnet_config["option-data"] = []
+        subnet_config["option-data"].append({"name": "routers", "data": str(gateway).strip()})
 
-    # Add DNS servers (option 6 - must be array of IP addresses)
+    # Add DNS servers (option 6)
+    # Note: Kea 3.0.2+ requires comma-separated string format, not array
     dns_servers = ipv4_config.get("dns_servers", [])
     if dns_servers:
         # Ensure dns_servers is a list
@@ -112,9 +134,9 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         if cleaned_dns:
             if "option-data" not in subnet_config:
                 subnet_config["option-data"] = []
-            # Kea expects DNS servers as an array, not a comma-separated string
+            # Kea 3.0.2+ requires comma-separated string for multi-value options
             subnet_config["option-data"].append(
-                {"name": "domain-name-servers", "data": cleaned_dns}
+                {"name": "domain-name-servers", "data": ", ".join(cleaned_dns)}
             )
 
     # Add domain name
@@ -124,7 +146,8 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
             subnet_config["option-data"] = []
         subnet_config["option-data"].append({"name": "domain-name", "data": domain})
 
-    # Add NTP servers (option 42 - must be array of IP addresses)
+    # Add NTP servers (option 42)
+    # Note: Kea 3.0.2+ requires comma-separated string format, not array
     ntp_servers = ipv4_config.get("ntp_servers", [])
     if ntp_servers:
         # Ensure ntp_servers is a list
@@ -136,8 +159,10 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         if cleaned_ntp:
             if "option-data" not in subnet_config:
                 subnet_config["option-data"] = []
-            # Kea expects NTP servers as an array
-            subnet_config["option-data"].append({"name": "ntp-servers", "data": cleaned_ntp})
+            # Kea 3.0.2+ requires comma-separated string for multi-value options
+            subnet_config["option-data"].append(
+                {"name": "ntp-servers", "data": ", ".join(cleaned_ntp)}
+            )
 
     # Handle relay mode
     relay_config = dhcp_config.get("relay", {})
@@ -217,19 +242,39 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         Kea DHCPv6 configuration dict
     """
     ipv6_config = dhcp_config.get("ipv6", {})
-    subnet = ipv6_config.get("subnet", "")
-    range_start = ipv6_config.get("range_start", "")
-    range_end = ipv6_config.get("range_end", "")
-    gateway = ipv6_config.get("gateway", "")
+    subnet = str(ipv6_config.get("subnet", "")).strip()
+    range_start = str(ipv6_config.get("range_start", "")).strip()
+    range_end = str(ipv6_config.get("range_end", "")).strip()
+    gateway = str(ipv6_config.get("gateway", "")).strip()
+
+    # Validate required fields
+    if not subnet or not range_start or not range_end:
+        raise ValueError("IPv6 subnet, range_start, and range_end are required")
 
     # Get interfaces for Kea to bind to
     interfaces = get_interfaces_for_kea(networking_mode, subnet)
 
     # Build interfaces-config
+    # Ensure interfaces is always a list of strings
+    if not interfaces:
+        interfaces = []
+    elif not isinstance(interfaces, list):
+        # If it's a string, convert to list
+        interfaces = [str(interfaces)] if interfaces else []
+    else:
+        # Ensure all items are strings
+        interfaces = [str(iface) for iface in interfaces if iface]
+
+    # Filter out any None, empty, or invalid values
+    interfaces = [
+        iface.strip() for iface in interfaces if iface and iface.strip() and isinstance(iface, str)
+    ]
+
     interfaces_config = {}
     if interfaces:
         interfaces_config["interfaces"] = interfaces
     else:
+        # If no specific interfaces, Kea will bind to all available interfaces
         interfaces_config["interfaces"] = ["*"]
 
     # Build subnet configuration
@@ -241,8 +286,10 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     }
 
     # Add gateway/router option (option 3 for IPv6)
-    if gateway:
-        subnet_config["option-data"] = [{"name": "sntp-servers", "data": gateway}]
+    if gateway and gateway.strip():
+        if "option-data" not in subnet_config:
+            subnet_config["option-data"] = []
+        subnet_config["option-data"].append({"name": "sntp-servers", "data": str(gateway).strip()})
 
     # Add DNS servers (option 23 - must be array of IP addresses)
     dns_servers = ipv6_config.get("dns_servers", [])
@@ -277,9 +324,14 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     backend_config = dhcp_config.get("backend", {})
     backend_type = backend_config.get("type", "memfile")
 
+    # Generate lease database with correct filename for IPv6
+    lease_db = generate_lease_database(backend_config)
+    if lease_db.get("type") == "memfile":
+        lease_db["name"] = "/var/lib/kea/dhcp6.leases"  # Use dhcp6.leases for IPv6
+
     config = {
         "interfaces-config": interfaces_config,
-        "lease-database": generate_lease_database(backend_config),
+        "lease-database": lease_db,
         "subnet6": [subnet_config],
         "valid-lifetime": 86400,  # 24 hours default
         "renew-timer": 43200,  # 12 hours

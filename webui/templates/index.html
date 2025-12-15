@@ -189,7 +189,7 @@
             <div x-show="activeApplication === 'dhcp'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
                 <!-- DHCP Service Status -->
                 <div class="bg-white rounded-lg shadow-sm p-4 border-l-4 relative"
-                     :class="(dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'border-green-500' : (dhcpStatus.enabled ? 'border-yellow-500' : 'border-gray-300')">
+                     :class="!dhcpStatus.enabled ? 'border-gray-300' : (dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'border-green-500' : 'border-yellow-500'">
                     <!-- Toggle in upper right corner -->
                     <div class="absolute top-3 right-3">
                         <label class="relative inline-flex items-center cursor-pointer">
@@ -200,11 +200,11 @@
                     <!-- Main content with status icon -->
                     <div class="flex items-center pr-16">
                         <div class="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 mr-3"
-                             :class="(dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'bg-green-100' : (dhcpStatus.enabled ? 'bg-yellow-100' : 'bg-gray-100')">
-                            <svg x-show="dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active" class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                             :class="!dhcpStatus.enabled ? 'bg-gray-100' : (dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'bg-green-100' : 'bg-yellow-100'">
+                            <svg x-show="dhcpStatus.enabled && dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active" class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                             </svg>
-                            <svg x-show="dhcpStatus.enabled && (!dhcpStatus.container || !dhcpStatus.container.container_running)" class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg x-show="dhcpStatus.enabled && (!dhcpStatus.container || !dhcpStatus.container.container_running || !dhcpStatus.container.service_active)" class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
                             </svg>
                             <svg x-show="!dhcpStatus.enabled" class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -214,8 +214,8 @@
                         <div class="flex-1">
                             <p class="text-xs font-medium text-gray-600 mb-0.5">Service Status</p>
                             <p class="text-2xl font-bold"
-                               :class="(dhcpStatus.container && dhcpStatus.container.service_active && dhcpStatus.container.container_running) ? 'text-green-600' : (dhcpStatus.container && dhcpStatus.container.service_active) ? 'text-yellow-600' : 'text-gray-500'">
-                                <span x-text="(dhcpStatus.container && dhcpStatus.container.service_active && dhcpStatus.container.container_running) ? 'Running' : (dhcpStatus.container && dhcpStatus.container.service_active) ? 'Starting...' : 'Stopped'"></span>
+                               :class="!dhcpStatus.enabled ? 'text-gray-500' : (dhcpStatus.container && dhcpStatus.container.service_active && dhcpStatus.container.container_running) ? 'text-green-600' : (dhcpStatus.container && dhcpStatus.container.service_active) ? 'text-yellow-600' : 'text-gray-500'">
+                                <span x-text="!dhcpStatus.enabled ? 'Stopped' : (dhcpStatus.container && dhcpStatus.container.service_active && dhcpStatus.container.container_running) ? 'Running' : (dhcpStatus.container && dhcpStatus.container.service_active) ? 'Starting...' : 'Stopped'"></span>
                             </p>
                             <p class="text-xs text-gray-500 mt-0.5">Kea Container</p>
                         </div>
@@ -807,7 +807,7 @@
                         <!-- OUI Filtering Section -->
                         <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
                             <h3 class="text-md font-semibold text-gray-900 mb-4">OUI Filtering</h3>
-                            
+
                             <!-- Arista-Only Mode Toggle -->
                             <div class="flex items-center justify-between mb-4 p-4 bg-gray-50 rounded-md">
                                 <div>
@@ -889,7 +889,7 @@
                                         <h3 class="text-md font-semibold text-gray-900">DHCP Reservations</h3>
                                         <p class="text-xs text-gray-500 mt-1">Static IP address assignments for specific MAC addresses</p>
                                     </div>
-                                    <button @click="showReservationForm = !showReservationForm" 
+                                    <button @click="showReservationForm = !showReservationForm"
                                             class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                                         <span x-show="!showReservationForm">+ Add New</span>
                                         <span x-show="showReservationForm">Cancel</span>
@@ -903,19 +903,19 @@
                                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
                                     <div>
                                         <label class="block text-sm font-medium text-gray-700 mb-1">MAC Address *</label>
-                                        <input type="text" x-model="newReservation.mac" 
+                                        <input type="text" x-model="newReservation.mac"
                                                placeholder="00:1C:73:AA:BB:CC"
                                                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                                     </div>
                                     <div>
                                         <label class="block text-sm font-medium text-gray-700 mb-1">IP Address *</label>
-                                        <input type="text" x-model="newReservation.ip" 
+                                        <input type="text" x-model="newReservation.ip"
                                                placeholder="10.0.0.100"
                                                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                                     </div>
                                     <div>
                                         <label class="block text-sm font-medium text-gray-700 mb-1">Hostname (optional)</label>
-                                        <input type="text" x-model="newReservation.hostname" 
+                                        <input type="text" x-model="newReservation.hostname"
                                                placeholder="switch-1"
                                                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                                     </div>
@@ -924,11 +924,11 @@
                                     <p class="text-sm text-red-800" x-text="reservationError"></p>
                                 </div>
                                 <div class="flex justify-end gap-2">
-                                    <button @click="showReservationForm = false; reservationError = ''; newReservation = {mac: '', ip: '', hostname: ''}" 
+                                    <button @click="showReservationForm = false; reservationError = ''; newReservation = {mac: '', ip: '', hostname: ''}"
                                             class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm">
                                         Cancel
                                     </button>
-                                    <button @click="addDhcpReservation()" 
+                                    <button @click="addDhcpReservation()"
                                             class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
                                         Add Reservation
                                     </button>
@@ -953,7 +953,7 @@
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900" x-text="reservation['ip-address'] || reservation.ip"></td>
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="reservation.hostname || '-'"></td>
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                                    <button @click="deleteDhcpReservation(reservation['hw-address'] || reservation.mac)" 
+                                                    <button @click="deleteDhcpReservation(reservation['hw-address'] || reservation.mac)"
                                                             class="text-red-600 hover:text-red-800 font-medium">
                                                         Delete
                                                     </button>
@@ -1148,8 +1148,8 @@
                             </div>
                             <div class="flex items-center space-x-2">
                                 <span class="px-3 py-1 text-xs font-semibold rounded-full"
-                                      :class="(dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'"
-                                      x-text="(dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'Container Running' : 'Container Stopped'"></span>
+                                      :class="!dhcpStatus.enabled ? 'bg-gray-100 text-gray-800' : (dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'"
+                                      x-text="!dhcpStatus.enabled ? 'Container Stopped' : (dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'Container Running' : 'Container Stopped'"></span>
                                 <span class="px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800"
                                       x-text="dhcpStatus.networking_mode === 'host' ? 'Host Network' : 'MacVLAN'"></span>
                             </div>
@@ -3137,6 +3137,7 @@
                             // Sync dhcpConfig.enabled with config value only (not container state)
                             // Container state is separate - a container can be running but disabled
                             this.dhcpConfig.enabled = data.enabled;
+                            // Alpine.js is automatically reactive, no need for force update
                         }
                     } catch (error) {
                         console.error('Failed to load DHCP status:', error);
@@ -3162,6 +3163,9 @@
                     const wasEnabled = this.dhcpConfig.enabled;
                     // Toggle the state immediately for UI responsiveness
                     this.dhcpConfig.enabled = !this.dhcpConfig.enabled;
+                    // Immediately update dhcpStatus.enabled to match the toggle
+                    this.dhcpStatus.enabled = this.dhcpConfig.enabled;
+                    // Alpine.js is automatically reactive, no need for force update
                     try {
                         // Use the OLD state to determine which endpoint to call
                         const endpoint = wasEnabled ? '/api/dhcp/disable' : '/api/dhcp/enable';
@@ -3183,9 +3187,14 @@
                             await this.$nextTick();
                             // Revert the toggle since we didn't actually change it
                             this.dhcpConfig.enabled = !this.dhcpConfig.enabled;
+                            this.dhcpStatus.enabled = this.dhcpConfig.enabled;
+                            // Alpine.js is automatically reactive, no need for force update
                             return;
                         }
                         if (response.ok) {
+                            // Immediately update the status to reflect the toggle change
+                            this.dhcpStatus.enabled = this.dhcpConfig.enabled;
+                            // Alpine.js is automatically reactive, no need for force update
                             await this.loadDhcpStatus();
                             // Refresh status again after delays to catch container state changes
                             setTimeout(() => this.loadDhcpStatus(), 2000);
