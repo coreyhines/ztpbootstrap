@@ -23,8 +23,6 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.ref }}
           fetch-tags: true
-          fetch-refs: |
-            +refs/heads/*:refs/remotes/origin/*
 
       - name: Run Gitleaks Secret Detection
         uses: gitleaks/gitleaks-action@v2
@@ -35,12 +33,19 @@ jobs:
         id: check_commits
         if: github.event_name == 'push'
         run: |
-          BASE_SHA=$(git rev-parse ${{ github.event.repository.default_branch }})
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+          if ! git rev-parse --verify "$DEFAULT_BRANCH" >/dev/null 2>&1; then
+            echo "Default branch $DEFAULT_BRANCH not found; assuming commits differ."
+            echo "commits_differ=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BASE_SHA=$(git rev-parse "$DEFAULT_BRANCH")
           HEAD_SHA=$(git rev-parse HEAD)
           if [ "$BASE_SHA" = "$HEAD_SHA" ]; then
-            echo "commits_differ=false" >> $GITHUB_OUTPUT
+            echo "commits_differ=false" >> "$GITHUB_OUTPUT"
           else
-            echo "commits_differ=true" >> $GITHUB_OUTPUT
+            echo "commits_differ=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Run TruffleHog Secret Detection (PR)
