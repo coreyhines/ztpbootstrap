@@ -13,7 +13,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0  # Full history needed for secret detection
     
@@ -58,7 +58,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     
     - name: Run OWASP Dependency-Check
       uses: dependency-check/Dependency-Check_Action@main
@@ -73,7 +73,7 @@ jobs:
           --scan ./setup.sh ./dev/tests/test-service.sh ./dev/tests/integration-test.sh ./dev/tests/ci-test.sh
     
     - name: Upload Dependency-Check results
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       if: always()
       with:
         name: dependency-check-report
@@ -86,7 +86,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     
     - name: Generate SBOM with Syft
       uses: anchore/sbom-action@v0
@@ -96,7 +96,7 @@ jobs:
         output-file: "sbom.cyclonedx.json"
     
     - name: Upload SBOM
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: sbom
         path: sbom.cyclonedx.json
@@ -108,7 +108,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     
     - name: Install shellcheck
       run: |
@@ -152,7 +152,7 @@ jobs:
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     
     - name: Set up environment
       run: |

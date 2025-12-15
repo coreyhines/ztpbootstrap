@@ -175,6 +175,8 @@ config_manager = ConfigManager(CONFIG_FILE) if ConfigManager else None
 security_logger = logging.getLogger("security")
 security_logger.setLevel(logging.INFO)
 
+logger = logging.getLogger(__name__)
+
 # Create logs directory if it doesn't exist
 SECURITY_LOG_DIR = CONFIG_DIR / "logs"
 SECURITY_LOG_DIR.mkdir(parents=True, exist_ok=True)

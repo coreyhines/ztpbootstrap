@@ -281,8 +281,19 @@ create_backup() {
 
     # Create backup directory structure
     if ! mkdir -p "$backup_path" 2>/dev/null; then
-        error "Failed to create backup directory: $backup_path"
-        return 1
+        # Try with sudo if regular mkdir failed
+        if [[ $EUID -ne 0 ]]; then
+            if sudo mkdir -p "$backup_path" 2>/dev/null; then
+                sudo chown -R "$USER:$(id -gn)" "$backup_path" 2>/dev/null || true
+                log "Created backup directory with sudo"
+            else
+                error "Failed to create backup directory: $backup_path"
+                return 1
+            fi
+        else
+            error "Failed to create backup directory: $backup_path"
+            return 1
+        fi
     fi
 
     # Backup service directory
