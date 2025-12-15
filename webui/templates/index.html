@@ -3243,7 +3243,6 @@
                         if (response.ok) {
                             const data = await response.json();
                             this.dhcpReservations = data.reservations || [];
-                            console.log('Loaded reservations:', this.dhcpReservations.length);
                         }
                     } catch (error) {
                         console.error('Failed to load DHCP reservations:', error);
