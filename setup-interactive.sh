@@ -4390,7 +4390,7 @@ parse_args() {
                 shift
                 ;;
             --reset-pass)
-                # If password argument is provided, use it; otherwise default to "ztpboot"
+                # If password argument is provided, use it; otherwise default to random char string
                 if [[ -n "${2:-}" ]] && [[ ! "$2" =~ ^- ]]; then
                     # Remove quotes if present (handles both single and double quotes)
                     RESET_PASSWORD="${2}"
