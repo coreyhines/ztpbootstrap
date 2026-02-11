@@ -31,7 +31,7 @@ error() {
 check_yq() {
     local yq_path
     yq_path=$(command -v yq 2>/dev/null || echo "")
-    
+
     if [[ -z "$yq_path" ]]; then
         log "yq not found, attempting to install..."
         if install_correct_yq; then
@@ -45,11 +45,11 @@ check_yq() {
             return 1
         fi
     fi
-    
+
     # Check if it's the correct yq (mikefarah/yq) or Python wrapper
     local yq_version_output
     yq_version_output=$(yq --version 2>&1 || echo "")
-    
+
     if echo "$yq_version_output" | grep -q "yq version\|v[0-9]"; then
         # Correct yq found
         log "✓ yq found: $yq_path ($yq_version_output)"
@@ -66,7 +66,7 @@ check_yq() {
             return 1
         fi
     fi
-    
+
     return 0
 }
 
@@ -75,7 +75,7 @@ install_correct_yq() {
     local arch
     arch=$(uname -m)
     local yq_arch=""
-    
+
     # Determine architecture
     if [[ "$arch" == "aarch64" ]] || [[ "$arch" == "arm64" ]]; then
         yq_arch="arm64"
@@ -85,11 +85,11 @@ install_correct_yq() {
         warn "Unsupported architecture for yq: $arch"
         return 1
     fi
-    
+
     local yq_version="v4.44.3"
     local yq_url="https://github.com/mikefarah/yq/releases/download/${yq_version}/yq_linux_${yq_arch}"
     local yq_dest="/usr/local/bin/yq"
-    
+
     # Try wget first, then curl
     if command -v wget >/dev/null 2>&1; then
         if [[ $EUID -eq 0 ]]; then
@@ -107,17 +107,17 @@ install_correct_yq() {
         warn "Neither wget nor curl available to download yq"
         return 1
     fi
-    
+
     # Make executable
     if [[ $EUID -eq 0 ]]; then
         chmod +x "$yq_dest" 2>/dev/null || return 1
     else
         sudo chmod +x "$yq_dest" 2>/dev/null || return 1
     fi
-    
+
     # Ensure /usr/local/bin is in PATH
     export PATH="/usr/local/bin:$PATH"
-    
+
     # Verify it works
     if "$yq_dest" --version >/dev/null 2>&1; then
         return 0
@@ -135,17 +135,17 @@ get_yaml_value() {
 # Copy source files to target directory
 copy_source_files() {
     log "Copying source files to target directory..."
-    
+
     local repo_dir
     repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    
+
     # Get target paths from config
     local bootstrap_script
     local nginx_conf
-    
+
     bootstrap_script=$(get_yaml_value '.paths.bootstrap_script')
     nginx_conf=$(get_yaml_value '.paths.nginx_conf')
-    
+
     # Copy bootstrap.py
     if [[ -n "$bootstrap_script" ]] && [[ "$bootstrap_script" != "null" ]]; then
         local source_bootstrap="${repo_dir}/bootstrap.py"
@@ -177,7 +177,7 @@ copy_source_files() {
             warn "Source file not found: $source_bootstrap"
         fi
     fi
-    
+
     # Copy nginx.conf
     if [[ -n "$nginx_conf" ]] && [[ "$nginx_conf" != "null" ]]; then
         local source_nginx="${repo_dir}/nginx.conf"
@@ -209,48 +209,48 @@ copy_source_files() {
             warn "Source file not found: $source_nginx"
         fi
     fi
-    
+
     echo ""
 }
 
 # Create all necessary directories from config
 create_directories() {
     log "Creating necessary directories..."
-    
+
     local script_dir
     local cert_dir
     local env_file
     local dirs_to_create=()
-    
+
     script_dir=$(get_yaml_value '.paths.script_dir')
     cert_dir=$(get_yaml_value '.paths.cert_dir')
     env_file=$(get_yaml_value '.paths.env_file')
-    
+
     # Collect all directories that need to be created
     if [[ -n "$script_dir" ]] && [[ "$script_dir" != "null" ]]; then
         dirs_to_create+=("$script_dir")
     fi
-    
+
     if [[ -n "$cert_dir" ]] && [[ "$cert_dir" != "null" ]]; then
         dirs_to_create+=("$cert_dir")
     fi
-    
+
     if [[ -n "$env_file" ]] && [[ "$env_file" != "null" ]]; then
         local env_dir
         env_dir=$(dirname "$env_file")
         dirs_to_create+=("$env_dir")
     fi
-    
+
     # Systemd pod directory
     local pod_dir="/etc/containers/systemd/ztpbootstrap"
     dirs_to_create+=("$pod_dir")
-    
+
     # Create directories (mkdir -p creates parent directories automatically)
     for dir in "${dirs_to_create[@]}"; do
         if [[ -z "$dir" ]] || [[ "$dir" == "null" ]]; then
             continue
         fi
-        
+
         if [[ ! -d "$dir" ]]; then
             if [[ ("$dir" =~ ^/etc/ || "$dir" =~ ^/opt/) && $EUID -ne 0 ]]; then
                 log "Creating directory (requires sudo): $dir"
@@ -304,7 +304,7 @@ create_directories() {
             fi
         fi
     done
-    
+
     echo ""
 }
 
@@ -312,57 +312,57 @@ create_directories() {
 update_bootstrap_py() {
     local bootstrap_file
     bootstrap_file=$(get_yaml_value '.paths.bootstrap_script')
-    
+
     if [[ ! -f "$bootstrap_file" ]]; then
         warn "Bootstrap script not found: $bootstrap_file"
         return
     fi
-    
+
     log "Updating bootstrap.py..."
-    
+
     local cv_addr
-    local enrollment_token
+    local enroll_chars
     local cv_proxy
     local eos_url
     local ntp_server
-    
+
     cv_addr=$(get_yaml_value '.cvaas.address')
-    enrollment_token=$(get_yaml_value '.cvaas.enrollment_token')
+    enroll_chars=$(get_yaml_value '.cvaas.enroll_chars')
     cv_proxy=$(get_yaml_value '.cvaas.proxy')
     eos_url=$(get_yaml_value '.cvaas.eos_url')
     ntp_server=$(get_yaml_value '.cvaas.ntp_server')
-    
+
     # Update cvAddr
     if [[ -n "$cv_addr" ]]; then
         sed -i.tmp "s|^cvAddr = .*|cvAddr = \"$cv_addr\"|" "$bootstrap_file"
     fi
-    
-    # Update enrollmentToken
-    if [[ -n "$enrollment_token" ]]; then
+
+    # Update enrollChars
+    if [[ -n "$enroll_chars" ]]; then
         # Escape special characters for sed
-        enrollment_token_escaped=$(printf '%s\n' "$enrollment_token" | sed 's/[[\.*^$()+?{|]/\\&/g')
-        sed -i.tmp "s|^enrollmentToken = .*|enrollmentToken = \"$enrollment_token_escaped\"|" "$bootstrap_file"
+        enroll_chars_escaped=$(printf '%s\n' "$enroll_chars" | sed 's/[[\.*^$()+?{|]/\\&/g')
+        sed -i.tmp "s|^enrollChars = .*|enrollChars = \"$enroll_chars_escaped\"|" "$bootstrap_file"
     fi
-    
+
     # Update cvproxy
     if [[ -n "$cv_proxy" ]]; then
         sed -i.tmp "s|^cvproxy = .*|cvproxy = \"$cv_proxy\"|" "$bootstrap_file"
     else
         sed -i.tmp "s|^cvproxy = .*|cvproxy = \"\"|" "$bootstrap_file"
     fi
-    
+
     # Update eosUrl
     if [[ -n "$eos_url" ]]; then
         sed -i.tmp "s|^eosUrl = .*|eosUrl = \"$eos_url\"|" "$bootstrap_file"
     else
         sed -i.tmp "s|^eosUrl = .*|eosUrl = \"\"|" "$bootstrap_file"
     fi
-    
+
     # Update ntpServer
     if [[ -n "$ntp_server" ]]; then
         sed -i.tmp "s|^ntpServer = .*|ntpServer = \"$ntp_server\"|" "$bootstrap_file"
     fi
-    
+
     rm -f "${bootstrap_file}.tmp"
     log "Updated bootstrap.py"
 }
@@ -371,26 +371,26 @@ update_bootstrap_py() {
 update_nginx_conf() {
     local nginx_file
     nginx_file=$(get_yaml_value '.paths.nginx_conf')
-    
+
     if [[ ! -f "$nginx_file" ]]; then
         warn "Nginx config not found: $nginx_file"
         return
     fi
-    
+
     log "Updating nginx.conf..."
-    
+
     local domain
     local ipv4
     local ipv6
     local https_port
     local http_only
-    
+
     domain=$(get_yaml_value '.network.domain')
     ipv4=$(get_yaml_value '.network.ipv4')
     ipv6=$(get_yaml_value '.network.ipv6')
     https_port=$(get_yaml_value '.network.https_port')
     http_only=$(get_yaml_value '.network.http_only')
-    
+
     # Build server_name line
     local server_name="$domain"
     if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]]; then
@@ -399,7 +399,7 @@ update_nginx_conf() {
     if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]]; then
         server_name="$server_name $ipv6"
     fi
-    
+
     # Update server_name in the first two server blocks only (HTTPS and HTTP redirect)
     # Do NOT update the default server block (which should have server_name _;)
     # Use awk to replace only the first two occurrences, skipping the default server block
@@ -410,7 +410,7 @@ update_nginx_conf() {
         }
         { print }
     ' "$nginx_file" > "${nginx_file}.tmp2" && mv "${nginx_file}.tmp2" "$nginx_file"
-    
+
     # Update ports if needed
     if [[ "$http_only" == "true" ]]; then
         # HTTP-only mode - remove SSL and update ports
@@ -421,7 +421,7 @@ update_nginx_conf() {
         sed -i.tmp "s|listen 443 ssl http2;|listen $https_port ssl http2;|g" "$nginx_file"
         sed -i.tmp "s|listen \[::\]:443 ssl http2;|listen [::]:$https_port ssl http2;|g" "$nginx_file"
     fi
-    
+
     rm -f "${nginx_file}.tmp"
     log "Updated nginx.conf"
 }
@@ -430,39 +430,39 @@ update_nginx_conf() {
 update_env_file() {
     local env_file
     env_file=$(get_yaml_value '.paths.env_file')
-    
+
     log "Updating environment file: $env_file"
-    
+
     # Create directory if needed
     local env_dir
     env_dir=$(dirname "$env_file")
     mkdir -p "$env_dir"
-    
+
     local cv_addr
-    local enrollment_token
+    local enroll_chars
     local cv_proxy
     local eos_url
     local ntp_server
     local domain
     local timezone
     local https_port
-    
+
     cv_addr=$(get_yaml_value '.cvaas.address')
-    enrollment_token=$(get_yaml_value '.cvaas.enrollment_token')
+    enroll_chars=$(get_yaml_value '.cvaas.enroll_chars')
     cv_proxy=$(get_yaml_value '.cvaas.proxy')
     eos_url=$(get_yaml_value '.cvaas.eos_url')
     ntp_server=$(get_yaml_value '.cvaas.ntp_server')
     domain=$(get_yaml_value '.network.domain')
     timezone=$(get_yaml_value '.container.timezone')
     https_port=$(get_yaml_value '.network.https_port')
-    
+
     cat > "$env_file" << EOF
 # Arista ZTP Bootstrap Configuration
 # Generated from config.yaml on $(date)
 
 # CVaaS Configuration
 CV_ADDR=$cv_addr
-ENROLLMENT_TOKEN=$enrollment_token
+ENROLL_CHARS=$enroll_chars
 CV_PROXY=$cv_proxy
 EOS_URL=$eos_url
 NTP_SERVER=$ntp_server
@@ -472,7 +472,7 @@ TZ=$timezone
 NGINX_HOST=$domain
 NGINX_PORT=$https_port
 EOF
-    
+
     log "Updated environment file"
 }
 
@@ -480,22 +480,22 @@ EOF
 update_pod_file() {
     local pod_file
     pod_file="/etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod"
-    
+
     if [[ ! -f "$pod_file" ]]; then
         warn "Pod file not found: $pod_file (will be created by setup.sh)"
         return 0
     fi
-    
+
     log "Updating pod file with network configuration..."
-    
+
     local host_network
     local ipv4
     local ipv6
-    
+
     host_network=$(get_yaml_value '.container.host_network')
     ipv4=$(get_yaml_value '.network.ipv4')
     ipv6=$(get_yaml_value '.network.ipv6')
-    
+
     # Check if host network mode is enabled
     if [[ "$host_network" == "true" ]]; then
         # Set Network=host and remove IP addresses
@@ -505,7 +505,7 @@ update_pod_file() {
         else
             warn "Failed to set Network=host in pod file"
         fi
-        
+
         # Remove IP and IP6 lines when using host network
         if sed -i.tmp "/^IP=/d" "$pod_file" 2>/dev/null; then
             rm -f "${pod_file}.tmp" 2>/dev/null || true
@@ -523,7 +523,7 @@ update_pod_file() {
         else
             warn "Failed to set Network in pod file"
         fi
-        
+
         # Update or remove IP addresses in pod file
         if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]] && [[ "$ipv4" != "" ]]; then
             # Use sed to update IP= line (add if it doesn't exist)
@@ -550,7 +550,7 @@ update_pod_file() {
                 log "Removed IPv4 address from pod file"
             fi
         fi
-        
+
         if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]] && [[ "$ipv6" != "" ]]; then
             # Use sed to update IP6= line (add if it doesn't exist)
             if grep -q "^IP6=" "$pod_file" 2>/dev/null; then
@@ -591,31 +591,31 @@ update_pod_file() {
 # Update setup.sh with new paths
 update_setup_sh() {
     local setup_file="setup.sh"
-    
+
     if [[ ! -f "$setup_file" ]]; then
         warn "setup.sh not found"
         return
     fi
-    
+
     log "Updating setup.sh with new paths..."
-    
+
     local script_dir
     local cert_dir
     local domain
-    
+
     script_dir=$(get_yaml_value '.paths.script_dir')
     cert_dir=$(get_yaml_value '.paths.cert_dir')
     domain=$(get_yaml_value '.network.domain')
-    
+
     # Update SCRIPT_DIR
     sed -i.tmp "s|^SCRIPT_DIR=.*|SCRIPT_DIR=\"$script_dir\"|" "$setup_file"
-    
+
     # Update CERT_DIR
     sed -i.tmp "s|^CERT_DIR=.*|CERT_DIR=\"$cert_dir\"|" "$setup_file"
-    
+
     # Update DOMAIN
     sed -i.tmp "s|^DOMAIN=.*|DOMAIN=\"$domain\"|" "$setup_file"
-    
+
     rm -f "${setup_file}.tmp"
     log "Updated setup.sh"
 }
@@ -634,17 +634,17 @@ main() {
     if [[ ! -f "$CONFIG_FILE" ]]; then
         error "Configuration file not found: $CONFIG_FILE"
     fi
-    
+
     log "Reading configuration from: $CONFIG_FILE"
-    
+
     check_yq
-    
+
     # Create directories before validation
     create_directories
-    
+
     # Copy source files to target directory
     copy_source_files
-    
+
     # Validate configuration first
     if [[ -f "validate-config.sh" ]]; then
         log "Validating configuration..."
@@ -653,10 +653,10 @@ main() {
         fi
         echo ""
     fi
-    
+
     # Show diff
     show_diff
-    
+
     # Ask for confirmation
     echo -n -e "${YELLOW}Do you want to apply these changes? [y/N]: ${NC}"
     read -r response
@@ -665,17 +665,17 @@ main() {
         exit 0
     fi
     echo ""
-    
+
     # Update all files
     update_bootstrap_py
     update_nginx_conf
     update_env_file
     update_pod_file
     update_setup_sh
-    
+
     log ""
     log "Configuration update completed!"
-    
+
     # Only show "Next steps" if not called from another script (check if --quiet flag is set)
     if [[ "${QUIET:-false}" != "true" ]]; then
         log ""

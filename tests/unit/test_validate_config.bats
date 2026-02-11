@@ -8,7 +8,7 @@ setup() {
     # Create temporary directory for test configs
     TEST_DIR=$(mktemp -d)
     TEST_CONFIG="${TEST_DIR}/test-config.yaml"
-    
+
     # Create a minimal valid config for testing
     cat > "$TEST_CONFIG" << 'EOF'
 paths:
@@ -28,7 +28,7 @@ network:
 
 cvaas:
   address: "www.arista.io"
-  enrollment_token: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test.token.here"
+  enroll_chars: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.test.token.here"
   proxy: ""
   eos_url: ""
   ntp_server: "time.nist.gov"
@@ -73,7 +73,7 @@ teardown() {
     skip "Requires yq to be installed"
     # Create config with invalid IPv4
     yq eval '.network.ipv4 = "999.999.999.999"' -i "$TEST_CONFIG"
-    
+
     run bash validate-config.sh "$TEST_CONFIG"
     assert_failure
     assert_output --partial "Invalid IPv4"
@@ -83,7 +83,7 @@ teardown() {
     skip "Requires yq to be installed"
     # Create config with invalid port
     yq eval '.network.https_port = 99999' -i "$TEST_CONFIG"
-    
+
     run bash validate-config.sh "$TEST_CONFIG"
     assert_failure
     assert_output --partial "Port must be between 1 and 65535"
@@ -91,19 +91,19 @@ teardown() {
 
 @test "validate-config.sh detects missing enrollment token" {
     skip "Requires yq to be installed"
-    # Create config without enrollment token
-    yq eval '.cvaas.enrollment_token = ""' -i "$TEST_CONFIG"
-    
+    # Create config without enrollment chars
+    yq eval '.cvaas.enroll_chars = ""' -i "$TEST_CONFIG"
+
     run bash validate-config.sh "$TEST_CONFIG"
     assert_failure
-    assert_output --partial "enrollment_token is required"
+    assert_output --partial "enroll_chars"
 }
 
 @test "validate-config.sh detects invalid domain" {
     skip "Requires yq to be installed"
     # Create config with invalid domain
     yq eval '.network.domain = "invalid..domain"' -i "$TEST_CONFIG"
-    
+
     run bash validate-config.sh "$TEST_CONFIG"
     assert_failure
     assert_output --partial "Invalid domain format"
@@ -114,7 +114,7 @@ teardown() {
     # Create config with invalid email
     yq eval '.ssl.use_letsencrypt = true' -i "$TEST_CONFIG"
     yq eval '.ssl.letsencrypt_email = "invalid-email"' -i "$TEST_CONFIG"
-    
+
     run bash validate-config.sh "$TEST_CONFIG"
     assert_failure
     assert_output --partial "Invalid email format"

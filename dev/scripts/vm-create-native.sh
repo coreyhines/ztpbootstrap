@@ -88,7 +88,7 @@ create_disk() {
             exit 1
         }
     fi
-    
+
     if [[ -f "$VM_DISK" ]]; then
         log_warn "Disk image $VM_DISK already exists"
         # In headless mode, auto-delete to ensure fresh test runs
@@ -107,7 +107,7 @@ create_disk() {
             fi
         fi
     fi
-    
+
     log_info "Creating disk image: $VM_DISK (${VM_DISK_SIZE})"
     if qemu-img create -f qcow2 "$VM_DISK" "$VM_DISK_SIZE"; then
         log_info "✓ Disk image created"
@@ -121,7 +121,7 @@ create_disk() {
 start_vm() {
     local iso_arg=""
     local drive_arg=""
-    
+
     if [[ -n "$ISO_PATH" ]] && [[ -f "$ISO_PATH" ]]; then
         # Check if it's a disk image (cloud image) or ISO
         # First check if there's an extracted .raw file for .raw.xz files
@@ -129,7 +129,7 @@ start_vm() {
             ISO_PATH="${ISO_PATH%.xz}"
             log_info "Using extracted cloud image (raw): $ISO_PATH"
         fi
-        
+
         if [[ "$ISO_PATH" == *.raw ]]; then
             # Raw cloud image - create a qcow2 copy so cloud-init can run fresh each time
             # Store in Downloads directory, not repo directory
@@ -180,7 +180,7 @@ start_vm() {
                 # Store in Downloads directory, not repo directory
                 local actual_format=$(qemu-img info "$ISO_PATH" 2>/dev/null | grep "file format:" | awk '{print $3}' || echo "raw")
                 local qcow2_copy="${ISO_DIR}/$(basename "${VM_DISK%.qcow2}")-cloud.qcow2"
-                
+
                 if [[ "$actual_format" == "qcow2" ]]; then
                     # Already qcow2 - create a standalone copy for fresh cloud-init runs
                     # Using standalone copy instead of snapshot to avoid boot issues
@@ -284,19 +284,19 @@ start_vm() {
             exit 0
         fi
     fi
-    
+
     log_info "Starting VM with native Hypervisor Framework acceleration..."
     log_info "VM Name: $VM_NAME"
     log_info "Memory: ${VM_MEMORY}MB"
     log_info "CPUs: $VM_CPUS"
     log_info "Disk: $VM_DISK"
     echo ""
-    
+
     # Determine display/console options
     local display_opts=""
     local console_opts=""
     local monitor_opts=""
-    
+
     if [[ "$HEADLESS" == "true" ]]; then
         display_opts="-display none"
         console_opts="-nographic"
@@ -326,15 +326,15 @@ start_vm() {
         log_info "Press Ctrl+Alt+G to release mouse/keyboard"
         log_info "Press Ctrl+Alt+Q to quit QEMU"
     fi
-    
+
     # Create log file
     local log_file="/tmp/qemu-${VM_NAME}.log"
     log_info "QEMU output will be logged to: $log_file"
     echo ""
-    
+
     log_info "Starting QEMU..."
     echo ""
-    
+
     # Add kernel parameters for console output if using console mode
     local kernel_params=""
     if [[ "$CONSOLE" == "true" ]] && [[ -n "$iso_arg" ]]; then
@@ -342,12 +342,12 @@ start_vm() {
         kernel_params="console=ttyAMA0,115200 earlyprintk=serial,ttyAMA0,115200"
         log_info "Adding kernel parameters for serial console: $kernel_params"
     fi
-    
+
     # If no drive_arg was set, use default disk
     if [[ -z "$drive_arg" ]]; then
         drive_arg="-drive file=$VM_DISK,if=virtio,format=qcow2"
     fi
-    
+
     # Detect architecture from ISO_PATH or use detected arch
     local detected_arch=""
     if [[ "$ISO_PATH" == *".aarch64."* ]] || [[ "$ISO_PATH" == *".arm64."* ]]; then
@@ -361,7 +361,7 @@ start_vm() {
     else
         detected_arch="x86_64"
     fi
-    
+
     # Find UEFI firmware (required for booting disk images)
     local uefi_firmware=""
     if [[ "$ISO_PATH" == *.raw ]] || [[ "$ISO_PATH" == *.qcow2 ]] || [[ "$ISO_PATH" == *cloudimg* ]] || [[ "$ISO_PATH" == *cloud*.img ]] || [[ -z "$ISO_PATH" ]]; then
@@ -372,7 +372,7 @@ start_vm() {
                 "/usr/local/share/qemu/edk2-aarch64-code.fd"
                 "/usr/share/qemu/edk2-aarch64-code.fd"
             )
-            
+
             # Also try finding via Homebrew Cellar
             if command -v brew &> /dev/null; then
                 local brew_prefix=$(brew --prefix 2>/dev/null)
@@ -390,7 +390,7 @@ start_vm() {
                 "/usr/local/share/qemu/edk2-x86_64-code.fd"
                 "/usr/share/qemu/edk2-x86_64-code.fd"
             )
-            
+
             if command -v brew &> /dev/null; then
                 local brew_prefix=$(brew --prefix 2>/dev/null)
                 if [[ -n "$brew_prefix" ]]; then
@@ -401,7 +401,7 @@ start_vm() {
                 fi
             fi
         fi
-        
+
         for fw_path in "${firmware_paths[@]}"; do
             if [[ -f "$fw_path" ]]; then
                 uefi_firmware="$fw_path"
@@ -409,7 +409,7 @@ start_vm() {
                 break
             fi
         done
-        
+
         if [[ -z "$uefi_firmware" ]]; then
             log_error "UEFI firmware not found for ${detected_arch}! Cloud images require UEFI firmware to boot."
             log_info "Install QEMU firmware: brew install qemu"
@@ -421,13 +421,13 @@ start_vm() {
             exit 1
         fi
     fi
-    
+
     # Create cloud-init ISO if using cloud image
     local cloud_init_iso=""
     if [[ "$ISO_PATH" == *.raw ]] || [[ "$ISO_PATH" == *.qcow2 ]] || [[ "$ISO_PATH" == *cloudimg* ]] || [[ "$ISO_PATH" == *cloud*.img ]]; then
         local cloud_init_dir="/tmp/cloud-init-${VM_NAME}"
         mkdir -p "$cloud_init_dir"
-        
+
         # Detect distribution from ISO path or download distro
         local distro_user="fedora"
         local distro_pkg_mgr="dnf"
@@ -436,10 +436,10 @@ start_vm() {
         local distro_install_cmd="dnf install -y"
         # Get current logged-in user for SSH key injection
         local current_user="${USER:-$(whoami)}"
-        
+
         # Normalize download distro name for comparison
         local distro_lower=$(echo "${DOWNLOAD_DISTRO:-}" | tr '[:upper:]' '[:lower:]')
-        
+
         if [[ "$ISO_PATH" == *ubuntu* ]] || [[ "$ISO_PATH" == *Ubuntu* ]] || [[ "$distro_lower" == "ubuntu" ]]; then
             distro_user="ubuntu"
             distro_pkg_mgr="apt"
@@ -478,7 +478,7 @@ start_vm() {
             distro_sudo_group="wheel"
             distro_install_cmd="zypper install -y"
         fi
-        
+
         # Create user-data for cloud-init (enable SSH, set password, clone repo, setup macvlan)
         # Use quoted heredoc delimiter to prevent variable expansion during parsing
         # Variables will be replaced with sed after heredoc creation
@@ -494,7 +494,7 @@ system_info:
   default_user:
     name: __DISTRO_USER__
     lock_passwd: false
-    plain_text_passwd: '__DISTRO_USER__'
+    plain_text_passwd: '__DISTRO_USER__'  # gitleaks:allow
     groups: [__DISTRO_SUDO_GROUP__, adm, systemd-journal]
     sudo: ["ALL=(ALL) NOPASSWD:ALL"]
     shell: /bin/bash
@@ -506,7 +506,7 @@ users:
     groups: [__DISTRO_SUDO_GROUP__, adm, systemd-journal]
     shell: /bin/bash
     lock_passwd: false
-    plain_text_passwd: '__DISTRO_USER__'
+    plain_text_passwd: '__DISTRO_USER__'  # gitleaks:allow
     # SSH keys will be added via write_files + runcmd (more reliable)
   - name: __CURRENT_USER__
     gecos: __CURRENT_USER__ User
@@ -514,7 +514,7 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     lock_passwd: false
-    plain_text_passwd: '__CURRENT_USER__'
+    plain_text_passwd: '__CURRENT_USER__'  # gitleaks:allow
     ssh_authorized_keys:
       - __CURRENT_USER_SSH_KEY__
 chpasswd:
@@ -567,7 +567,7 @@ write_files:
         User: __DISTRO_USER__
         Password: __DISTRO_USER__
         From host: ssh __DISTRO_USER__@localhost -p 2222
-      
+
       Service access (if running on port 80/443):
         HTTP:  http://localhost:8080
         HTTPS: https://localhost:8443
@@ -723,7 +723,7 @@ runcmd:
       printf '%s\n' \
         '# Minimal configuration for automated testing' \
         'CV_ADDR=www.arista.io' \
-        'ENROLLMENT_TOKEN=test_token_for_automated_testing' \
+        'ENROLL_CHARS=test_token_for_automated_testing' \
         'CV_PROXY=' \
         'EOS_URL=' \
         'NTP_SERVER=time.nist.gov' \
@@ -821,7 +821,7 @@ runcmd:
       echo "Auto-setup disabled. Run manually: cd /home/__CURRENT_USER__/ztpbootstrap && ./setup-interactive.sh"
     fi
 CLOUDINITEOF
-        
+
         # Get host SSH public key if available (will be embedded in user-data via write_files)
         # This allows passwordless SSH access from the host machine
         local host_ssh_key=""
@@ -832,7 +832,7 @@ CLOUDINITEOF
         elif [[ -f "$HOME/.ssh/id_rsa.pub" ]]; then
             host_ssh_key="$HOME/.ssh/id_rsa.pub"
         fi
-        
+
         if [[ -n "$host_ssh_key" ]] && [[ -f "$host_ssh_key" ]]; then
             ssh_key_content=$(cat "$host_ssh_key" 2>/dev/null || echo "")
             current_user_ssh_key="$ssh_key_content"
@@ -846,7 +846,7 @@ CLOUDINITEOF
             sed -i.bak '/ssh_authorized_keys:/,/__CURRENT_USER_SSH_KEY__/d' "$cloud_init_dir/user-data" 2>/dev/null || true
             rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
         fi
-        
+
         # Replace all placeholders with actual values (after heredoc creation to avoid expansion issues)
         # Use a different delimiter for install_cmd since it contains | characters
         sed -i.bak \
@@ -859,27 +859,27 @@ CLOUDINITEOF
           -e "s|__CURRENT_USER_SSH_KEY__|${current_user_ssh_key}|g" \
           "$cloud_init_dir/user-data" 2>/dev/null || true
         rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
-        
+
         # Create meta-data
         # Set FQDN for test VM (use .local domain if no domain specified)
         local vm_fqdn="${VM_NAME}.local"
         echo "instance-id: ${VM_NAME}-$(date +%s)" > "$cloud_init_dir/meta-data"
         echo "local-hostname: ${VM_NAME}" >> "$cloud_init_dir/meta-data"
         echo "fqdn: ${vm_fqdn}" >> "$cloud_init_dir/meta-data"
-        
+
         # Replace FQDN placeholder in user-data
         sed -i.bak \
           -e "s|__VM_FQDN__|${vm_fqdn}|g" \
           "$cloud_init_dir/user-data" 2>/dev/null || true
         rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
-        
+
         # Remove auto-setup flag file creation if auto-setup is disabled
         if [[ "$AUTO_SETUP" != "true" ]]; then
             # Remove only the auto-setup-flag write_files entry, not the entire write_files section
             sed -i.bak '/path: \/tmp\/auto-setup-flag/,/owner: root:root/d' "$cloud_init_dir/user-data" 2>/dev/null || true
             rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
         fi
-        
+
         # Create cloud-init ISO
         cloud_init_iso="/tmp/cloud-init-${VM_NAME}.iso"
         # Include SSH key file if it exists
@@ -887,7 +887,7 @@ CLOUDINITEOF
         if [[ -f "$cloud_init_dir/host_ssh_key.pub" ]]; then
             iso_files+=("$cloud_init_dir/host_ssh_key.pub")
         fi
-        
+
         if command -v mkisofs &> /dev/null; then
             mkisofs -output "$cloud_init_iso" -volid cidata -joliet -rock "${iso_files[@]}" 2>/dev/null
         elif command -v genisoimage &> /dev/null; then
@@ -903,7 +903,7 @@ CLOUDINITEOF
             log_warn "No ISO creation tool found (mkisofs/genisoimage/hdiutil). SSH may not work without cloud-init."
             cloud_init_iso=""
         fi
-        
+
         if [[ -n "$cloud_init_iso" ]] && [[ -f "$cloud_init_iso" ]]; then
             log_info "Created cloud-init ISO: $cloud_init_iso"
             log_info "Default user: ${distro_user} / Password: ${distro_user}"
@@ -917,7 +917,7 @@ CLOUDINITEOF
             log_info "Install cdrtools for cloud-init ISO support: brew install cdrtools"
         fi
     fi
-    
+
     # QEMU command with HVF (Hypervisor Framework) acceleration
     # Run in foreground so user can see output
     local cloud_init_drive=""
@@ -927,7 +927,7 @@ CLOUDINITEOF
         cloud_init_drive="-cdrom $cloud_init_iso"
         log_info "Cloud-init ISO mounted as CD-ROM for detection"
     fi
-    
+
     # Determine QEMU binary and machine type based on architecture
     local qemu_bin=""
     local machine_type=""
@@ -944,19 +944,19 @@ CLOUDINITEOF
             machine_type="q35,accel=hvf"
         fi
     fi
-    
+
     # Build QEMU command
     local qemu_cmd="$qemu_bin \
         -M $machine_type \
         -cpu host \
         -smp $VM_CPUS \
         -m $VM_MEMORY"
-    
+
     # Add UEFI firmware if needed (for disk images)
     if [[ -n "$uefi_firmware" ]]; then
         qemu_cmd="$qemu_cmd -drive if=pflash,format=raw,file=$uefi_firmware,readonly=on"
     fi
-    
+
     # Add drives
     qemu_cmd="$qemu_cmd \
         $drive_arg \
@@ -970,11 +970,11 @@ CLOUDINITEOF
         $console_opts \
         $monitor_opts \
         -name $VM_NAME"
-    
+
     # Add kernel parameters if specified (requires appending to kernel command line)
     # Note: This is complex for ISOs, so we'll rely on the OS detecting serial console
     # Most modern Linux distros auto-detect serial console on ARM64
-    
+
     # Execute QEMU - output goes to both console and log file
     if [[ "$CONSOLE" == "true" ]]; then
         # In console mode, run directly so output appears in terminal
@@ -990,7 +990,7 @@ CLOUDINITEOF
         log_info "VM started (PID: $qemu_pid)"
         log_info "Waiting for SSH to be ready on port 2222..."
         log_info "This may take 1-3 minutes for cloud-init to complete..."
-        
+
         # Wait for SSH to be ready
         local ssh_timeout=300  # 5 minutes
         local ssh_interval=2
@@ -998,7 +998,7 @@ CLOUDINITEOF
         local elapsed=0
         local ssh_ready=false
         local port_open=false
-        
+
         # Phase 1: Wait for port to be open
         while [ $elapsed -lt $ssh_timeout ]; do
             if timeout 1 bash -c "echo > /dev/tcp/localhost/2222" 2>/dev/null; then
@@ -1012,14 +1012,14 @@ CLOUDINITEOF
                 log_info "  Still waiting for port... (${elapsed}s elapsed)"
             fi
         done
-        
+
         if [ "$port_open" != "true" ]; then
             log_error "SSH port did not open within ${ssh_timeout}s"
             log_info "Check VM logs: tail -f $log_file"
             log_info "VM is still running (PID: $qemu_pid). To stop: pkill -f 'qemu-system.*${VM_NAME}'"
             exit 1
         fi
-        
+
         # Phase 2: Wait for SSH to accept connections
         log_info "Waiting for SSH to accept connections..."
         start_time=$(date +%s)
@@ -1027,7 +1027,7 @@ CLOUDINITEOF
         # Determine SSH user - try current user first, then distro default (fedora)
         local ssh_user="${USER:-$(whoami)}"
         local distro_default_user="fedora"
-        
+
         while [ $elapsed -lt $ssh_timeout ]; do
             # Try current user first (created by cloud-init)
             if ssh -o ConnectTimeout=2 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -p 2222 "${ssh_user}@localhost" "echo 'SSH ready'" 2>/dev/null; then
@@ -1048,14 +1048,14 @@ CLOUDINITEOF
                 log_info "  Still waiting for SSH... (${elapsed}s elapsed)"
             fi
         done
-        
+
         if [ "$ssh_ready" != "true" ]; then
             log_error "SSH did not become ready within ${ssh_timeout}s"
             log_info "Check VM logs: tail -f $log_file"
             log_info "VM is still running (PID: $qemu_pid). To stop: pkill -f 'qemu-system.*${VM_NAME}'"
             exit 1
         fi
-        
+
         log_info "✓ VM is ready! SSH available on port 2222"
         log_info "VM is running (PID: $qemu_pid). To stop: pkill -f 'qemu-system.*${VM_NAME}'"
         log_info "To view logs: tail -f $log_file"
@@ -1072,12 +1072,12 @@ find_valid_url() {
     local patterns=("$@")
     local found_url=""
     local found_file=""
-    
+
     for pattern_info in "${patterns[@]}"; do
         # Pattern format: "url|filename" or just "url" (filename derived from URL)
         local test_url=""
         local test_file=""
-        
+
         if [[ "$pattern_info" == *"|"* ]]; then
             # Split on | to get URL and filename
             test_url="${pattern_info%%|*}"
@@ -1087,9 +1087,9 @@ find_valid_url() {
             test_url="$pattern_info"
             test_file=$(basename "$test_url")
         fi
-        
+
         local http_code=$(curl -s -o /dev/null -w "%{http_code}" -L --head "$test_url" 2>/dev/null)
-        
+
         if [[ "$http_code" == "200" ]]; then
             found_url="$test_url"
             found_file="$test_file"
@@ -1098,7 +1098,7 @@ find_valid_url() {
             break
         fi
     done
-    
+
     if [[ -n "$found_url" ]]; then
         # Output to stdout (for capture), log messages go to stderr
         echo "${found_url}|${found_file}"
@@ -1115,10 +1115,10 @@ download_iso() {
     local iso_file=""
     local download_url=""
     local iso_path=""
-    
+
     # Create ISO directory if it doesn't exist
     mkdir -p "$ISO_DIR"
-    
+
     case "$distro" in
         fedora|Fedora)
             if [[ "$version" == "latest" ]]; then
@@ -1137,7 +1137,7 @@ download_iso() {
                 fi
                 log_info "Latest Fedora version: $version"
             fi
-            
+
             # Detect architecture if not specified
             local arch="${DOWNLOAD_ARCH}"
             if [[ -z "$arch" ]]; then
@@ -1150,53 +1150,53 @@ download_iso() {
                     log_info "Detected x86_64 architecture"
                 fi
             fi
-            
+
             # Warn if using x86_64 on ARM64 (will be slow)
             if [[ "$arch" == "x86_64" ]] && [[ "$(uname -m)" == "arm64" ]]; then
                 log_warn "Using x86_64 image on ARM64 system - performance will be SLOW (emulated)"
                 log_warn "Consider using aarch64 for native performance"
             fi
-            
+
             if [[ "$DOWNLOAD_TYPE" == "cloud" ]]; then
                 # Fedora Cloud image (raw format, boots directly)
                 # Try to find available image by checking common patterns
                 log_info "Finding available Fedora Cloud image for ${arch}..."
-                
+
                 # Try different version patterns (1.6, 1.5, 1.2, 1.1, etc.)
                 local found_url=""
                 local found_file=""
                 local version_patterns=("1.6" "1.5" "1.2" "1.1" "1.0")
-                
+
                 for vp in "${version_patterns[@]}"; do
                     # Try generic QEMU/KVM qcow2 image first (best for local virtualization)
                     local test_file="Fedora-Cloud-Base-${version}-${vp}.${arch}.qcow2"
                     local test_url="https://download.fedoraproject.org/pub/fedora/linux/releases/${version}/Cloud/${arch}/images/${test_file}"
                     local http_code=$(curl -s -o /dev/null -w "%{http_code}" -L --head "$test_url" 2>/dev/null)
-                    
+
                     if [[ "$http_code" == "200" ]]; then
                         found_url="$test_url"
                         found_file="$test_file"
                         log_info "Found generic QEMU qcow2 image: $test_file (best for local VMs)"
                         break
                     fi
-                    
+
                     # Try generic QEMU compressed
                     test_file="Fedora-Cloud-Base-${version}-${vp}.${arch}.qcow2.xz"
                     test_url="https://download.fedoraproject.org/pub/fedora/linux/releases/${version}/Cloud/${arch}/images/${test_file}"
                     http_code=$(curl -s -o /dev/null -w "%{http_code}" -L --head "$test_url" 2>/dev/null)
-                    
+
                     if [[ "$http_code" == "200" ]]; then
                         found_url="$test_url"
                         found_file="$test_file"
                         log_info "Found generic QEMU qcow2 compressed image: $test_file"
                         break
                     fi
-                    
+
                     # Try AmazonEC2 raw.xz as fallback (EC2-specific, may have issues with cloud-init)
                     test_file="Fedora-Cloud-Base-AmazonEC2-${version}-${vp}.${arch}.raw.xz"
                     test_url="https://download.fedoraproject.org/pub/fedora/linux/releases/${version}/Cloud/${arch}/images/${test_file}"
                     http_code=$(curl -s -o /dev/null -w "%{http_code}" -L --head "$test_url" 2>/dev/null)
-                    
+
                     if [[ "$http_code" == "200" ]]; then
                         found_url="$test_url"
                         found_file="$test_file"
@@ -1204,12 +1204,12 @@ download_iso() {
                         log_warn "Note: EC2 images are AWS-specific and may not work well with standard cloud-init"
                         break
                     fi
-                    
+
                     # Try GCE tar.gz as last resort
                     test_file="Fedora-Cloud-Base-GCE-${version}-${vp}.${arch}.tar.gz"
                     test_url="https://download.fedoraproject.org/pub/fedora/linux/releases/${version}/Cloud/${arch}/images/${test_file}"
                     http_code=$(curl -s -o /dev/null -w "%{http_code}" -L --head "$test_url" 2>/dev/null)
-                    
+
                     if [[ "$http_code" == "200" ]]; then
                         found_url="$test_url"
                         found_file="$test_file"
@@ -1217,7 +1217,7 @@ download_iso() {
                         break
                     fi
                 done
-                
+
                 if [[ -z "$found_url" ]]; then
                     log_error "Could not find Fedora Cloud image for version ${version} architecture ${arch}"
                     log_info "Tried patterns:"
@@ -1227,7 +1227,7 @@ download_iso() {
                     log_info "You may need to specify a different version/architecture or download manually"
                     return 1
                 fi
-                
+
                 iso_file="$found_file"
                 download_url="$found_url"
                 iso_path="${ISO_DIR}/${iso_file}"
@@ -1237,7 +1237,7 @@ download_iso() {
                 iso_file="Fedora-Server-netinst-aarch64-${version}.iso"
                 download_url="https://download.fedoraproject.org/pub/fedora/linux/releases/${version}/Server/aarch64/iso/${iso_file}"
                 iso_path="${ISO_DIR}/${iso_file}"
-                
+
                 # Verify URL exists before downloading
                 log_info "Checking if ISO URL is valid..."
                 if ! curl -s --head "$download_url" | grep -q "200 OK"; then
@@ -1249,13 +1249,13 @@ download_iso() {
                 fi
             fi
             ;;
-            
+
         ubuntu|Ubuntu)
             if [[ "$version" == "latest" ]]; then
                 version="22.04"
                 log_info "Using Ubuntu LTS: $version"
             fi
-            
+
             if [[ "$DOWNLOAD_TYPE" == "cloud" ]]; then
                 # Ubuntu Cloud image (pre-built, boots directly)
                 iso_file="ubuntu-${version}-server-cloudimg-arm64.img"
@@ -1269,13 +1269,13 @@ download_iso() {
                 iso_path="${ISO_DIR}/${iso_file}"
             fi
             ;;
-            
+
         debian|Debian)
             if [[ "$version" == "latest" ]]; then
                 version="12"
                 log_info "Using Debian stable: $version"
             fi
-            
+
             iso_file="debian-${version}.0.0-arm64-netinst.iso"
             # Try multiple mirrors
             local mirrors=(
@@ -1285,7 +1285,7 @@ download_iso() {
             download_url="${mirrors[0]}"
             iso_path="${ISO_DIR}/${iso_file}"
             ;;
-            
+
         rocky|Rocky|rockylinux|RockyLinux)
             # Detect architecture
             local arch="${DOWNLOAD_ARCH}"
@@ -1296,12 +1296,12 @@ download_iso() {
                     arch="x86_64"
                 fi
             fi
-            
+
             if [[ "$version" == "latest" ]]; then
                 version="9"
                 log_info "Using Rocky Linux latest stable: $version"
             fi
-            
+
             if [[ "$DOWNLOAD_TYPE" == "cloud" ]]; then
                 log_info "Finding available Rocky Linux Cloud image for ${arch}..."
                 # Try multiple URL patterns
@@ -1311,7 +1311,7 @@ download_iso() {
                     "https://dl.rockylinux.org/pub/rocky/${version}/images/${arch}/Rocky-${version}-GenericCloud-Base-${arch}.qcow2|Rocky-${version}-GenericCloud-Base-${arch}.qcow2"
                     "https://download.rockylinux.org/pub/rocky/${version}/images/${arch}/Rocky-${version}-GenericCloud-Base-${arch}.qcow2|Rocky-${version}-GenericCloud-Base-${arch}.qcow2"
                 )
-                
+
                 local url_result=$(find_valid_url "${url_patterns[@]}")
                 if [[ -z "$url_result" ]]; then
                     log_error "Could not find Rocky Linux Cloud image for version ${version} architecture ${arch}"
@@ -1321,7 +1321,7 @@ download_iso() {
                     done
                     return 1
                 fi
-                
+
                 # Extract URL and filename, trimming any whitespace
                 download_url=$(echo "${url_result%%|*}" | tr -d '\n\r' | xargs)
                 iso_file=$(echo "${url_result#*|}" | tr -d '\n\r' | xargs)
@@ -1332,7 +1332,7 @@ download_iso() {
                 return 1
             fi
             ;;
-            
+
         almalinux|AlmaLinux|alma|Alma)
             # Detect architecture
             local arch="${DOWNLOAD_ARCH}"
@@ -1343,12 +1343,12 @@ download_iso() {
                     arch="x86_64"
                 fi
             fi
-            
+
             if [[ "$version" == "latest" ]]; then
                 version="9"
                 log_info "Using AlmaLinux latest stable: $version"
             fi
-            
+
             if [[ "$DOWNLOAD_TYPE" == "cloud" ]]; then
                 log_info "Finding available AlmaLinux Cloud image for ${arch}..."
                 # Try multiple URL patterns
@@ -1357,7 +1357,7 @@ download_iso() {
                     "https://repo.almalinux.org/almalinux/${version}/cloud/${arch}/images/AlmaLinux-${version}-GenericCloud-Base-${arch}.qcow2|AlmaLinux-${version}-GenericCloud-Base-${arch}.qcow2"
                     "https://repo.almalinux.org/almalinux/${version}/cloud/${arch}/images/AlmaLinux-${version}-GenericCloud-${arch}.qcow2|AlmaLinux-${version}-GenericCloud-${arch}.qcow2"
                 )
-                
+
                 local url_result=$(find_valid_url "${url_patterns[@]}")
                 if [[ -z "$url_result" ]]; then
                     log_error "Could not find AlmaLinux Cloud image for version ${version} architecture ${arch}"
@@ -1367,7 +1367,7 @@ download_iso() {
                     done
                     return 1
                 fi
-                
+
                 # Extract URL and filename, trimming any whitespace
                 download_url=$(echo "${url_result%%|*}" | tr -d '\n\r' | xargs)
                 iso_file=$(echo "${url_result#*|}" | tr -d '\n\r' | xargs)
@@ -1378,7 +1378,7 @@ download_iso() {
                 return 1
             fi
             ;;
-            
+
         centos|CentOS|centos-stream|CentOS-Stream|centosstream|CentOSStream)
             # Detect architecture
             local arch="${DOWNLOAD_ARCH}"
@@ -1389,13 +1389,13 @@ download_iso() {
                     arch="x86_64"
                 fi
             fi
-            
+
             if [[ "$version" == "latest" ]]; then
                 # CentOS Stream doesn't use version numbers the same way, use "9" for Stream 9
                 version="9"
                 log_info "Using CentOS Stream 9"
             fi
-            
+
             if [[ "$DOWNLOAD_TYPE" == "cloud" ]]; then
                 log_info "Finding available CentOS Stream Cloud image for ${arch}..."
                 # Try multiple URL patterns
@@ -1404,7 +1404,7 @@ download_iso() {
                     "https://cloud.centos.org/centos/${version}-stream/${arch}/images/CentOS-Stream-GenericCloud-${version}-${arch}.qcow2|CentOS-Stream-GenericCloud-${version}-${arch}.qcow2"
                     "https://cloud.centos.org/centos/${version}-stream/${arch}/images/CentOS-Stream-GenericCloud-Base-${version}-${arch}.qcow2|CentOS-Stream-GenericCloud-Base-${version}-${arch}.qcow2"
                 )
-                
+
                 local url_result=$(find_valid_url "${url_patterns[@]}")
                 if [[ -z "$url_result" ]]; then
                     log_error "Could not find CentOS Stream Cloud image for version ${version} architecture ${arch}"
@@ -1414,7 +1414,7 @@ download_iso() {
                     done
                     return 1
                 fi
-                
+
                 # Extract URL and filename, trimming any whitespace
                 download_url=$(echo "${url_result%%|*}" | tr -d '\n\r' | xargs)
                 iso_file=$(echo "${url_result#*|}" | tr -d '\n\r' | xargs)
@@ -1425,7 +1425,7 @@ download_iso() {
                 return 1
             fi
             ;;
-            
+
         opensuse|OpenSUSE|opensuse-leap|OpenSUSE-Leap|leap|Leap)
             # Detect architecture
             local arch="${DOWNLOAD_ARCH}"
@@ -1436,12 +1436,12 @@ download_iso() {
                     arch="x86_64"
                 fi
             fi
-            
+
             if [[ "$version" == "latest" ]]; then
                 version="15.6"
                 log_info "Using openSUSE Leap latest: $version"
             fi
-            
+
             if [[ "$DOWNLOAD_TYPE" == "cloud" ]]; then
                 log_info "Finding available openSUSE Leap Cloud image for ${arch}..."
                 # Try multiple URL patterns
@@ -1450,7 +1450,7 @@ download_iso() {
                     "https://download.opensuse.org/distribution/leap/${version}/appliances/openSUSE-Leap-${version}-${arch}.qcow2|openSUSE-Leap-${version}-${arch}.qcow2"
                     "https://download.opensuse.org/distribution/leap/${version}/appliances/openSUSE-Leap-${version}-KVM.${arch}.qcow2|openSUSE-Leap-${version}-KVM.${arch}.qcow2"
                 )
-                
+
                 local url_result=$(find_valid_url "${url_patterns[@]}")
                 if [[ -z "$url_result" ]]; then
                     log_error "Could not find openSUSE Leap Cloud image for version ${version} architecture ${arch}"
@@ -1460,7 +1460,7 @@ download_iso() {
                     done
                     return 1
                 fi
-                
+
                 # Extract URL and filename, trimming any whitespace
                 download_url=$(echo "${url_result%%|*}" | tr -d '\n\r' | xargs)
                 iso_file=$(echo "${url_result#*|}" | tr -d '\n\r' | xargs)
@@ -1471,21 +1471,21 @@ download_iso() {
                 return 1
             fi
             ;;
-            
+
         *)
             log_error "Unsupported distribution: $distro"
             log_info "Supported: fedora, ubuntu, debian, rocky, almalinux, centos-stream, opensuse-leap"
             return 1
             ;;
     esac
-    
+
     # Check if ISO already exists (exact match)
     if [[ -f "$iso_path" ]]; then
         log_info "ISO already exists: $iso_path"
         ISO_PATH="$iso_path"
         return 0
     fi
-    
+
     # Check for similar files (same distro, arch, type) - useful if version differs slightly
     if [[ "$DOWNLOAD_TYPE" == "cloud" ]]; then
         # Detect architecture for pattern matching (same logic as download_iso function)
@@ -1498,7 +1498,7 @@ download_iso() {
                 arch="x86_64"
             fi
         fi
-        
+
         local patterns=()
         case "$distro" in
             fedora|Fedora)
@@ -1525,7 +1525,7 @@ download_iso() {
                 patterns=("openSUSE-Leap-*-${arch}.qcow2")
                 ;;
         esac
-        
+
         if [[ ${#patterns[@]} -gt 0 ]]; then
             local found_file=""
             # Check in ISO_DIR first
@@ -1533,7 +1533,7 @@ download_iso() {
                 found_file=$(find "$ISO_DIR" -maxdepth 1 -name "$pattern" -type f 2>/dev/null | head -1)
                 if [[ -n "$found_file" ]] && [[ -f "$found_file" ]]; then
                     log_info "Found existing cloud image: $found_file"
-                    
+
                     # If it's compressed, check if extracted version exists
                     if [[ "$found_file" == *.xz ]]; then
                         local extracted="${found_file%.xz}"
@@ -1545,7 +1545,7 @@ download_iso() {
                             log_info "Found compressed image, will extract on use"
                         fi
                     fi
-                    
+
                     log_info "Using existing image instead of downloading"
                     ISO_PATH="$found_file"
                     return 0
@@ -1553,12 +1553,12 @@ download_iso() {
             done
         fi
     fi
-    
+
     log_download "Downloading $distro $version..."
     log_download "URL: $download_url"
     log_download "Destination: $iso_path"
     echo ""
-    
+
     # Download with progress (follow redirects with -L)
     if command -v curl &> /dev/null; then
         # URL was already verified by find_valid_url() if it was used, but verify again for direct URLs
@@ -1572,7 +1572,7 @@ download_iso() {
                 return 1
             fi
         fi
-        
+
         if curl -L --progress-bar -o "$iso_path" "$download_url"; then
             # Verify it's not an HTML error page
             if head -1 "$iso_path" 2>/dev/null | grep -q "<!DOCTYPE\|<html"; then
@@ -1581,7 +1581,7 @@ download_iso() {
                 rm -f "$iso_path"
                 return 1
             fi
-            
+
             # Check file size (should be > 1MB for images)
             local file_size=$(stat -f%z "$iso_path" 2>/dev/null || stat -c%s "$iso_path" 2>/dev/null || echo "0")
             if [[ "$file_size" -lt 1048576 ]]; then
@@ -1589,21 +1589,21 @@ download_iso() {
                 rm -f "$iso_path"
                 return 1
             fi
-            
+
             log_info "✓ Download complete: $iso_path ($(numfmt --to=iec-i --suffix=B $file_size 2>/dev/null || echo "${file_size} bytes"))"
-            
+
             # If it's a compressed cloud image, extract it
             if [[ "$iso_path" == *.xz ]]; then
                 log_info "Extracting compressed image..."
                 local extracted_path="${iso_path%.xz}"
-                
+
                 # Check if already extracted
                 if [[ -f "$extracted_path" ]]; then
                     log_info "Extracted image already exists: $extracted_path"
                     ISO_PATH="$extracted_path"
                     return 0
                 fi
-                
+
                 if command -v xz &> /dev/null; then
                     if xz -d "$iso_path" 2>&1; then
                         log_info "✓ Extracted to: $extracted_path"
@@ -1638,7 +1638,7 @@ download_iso() {
     elif command -v wget &> /dev/null; then
         if wget --progress=bar:force -O "$iso_path" "$download_url" 2>&1; then
             log_info "✓ Download complete: $iso_path"
-            
+
             # If it's a compressed cloud image, extract it
             if [[ "$iso_path" == *.xz ]]; then
                 log_info "Extracting compressed image..."

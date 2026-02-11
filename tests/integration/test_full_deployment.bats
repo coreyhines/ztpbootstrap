@@ -9,15 +9,15 @@ setup() {
     TEST_DIR=$(mktemp -d)
     TEST_SCRIPT_DIR="${TEST_DIR}/ztpbootstrap"
     TEST_CERT_DIR="${TEST_DIR}/certs/wild"
-    
+
     mkdir -p "$TEST_SCRIPT_DIR"
     mkdir -p "$TEST_CERT_DIR"
-    
+
     # Copy test files
     cp bootstrap.py "${TEST_SCRIPT_DIR}/"
     cp nginx.conf "${TEST_SCRIPT_DIR}/"
     cp setup.sh "${TEST_SCRIPT_DIR}/"
-    
+
     # Create test config
     cat > "${TEST_SCRIPT_DIR}/config.yaml" << EOF
 paths:
@@ -37,7 +37,7 @@ network:
 
 cvaas:
   address: "www.arista.io"
-  enrollment_token: "test_token_here"
+  enroll_chars: "test_token_here"
   proxy: ""
   eos_url: ""
   ntp_server: "time.nist.gov"

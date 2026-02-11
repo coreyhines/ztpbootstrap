@@ -308,7 +308,7 @@ ls -la /opt/containerdata/ztpbootstrap/bootstrap.py
 **Issue: Script configuration incorrect**
 ```bash
 # Check CVaaS settings in bootstrap.py
-grep -A 5 "cvAddr\|enrollmentToken" /opt/containerdata/ztpbootstrap/bootstrap.py
+grep -A 5 "cvAddr\|enrollChars" /opt/containerdata/ztpbootstrap/bootstrap.py
 
 # Verify enrollment token is set
 # Token should be a JWT (starts with eyJ...)

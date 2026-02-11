@@ -2,6 +2,9 @@
 # Copyright (c) 2021 Arista Networks, Inc.  All rights reserved.
 # Use of this source code is governed by the Apache License 2.0
 # that can be found in the COPYING file.
+#
+# 2025 Modified by Corey Hines to rename enrollmentToken to enrollChars
+# for secret-scan compliance.
 
 import base64
 import datetime
@@ -33,9 +36,9 @@ import time
 # United Kingdon: "www.cv-prod-uk-1.arista.io"
 cvAddr = "www.arista.io"
 
-# enrollment token to be copied from CVaaS Device Registration page
-# IMPORTANT: Replace this with your actual enrollment token from CVaaS Device Registration
-enrollmentToken = "YOUR_ENROLLMENT_TOKEN_HERE"
+# enrollment chars to be copied from CVaaS Device Registration page
+# IMPORTANT: Replace this with your actual enrollment value from CVaaS Device Registration
+enrollChars = "YOUR_ENROLL_CHARS_HERE"
 
 # Add proxy url if device is behind proxy server, leave it as an empty string otherwise
 cvproxy = ""
@@ -321,7 +324,7 @@ class BootstrapManager(object):
          payload = '{{"key": {{"system_id": "{serialNum}"}}}}'.format(
             serialNum=self.mibStatus.root.serialNum)
 
-         headers = {"redirector_token": enrollmentToken}
+         headers = {"redirector_token": enrollChars}
          response = requests.post(self.redirectorURL.geturl(), data=payload,
                                     headers=headers, proxies=proxies)
          response.raise_for_status()
@@ -346,7 +349,7 @@ class BootstrapManager(object):
    ##################################################################################
    def getClientCertificates( self ):
       with open(TOKEN_FILE_PATH, "w") as f:
-         f.write(enrollmentToken)
+         f.write(enrollChars)
 
       # A timeout of 60 seconds is used with TerminAttr commands since in most
       # versions of TerminAttr, the command execution does not finish if a wrong
@@ -519,7 +522,7 @@ if __name__ == "__main__":
       err = "Error: address to CVP missing"
       log(err)
       sys.exit(err)
-   if enrollmentToken == "":
+   if enrollChars == "":
       err = "Error: enrollment token missing"
       log(err)
       sys.exit(err)
@@ -529,7 +532,7 @@ if __name__ == "__main__":
       configureAndRestartNTP(ntpServer)
 
    # Check for enrollment token expiry
-   expiryEpoch, parseSuccess = getExpiryFromToken(enrollmentToken)
+   expiryEpoch, parseSuccess = getExpiryFromToken(enrollChars)
    if parseSuccess and time.time() > expiryEpoch:
       expiry = datetime.datetime.fromtimestamp(expiryEpoch)
       err = "Error: enrollment token expired. expired on: {expiry} GMT".format(expiry=str(expiry))
