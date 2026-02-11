@@ -78,6 +78,7 @@ show_bootstrap_diff() {
         echo -e "    ${GREEN}+ $cv_addr_yaml${NC}"
     fi
 
+    # enroll_chars in config vs enrollChars in bootstrap.py (Apache 2.0, Arista)
     local token_yaml
     local token_current
     token_yaml=$(get_yaml_value '.cvaas.enroll_chars')

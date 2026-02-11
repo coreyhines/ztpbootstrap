@@ -720,6 +720,7 @@ runcmd:
       # Create directory first
       mkdir -p /opt/containerdata/ztpbootstrap
       # Create env file using printf to avoid YAML heredoc issues
+      # ENROLL_CHARS is read by setup.sh and written into bootstrap.py (Apache 2.0, Arista) as enrollChars.
       printf '%s\n' \
         '# Minimal configuration for automated testing' \
         'CV_ADDR=www.arista.io' \

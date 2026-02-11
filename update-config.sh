@@ -327,6 +327,7 @@ update_bootstrap_py() {
     local ntp_server
 
     cv_addr=$(get_yaml_value '.cvaas.address')
+    # enroll_chars: CVaaS value written into bootstrap.py as enrollChars (Apache 2.0, Arista Networks).
     enroll_chars=$(get_yaml_value '.cvaas.enroll_chars')
     cv_proxy=$(get_yaml_value '.cvaas.proxy')
     eos_url=$(get_yaml_value '.cvaas.eos_url')
@@ -337,7 +338,7 @@ update_bootstrap_py() {
         sed -i.tmp "s|^cvAddr = .*|cvAddr = \"$cv_addr\"|" "$bootstrap_file"
     fi
 
-    # Update enrollChars
+    # Update enrollChars in bootstrap.py (Apache 2.0, Arista); used for redirector_token and cert retrieval.
     if [[ -n "$enroll_chars" ]]; then
         # Escape special characters for sed
         enroll_chars_escaped=$(printf '%s\n' "$enroll_chars" | sed 's/[[\.*^$()+?{|]/\\&/g')
@@ -460,7 +461,7 @@ update_env_file() {
 # Arista ZTP Bootstrap Configuration
 # Generated from config.yaml on $(date)
 
-# CVaaS Configuration
+# CVaaS Configuration (ENROLL_CHARS consumed by bootstrap.py - Apache 2.0, Arista)
 CV_ADDR=$cv_addr
 ENROLL_CHARS=$enroll_chars
 CV_PROXY=$cv_proxy

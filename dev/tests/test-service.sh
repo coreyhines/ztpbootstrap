@@ -216,6 +216,7 @@ main() {
         warn "Consider using Let's Encrypt with automated renewal for production"
     fi
     log ""
+    # ENROLL_CHARS is passed to bootstrap.py (Apache 2.0, Arista) as enrollChars for CVaaS.
     log "To start the service with a valid enrollment value:"
     log "1. Edit /opt/containerdata/ztpbootstrap/ztpbootstrap.env"
     log "2. Set ENROLL_CHARS to your CVaaS enrollment value"

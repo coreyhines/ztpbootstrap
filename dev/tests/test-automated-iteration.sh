@@ -610,7 +610,7 @@ CONFIGEOF
                 fi
             fi
 
-            # Set required default values in config.yaml if not already set
+            # Set required default values in config.yaml if not already set (enroll_chars -> bootstrap.py, Apache 2.0 Arista).
             # These are needed for non-interactive mode to work
             ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p "$SSH_PORT" "${SSH_USER}@localhost" \
                 "cd ${ztpbootstrap_dir} && \

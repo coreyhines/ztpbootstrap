@@ -95,6 +95,7 @@ load_env() {
         error "CV_ADDR is not set in environment file"
     fi
 
+    # ENROLL_CHARS: CVaaS enrollment value; bootstrap.py (Apache 2.0, Arista) uses it as enrollChars.
     if [[ -z "${ENROLL_CHARS:-}" ]]; then
         error "ENROLL_CHARS is not set in environment file"
     fi

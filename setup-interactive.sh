@@ -26,6 +26,9 @@ EXISTING_DOMAIN=""
 EXISTING_IPV4=""
 EXISTING_IPV6=""
 EXISTING_CV_ADDR=""
+# EXISTING_ENROLL_CHARS: CVaaS enrollment value from Arista Device Registration.
+# Written to config as cvaas.enroll_chars and consumed by bootstrap.py (Apache 2.0,
+# originally by Arista Networks) as enrollChars for redirector auth and client certs.
 EXISTING_ENROLL_CHARS=""
 EXISTING_CV_PROXY=""
 EXISTING_EOS_URL=""
@@ -2705,6 +2708,7 @@ PYTHON_VERIFY
     echo ""
 
     prompt_with_default "CVaaS address" "${EXISTING_CV_ADDR:-www.arista.io}" CV_ADDR
+    # ENROLL_CHARS written to config and used by bootstrap.py (Apache 2.0, Arista) as enrollChars.
     prompt_with_default "Enrollment chars (from CVaaS Device Registration)" "${EXISTING_ENROLL_CHARS:-}" ENROLL_CHARS "true"
     # Proxy URL and EOS image URL - only prompt in extended mode
     if [[ "${EXTENDED_MODE:-false}" == "true" ]]; then
@@ -3348,7 +3352,7 @@ network:
   http_only: $HTTP_ONLY
 
 # ============================================================================
-# CVaaS Configuration
+# CVaaS Configuration (enroll_chars used by bootstrap.py - Apache 2.0, Arista)
 # ============================================================================
 cvaas:
   address: "$CV_ADDR"

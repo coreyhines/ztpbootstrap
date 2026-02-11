@@ -352,6 +352,7 @@ validate_config() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
+    # enroll_chars: required for bootstrap.py (Apache 2.0, Arista Networks) as enrollChars.
     local cv_addr
     local enroll_chars
     local cv_proxy
