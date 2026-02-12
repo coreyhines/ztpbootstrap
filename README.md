@@ -221,7 +221,7 @@ network:
 
 cvaas:
   address: "www.arista.io"
-  enrollment_token: "your_token_here"
+  enroll_chars: "your_value_here"
 ```
 
 See `config.yaml.template` for complete structure.
@@ -232,7 +232,7 @@ Edit `ztpbootstrap.env`:
 
 ```bash
 CV_ADDR=www.arista.io
-ENROLLMENT_TOKEN=your_token_here
+ENROLL_CHARS=your_value_here
 NTP_SERVER=pool.ntp.org
 TZ=UTC
 ```

@@ -30,18 +30,18 @@ get_bootstrap_value() {
     local var_name="$1"
     local bootstrap_file
     bootstrap_file=$(get_yaml_value '.paths.bootstrap_script')
-    
+
     if [[ ! -f "$bootstrap_file" ]]; then
         echo "<file not found>"
         return
     fi
-    
+
     case "$var_name" in
         cvAddr)
             grep -oP '^cvAddr = "\K[^"]+' "$bootstrap_file" 2>/dev/null || echo "<not found>"
             ;;
-        enrollmentToken)
-            grep -oP '^enrollmentToken = "\K[^"]+' "$bootstrap_file" 2>/dev/null | head -c 20 || echo "<not found>"
+        enrollChars)
+            grep -oP '^enrollChars = "\K[^"]+' "$bootstrap_file" 2>/dev/null | head -c 20 || echo "<not found>"
             echo "..."
             ;;
         cvproxy)
@@ -60,14 +60,14 @@ get_bootstrap_value() {
 show_bootstrap_diff() {
     local bootstrap_file
     bootstrap_file=$(get_yaml_value '.paths.bootstrap_script')
-    
+
     if [[ ! -f "$bootstrap_file" ]]; then
         info "bootstrap.py: File not found, will be created"
         return
     fi
-    
+
     echo -e "${CYAN}bootstrap.py:${NC}"
-    
+
     local cv_addr_yaml
     local cv_addr_current
     cv_addr_yaml=$(get_yaml_value '.cvaas.address')
@@ -77,17 +77,18 @@ show_bootstrap_diff() {
         echo -e "    ${RED}- $cv_addr_current${NC}"
         echo -e "    ${GREEN}+ $cv_addr_yaml${NC}"
     fi
-    
+
+    # enroll_chars in config vs enrollChars in bootstrap.py (Apache 2.0, Arista)
     local token_yaml
     local token_current
-    token_yaml=$(get_yaml_value '.cvaas.enrollment_token')
-    token_current=$(get_bootstrap_value "enrollmentToken")
+    token_yaml=$(get_yaml_value '.cvaas.enroll_chars')
+    token_current=$(get_bootstrap_value "enrollChars")
     if [[ "$token_yaml" != "$token_current" ]]; then
-        echo -e "  ${YELLOW}enrollmentToken:${NC}"
+        echo -e "  ${YELLOW}enrollChars:${NC}"
         echo -e "    ${RED}- ${token_current:0:20}...${NC}"
         echo -e "    ${GREEN}+ ${token_yaml:0:20}...${NC}"
     fi
-    
+
     local proxy_yaml
     local proxy_current
     proxy_yaml=$(get_yaml_value '.cvaas.proxy')
@@ -103,19 +104,19 @@ show_bootstrap_diff() {
 show_nginx_diff() {
     local nginx_file
     nginx_file=$(get_yaml_value '.paths.nginx_conf')
-    
+
     if [[ ! -f "$nginx_file" ]]; then
         info "nginx.conf: File not found, will be created"
         return
     fi
-    
+
     echo -e "${CYAN}nginx.conf:${NC}"
-    
+
     local domain_yaml
     local domain_current
     domain_yaml=$(get_yaml_value '.network.domain')
     domain_current=$(grep -oP 'server_name \K[^ ]+' "$nginx_file" 2>/dev/null | head -1 || echo "<not found>")
-    
+
     if [[ "$domain_yaml" != "$domain_current" ]]; then
         echo -e "  ${YELLOW}server_name:${NC}"
         echo -e "    ${RED}- $domain_current${NC}"
@@ -127,15 +128,15 @@ show_nginx_diff() {
 show_env_diff() {
     local env_file
     env_file=$(get_yaml_value '.paths.env_file')
-    
+
     echo -e "${CYAN}ztpbootstrap.env:${NC}"
-    
+
     if [[ -f "$env_file" ]]; then
         local cv_addr_yaml
         local cv_addr_current
         cv_addr_yaml=$(get_yaml_value '.cvaas.address')
         cv_addr_current=$(grep -oP '^CV_ADDR=\K.+' "$env_file" 2>/dev/null || echo "<not found>")
-        
+
         if [[ "$cv_addr_yaml" != "$cv_addr_current" ]]; then
             echo -e "  ${YELLOW}CV_ADDR:${NC}"
             echo -e "    ${RED}- $cv_addr_current${NC}"
@@ -152,12 +153,12 @@ main() {
         echo -e "${RED}Error: Configuration file not found: $CONFIG_FILE${NC}"
         exit 1
     fi
-    
+
     if ! command -v yq >/dev/null 2>&1; then
         echo -e "${RED}Error: yq is required${NC}"
         exit 1
     fi
-    
+
     echo ""
     echo -e "${BLUE}╔══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║${NC}  ${GREEN}Configuration Diff${NC}                                        ${BLUE}║${NC}"
@@ -165,7 +166,7 @@ main() {
     echo ""
     info "Showing changes that will be applied from: $CONFIG_FILE"
     echo ""
-    
+
     show_bootstrap_diff
     echo ""
     show_nginx_diff

@@ -89,35 +89,36 @@ load_env() {
     log "Loading environment variables..."
     # shellcheck source=/dev/null
     source "$ENV_FILE"
-    
+
     # Validate required variables
     if [[ -z "${CV_ADDR:-}" ]]; then
         error "CV_ADDR is not set in environment file"
     fi
-    
-    if [[ -z "${ENROLLMENT_TOKEN:-}" ]]; then
-        error "ENROLLMENT_TOKEN is not set in environment file"
+
+    # ENROLL_CHARS: CVaaS enrollment value; bootstrap.py (Apache 2.0, Arista) uses it as enrollChars.
+    if [[ -z "${ENROLL_CHARS:-}" ]]; then
+        error "ENROLL_CHARS is not set in environment file"
     fi
-    
+
     log "Environment variables loaded successfully"
     log "CVaaS Address: $CV_ADDR"
-    log "Enrollment Token: ${ENROLLMENT_TOKEN:0:20}..."
+    log "Enrollment Chars: ${ENROLL_CHARS:0:20}..."
 }
 
 
 # Check SSL certificates
 check_ssl_certificates() {
     log "Checking SSL certificates for $DOMAIN..."
-    
+
     if [[ ! -d "$CERT_DIR" ]]; then
         warn "Certificate directory not found: $CERT_DIR"
         warn "You may need to obtain SSL certificates for $DOMAIN"
         return 1
     fi
-    
+
     local cert_file="${CERT_DIR}/fullchain.pem"
     local key_file="${CERT_DIR}/privkey.pem"
-    
+
     if [[ ! -f "$cert_file" ]] || [[ ! -f "$key_file" ]]; then
         warn "SSL certificate files not found:"
         warn "  Certificate: $cert_file"
@@ -125,7 +126,7 @@ check_ssl_certificates() {
         warn "You may need to obtain SSL certificates for $DOMAIN"
         return 1
     fi
-    
+
     # Check certificate validity
     if openssl x509 -in "$cert_file" -text -noout | grep -q "$DOMAIN"; then
         log "SSL certificate found and appears valid for $DOMAIN"
@@ -139,10 +140,10 @@ check_ssl_certificates() {
 # Setup SSL certificates using certbot (if available)
 setup_ssl_certificates() {
     log "Setting up SSL certificates..."
-    
+
     if command -v certbot >/dev/null 2>&1; then
         log "Certbot found, attempting to obtain SSL certificate..."
-        
+
         # Check if we can obtain a certificate
         if certbot certonly \
             --standalone \
@@ -169,11 +170,11 @@ is_nfs_mount() {
     if [[ -z "$path" ]]; then
         return 1
     fi
-    
+
     # Resolve the path to its actual location
     local resolved_path
     resolved_path=$(readlink -f "$path" 2>/dev/null || realpath "$path" 2>/dev/null || echo "$path")
-    
+
     # Check if the path is on an NFS mount using findmnt or mount
     if command -v findmnt >/dev/null 2>&1; then
         if findmnt -n -o FSTYPE -T "$resolved_path" 2>/dev/null | grep -qi "^nfs"; then
@@ -184,13 +185,13 @@ is_nfs_mount() {
             return 0
         fi
     fi
-    
+
     # Check parent directories if the path itself doesn't exist yet
     local check_path="$resolved_path"
     while [[ "$check_path" != "/" ]] && [[ ! -e "$check_path" ]]; do
         check_path=$(dirname "$check_path")
     done
-    
+
     if [[ -n "$check_path" ]] && [[ "$check_path" != "/" ]]; then
         if command -v findmnt >/dev/null 2>&1; then
             if findmnt -n -o FSTYPE -T "$check_path" 2>/dev/null | grep -qi "^nfs"; then
@@ -202,29 +203,29 @@ is_nfs_mount() {
             fi
         fi
     fi
-    
+
     return 1
 }
 
 # Create logs directory with proper permissions and SELinux context
 setup_logs_directory() {
     log "Setting up logs directory..."
-    
+
     # Create logs directory for nginx logs
     mkdir -p "${SCRIPT_DIR}/logs" || {
         warn "Failed to create logs directory: ${SCRIPT_DIR}/logs"
         return 1
     }
-    
+
     # Set permissions for nginx to write logs (nginx runs as UID 101 in alpine image)
     # Use 775 instead of 777 for better security (group-writable but not world-writable)
     chmod 775 "${SCRIPT_DIR}/logs" 2>/dev/null || true
-    
+
     # Try to set ownership to nginx user (UID 101) if possible
     if command -v chown >/dev/null 2>&1; then
         chown 101:101 "${SCRIPT_DIR}/logs" 2>/dev/null || chmod 775 "${SCRIPT_DIR}/logs" 2>/dev/null || true
     fi
-    
+
     # Set SELinux context for logs directory (if SELinux is enabled and not on NFS)
     # NFS doesn't support SELinux contexts, so we skip chcon for NFS mounts
     if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
@@ -235,7 +236,7 @@ setup_logs_directory() {
             log "Logs directory is on NFS, skipping SELinux context (NFS doesn't support SELinux contexts)"
         fi
     fi
-    
+
     log "Created logs directory: ${SCRIPT_DIR}/logs"
     return 0
 }
@@ -243,20 +244,20 @@ setup_logs_directory() {
 # Create a simple self-signed certificate for testing
 create_self_signed_cert() {
     log "Creating self-signed certificate for testing..."
-    
+
     local cert_file="${CERT_DIR}/fullchain.pem"
     local key_file="${CERT_DIR}/privkey.pem"
-    
+
     # Create certificate directory if it doesn't exist
     mkdir -p "$CERT_DIR"
-    
+
     # Generate self-signed certificate
     openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
         -keyout "$key_file" \
         -out "$cert_file" \
         -subj "/C=US/ST=State/L=City/O=Organization/CN=$DOMAIN" \
         -addext "subjectAltName=DNS:$DOMAIN"
-    
+
     # Set proper permissions and SELinux context (if SELinux is enabled and not on NFS)
     # Certificate file can be world-readable (644)
     chmod 644 "$cert_file" 2>/dev/null || true
@@ -271,7 +272,7 @@ create_self_signed_cert() {
             log "Certificate directory is on NFS, skipping SELinux context (NFS doesn't support SELinux contexts)"
         fi
     fi
-    
+
     # Also set SELinux context for script directory to allow webui uploads (only if not on NFS)
     if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
         if ! is_nfs_mount "$SCRIPT_DIR"; then
@@ -281,7 +282,7 @@ create_self_signed_cert() {
             log "Script directory is on NFS, skipping SELinux context (NFS doesn't support SELinux contexts)"
         fi
     fi
-    
+
     log "Self-signed certificate created for testing"
     warn "This is a self-signed certificate and should not be used in production"
 }
@@ -289,17 +290,17 @@ create_self_signed_cert() {
 # Configure nginx for HTTP-only mode
 configure_http_only() {
     log "Configuring nginx for HTTP-only mode..."
-    
+
     if [[ ! -f "$NGINX_CONF" ]]; then
         error "Nginx configuration file not found: $NGINX_CONF"
     fi
-    
+
     # Backup original nginx.conf
     if [[ ! -f "${NGINX_CONF}.backup" ]]; then
         cp "$NGINX_CONF" "${NGINX_CONF}.backup"
         log "Backed up original nginx.conf to ${NGINX_CONF}.backup"
     fi
-    
+
     # Create HTTP-only nginx configuration
     cat > "$NGINX_CONF" << 'NGINX_EOF'
 # Nginx configuration for Arista ZTP Bootstrap Service
@@ -311,25 +312,25 @@ server {
     listen 80;
     listen [::]:80;
     server_name ztpboot.example.com 10.0.0.10 2001:db8::10;
-    
+
     # Root directory for serving files
     root /usr/share/nginx/html;
     index bootstrap.py;
-    
+
     # Logging
     access_log /var/log/nginx/ztpbootstrap_access.log;
     error_log /var/log/nginx/ztpbootstrap_error.log;
-    
+
     # Main location block
     location / {
         try_files $uri $uri/ =404;
-        
+
         # Set proper MIME type for Python scripts
         location ~* \.py$ {
             add_header Content-Type "text/plain; charset=utf-8";
             add_header Content-Disposition "attachment; filename=bootstrap.py";
         }
-        
+
         # Cache control for bootstrap script
         location = /bootstrap.py {
             add_header Cache-Control "no-cache, no-store, must-revalidate";
@@ -339,21 +340,21 @@ server {
             add_header Content-Disposition "attachment; filename=bootstrap.py";
         }
     }
-    
+
     # Health check endpoint
     location /health {
         access_log off;
         return 200 "healthy\n";
         add_header Content-Type text/plain;
     }
-    
+
     # Deny access to hidden files
     location ~ /\. {
         deny all;
         access_log off;
         log_not_found off;
     }
-    
+
     # Deny access to backup files
     location ~ ~$ {
         deny all;
@@ -367,12 +368,12 @@ server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
-    
+
     # Return 444 to close connection for invalid requests
     return 444;
 }
 NGINX_EOF
-    
+
     log "Nginx configured for HTTP-only mode"
     warn "HTTP-only mode is insecure and should not be used in production"
     warn "Consider using Let's Encrypt with automated renewal instead"
@@ -381,7 +382,7 @@ NGINX_EOF
 # Check prerequisites before setup
 check_setup_prerequisites() {
     log "Checking prerequisites..."
-    
+
     # Check Podman
     if ! command -v podman >/dev/null 2>&1; then
         error "Podman is not installed. Please install Podman first."
@@ -393,7 +394,7 @@ check_setup_prerequisites() {
         return 1
     fi
     log "✓ Podman found: $(podman --version)"
-    
+
     # Check macvlan network
     if ! podman network exists ztpbootstrap-net 2>/dev/null; then
         error "Macvlan network 'ztpbootstrap-net' not found"
@@ -407,26 +408,26 @@ check_setup_prerequisites() {
     else
         log "✓ Macvlan network 'ztpbootstrap-net' found"
     fi
-    
+
     return 0
 }
 
 # Setup Podman pod with containers
 setup_pod() {
     log "Setting up Podman pod with containers..."
-    
+
     # Get the directory where this script is located (repository directory)
     local repo_dir
     repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    
+
     local systemd_dir="/etc/containers/systemd/ztpbootstrap"
     mkdir -p "$systemd_dir"
-    
+
     # Copy pod and container files from repository
     if [[ -f "${repo_dir}/systemd/ztpbootstrap.pod" ]]; then
         cp "${repo_dir}/systemd/ztpbootstrap.pod" "$systemd_dir/"
         log "Pod configuration installed"
-        
+
         # Update pod file with IP addresses from config.yaml if it exists
         local pod_file="${systemd_dir}/ztpbootstrap.pod"
         # Check for config.yaml in repo directory or current directory
@@ -438,7 +439,7 @@ setup_pod() {
         elif [[ -f "config.yaml" ]]; then
             config_file="config.yaml"
         fi
-        
+
         if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
             log "Found config.yaml at: $config_file"
             local host_network
@@ -447,9 +448,9 @@ setup_pod() {
             host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
             ipv4=$(yq eval '.network.ipv4' "$config_file" 2>/dev/null || echo "")
             ipv6=$(yq eval '.network.ipv6' "$config_file" 2>/dev/null || echo "")
-            
+
             log "Reading network config: host_network=$host_network, IPv4=$ipv4, IPv6=$ipv6"
-            
+
             # Check if host network mode is enabled
             if [[ "$host_network" == "true" ]]; then
                 # Set Network=host and remove IP addresses
@@ -459,7 +460,7 @@ setup_pod() {
                 else
                     warn "Failed to set Network=host in pod file"
                 fi
-                
+
                 # Remove IP and IP6 lines when using host network
                 if sed -i.tmp "/^IP=/d" "$pod_file" 2>/dev/null; then
                     rm -f "${pod_file}.tmp" 2>/dev/null || true
@@ -477,7 +478,7 @@ setup_pod() {
                 else
                     warn "Failed to set Network in pod file"
                 fi
-                
+
                 # For HTTP-only mode (testing), use DHCP instead of static IPs
                 if [[ "$HTTP_ONLY" == "true" ]]; then
                     # Remove static IPs to use DHCP
@@ -522,7 +523,7 @@ setup_pod() {
                         log "Removed IPv4 address from pod file"
                     fi
                 fi
-                
+
                 # Update or remove IPv6 address (skip if HTTP_ONLY already handled above)
                 if [[ "$HTTP_ONLY" != "true" ]] && [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]] && [[ "$ipv6" != "" ]]; then
                     if grep -q "^IP6=" "$pod_file" 2>/dev/null; then
@@ -569,13 +570,13 @@ setup_pod() {
         error "Pod configuration file not found: ${repo_dir}/systemd/ztpbootstrap.pod"
         return 1
     fi
-    
+
     if [[ -f "${repo_dir}/systemd/ztpbootstrap-nginx.container" ]]; then
         cp "${repo_dir}/systemd/ztpbootstrap-nginx.container" "$systemd_dir/"
         log "Nginx container configuration installed"
-        
+
         local nginx_container_file="${systemd_dir}/ztpbootstrap-nginx.container"
-        
+
         # Remove certs volume mount if using HTTP-only mode
         if [[ "$HTTP_ONLY" == "true" ]]; then
             if sed -i.tmp "/certs\/wild.*\/etc\/nginx\/ssl/d" "$nginx_container_file" 2>/dev/null; then
@@ -583,7 +584,7 @@ setup_pod() {
                 log "Removed SSL certificate volume mount from nginx container (HTTP-only mode)"
             fi
         fi
-        
+
         # Remove PublishPort lines if using host networking
         if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
             local host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
@@ -598,12 +599,12 @@ setup_pod() {
         error "Nginx container configuration not found: ${repo_dir}/systemd/ztpbootstrap-nginx.container"
         return 1
     fi
-    
+
     # Copy Web UI container and directory if webui exists
     if [[ -d "${repo_dir}/webui" ]] && [[ -f "${repo_dir}/systemd/ztpbootstrap-webui.container" ]]; then
         cp "${repo_dir}/systemd/ztpbootstrap-webui.container" "$systemd_dir/"
         log "Web UI container configuration installed"
-        
+
         # Remove PublishPort lines if using host networking
         local webui_container_file="${systemd_dir}/ztpbootstrap-webui.container"
         if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
@@ -613,7 +614,7 @@ setup_pod() {
                     rm -f "${webui_container_file}.tmp" 2>/dev/null || true
                     log "Removed PublishPort directives from webui container (host network mode)"
                 fi
-                
+
                 # Update nginx.conf to use localhost instead of container name for host networking
                 if [[ -f "$NGINX_CONF" ]]; then
                     if sed -i.tmp "s|ztpbootstrap-webui:5000|127.0.0.1:5000|g" "$NGINX_CONF" 2>/dev/null; then
@@ -625,7 +626,7 @@ setup_pod() {
                 fi
             fi
         fi
-        
+
         # Copy webui directory to script directory
         local webui_dest="${SCRIPT_DIR}/webui"
         if [[ ! -d "$webui_dest" ]]; then
@@ -646,7 +647,7 @@ setup_pod() {
             warn "Source: ${repo_dir}/webui"
             warn "Destination: $webui_dest"
         fi
-        
+
         # Ensure systemd recognizes the webui container file
         # This is important because systemd-quadlet needs to generate the service
         if [[ -f "${systemd_dir}/ztpbootstrap-webui.container" ]]; then
@@ -656,7 +657,7 @@ setup_pod() {
         warn "Web UI directory not found, Web UI container will not be included"
         warn "Service will run without Web UI"
     fi
-    
+
     return 0
 }
 
@@ -667,19 +668,19 @@ start_service() {
         error "Pod setup failed. Please create the macvlan network first."
         exit 1
     fi
-    
+
     # Define systemd directory (same as in setup_pod)
     local systemd_dir="/etc/containers/systemd/ztpbootstrap"
-    
+
     # Reload systemd daemon after copying files so it recognizes the new services
     log "Reloading systemd daemon..."
     systemctl daemon-reload
-    
+
     # Wait a moment for systemd to fully process the new services
     # Systemd quadlet generator needs time to process .container files
     sleep 2
-    
-    
+
+
     log "Starting ztpbootstrap pod..."
     if systemctl start ztpbootstrap; then
         log "Pod started successfully"
@@ -689,7 +690,7 @@ start_service() {
         error "Failed to start pod. Check logs with: journalctl -u ztpbootstrap -f"
         return 1
     fi
-    
+
     # Start nginx container
     log "Starting nginx container..."
     if systemctl start ztpbootstrap-nginx; then
@@ -698,15 +699,15 @@ start_service() {
     else
         warn "Failed to start nginx container. Check logs with: journalctl -u ztpbootstrap-nginx -f"
     fi
-    
+
     # Helper function to diagnose webui startup failures
     diagnose_webui_failure() {
         warn "=== WebUI Container Startup Diagnostics ==="
-        
+
         # Check service file locations
         local generator_file="/run/systemd/generator/ztpbootstrap-webui.service"
         local system_file="/etc/systemd/system/ztpbootstrap-webui.service"
-        
+
         warn "Service file locations:"
         if [[ -f "$generator_file" ]]; then
             warn "  ✓ Found: $generator_file"
@@ -718,13 +719,13 @@ start_service() {
         else
             warn "  ✗ Not found: $system_file"
         fi
-        
+
         # Check service status
         warn "Service status:"
         systemctl status ztpbootstrap-webui.service --no-pager -l | head -20 | sed 's/^/    /' | while IFS= read -r line; do
             warn "$line"
         done || true
-        
+
         # Check if container exists
         if podman ps -a --filter name=ztpbootstrap-webui --format "{{.Names}}" | grep -q ztpbootstrap-webui; then
             warn "Container exists (may be stopped):"
@@ -738,13 +739,13 @@ start_service() {
         else
             warn "  ✗ Container does not exist"
         fi
-        
+
         # Check journal logs
         warn "Systemd journal (last 20 lines):"
         journalctl -u ztpbootstrap-webui.service -n 20 --no-pager 2>&1 | sed 's/^/    /' | while IFS= read -r line; do
             warn "$line"
         done || true
-        
+
         # Check if required files exist
         warn "Required files:"
         if [[ -f "/opt/containerdata/ztpbootstrap/webui/start-webui.sh" ]]; then
@@ -762,10 +763,10 @@ start_service() {
         else
             warn "  ✗ /opt/containerdata/ztpbootstrap/webui/app.py NOT FOUND"
         fi
-        
+
         warn "=== End Diagnostics ==="
     }
-    
+
     # Start webui container if it exists
     # Check both unit-files and if the service is available
     if systemctl list-unit-files | grep -q ztpbootstrap-webui.service || systemctl list-units --all | grep -q ztpbootstrap-webui.service; then
@@ -773,7 +774,7 @@ start_service() {
         if systemctl start ztpbootstrap-webui.service 2>&1; then
             # Wait a moment for container to start
             sleep 3
-            
+
             # Verify service is actually running
             if systemctl is-active --quiet ztpbootstrap-webui.service; then
                 # Verify container is actually running
@@ -786,7 +787,7 @@ start_service() {
             else
                 warn "⚠️  Service start command succeeded but service is not active"
                 diagnose_webui_failure
-                
+
                 # Try once more after showing diagnostics
                 log "Retrying webui container start..."
                 sleep 2
@@ -846,7 +847,7 @@ start_service() {
 check_service_status() {
     log "Checking pod status..."
     systemctl status ztpbootstrap --no-pager -l
-    
+
     log ""
     log "Container status:"
     podman pod ps --filter name=ztpbootstrap
@@ -856,10 +857,10 @@ check_service_status() {
 # Main function
 main() {
     log "Starting Arista ZTP Bootstrap Service setup..."
-    
+
     parse_args "$@"
     check_root
-    
+
     if [[ "$HTTP_ONLY" == "true" ]]; then
         warn "⚠️  WARNING: HTTP-only mode is enabled!"
         warn "This configuration is INSECURE and should only be used in isolated lab environments."
@@ -870,21 +871,21 @@ main() {
         log "Proceeding with HTTP-only setup (flag provided, no confirmation required)"
         echo ""
     fi
-    
+
     # Check prerequisites first
     if ! check_setup_prerequisites; then
         error "Prerequisites check failed. Please fix issues above and try again."
         exit 1
     fi
-    
+
     check_env_file
     load_env
-    
+
     # Always set up logs directory (required for nginx container)
     if ! setup_logs_directory; then
         warn "Failed to set up logs directory - nginx container may fail to start"
     fi
-    
+
     # Ensure script directory is writable by webui container (runs as root)
     # This allows the webui to upload bootstrap scripts
     log "Setting permissions for webui script uploads..."
@@ -915,7 +916,7 @@ main() {
             log "Set permissions on script directory for webui uploads (NFS - using 777/666 due to NFS limitations, SELinux context not applicable)"
         fi
     fi
-    
+
     if [[ "$HTTP_ONLY" == "true" ]]; then
         configure_http_only
         log "HTTP-only mode configured"
@@ -931,10 +932,10 @@ main() {
             warn "Consider using Let's Encrypt with certbot for production (can be automated)"
         fi
     fi
-    
+
     start_service
     check_service_status
-    
+
     log "Setup completed successfully!"
     if [[ "$HTTP_ONLY" == "true" ]]; then
         log "The ZTP Bootstrap service is now running at: http://$DOMAIN"

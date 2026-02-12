@@ -26,7 +26,10 @@ EXISTING_DOMAIN=""
 EXISTING_IPV4=""
 EXISTING_IPV6=""
 EXISTING_CV_ADDR=""
-EXISTING_ENROLLMENT_TOKEN=""
+# EXISTING_ENROLL_CHARS: CVaaS enrollment value from Arista Device Registration.
+# Written to config as cvaas.enroll_chars and consumed by bootstrap.py (Apache 2.0,
+# originally by Arista Networks) as enrollChars for redirector auth and client certs.
+EXISTING_ENROLL_CHARS=""
 EXISTING_CV_PROXY=""
 EXISTING_EOS_URL=""
 EXISTING_NTP_SERVER=""
@@ -62,7 +65,7 @@ prompt_with_default() {
     local var_name="$3"
     local is_secret="${4:-false}"
     local allow_empty="${5:-false}"
-    
+
     # In non-interactive mode, use default value without prompting
     if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
         value="$default_value"
@@ -70,7 +73,7 @@ prompt_with_default() {
         eval "$var_name=\"$value\""
         return 0
     fi
-    
+
     if [[ "$is_secret" == "true" ]]; then
         info "$prompt_text"
         if [[ -n "$default_value" ]]; then
@@ -97,7 +100,7 @@ prompt_with_default() {
         fi
         read -r value
     fi
-    
+
     # Handle empty input
     if [[ -z "$value" ]]; then
         if [[ -n "$default_value" ]]; then
@@ -114,7 +117,7 @@ prompt_with_default() {
             value=""
         fi
     fi
-    
+
     eval "$var_name='$value'"
 }
 
@@ -123,7 +126,7 @@ prompt_yes_no() {
     local prompt_text="$1"
     local default_value="${2:-n}"
     local var_name="$3"
-    
+
     # In non-interactive mode, use default value without prompting
     if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
         if [[ "$default_value" == "y" ]] || [[ "$default_value" == "Y" ]]; then
@@ -134,14 +137,14 @@ prompt_yes_no() {
         log "Non-interactive: $prompt_text = $default_value"
         return 0
     fi
-    
+
     local default_display
     if [[ "$default_value" == "y" ]] || [[ "$default_value" == "Y" ]]; then
         default_display="Y/n"
     else
         default_display="y/N"
     fi
-    
+
     while true; do
         echo -n -e "${CYAN}[?]${NC} $prompt_text ${BLUE}[$default_display]${NC}: "
         read -r response
@@ -159,7 +162,7 @@ detect_previous_install() {
     local script_dir="${1:-/opt/containerdata/ztpbootstrap}"
     local systemd_dir="/etc/containers/systemd/ztpbootstrap"
     local found=false
-    
+
     # Check if service directory exists and has files
     if [[ -d "$script_dir" ]]; then
         local file_count
@@ -172,7 +175,7 @@ detect_previous_install() {
             found=true
         fi
     fi
-    
+
     # Check if systemd directory exists and has files
     if [[ -d "$systemd_dir" ]]; then
         local file_count
@@ -185,7 +188,7 @@ detect_previous_install() {
             found=true
         fi
     fi
-    
+
     if [[ "$found" == "true" ]]; then
         return 0
     else
@@ -197,26 +200,26 @@ detect_previous_install() {
 create_backup() {
     local script_dir="${1:-/opt/containerdata/ztpbootstrap}"
     local systemd_dir="/etc/containers/systemd/ztpbootstrap"
-    
+
     # Get repository directory
     local repo_dir
     repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    
+
     # Create backup directory
     local backup_dir="${repo_dir}/${BACKUP_BASE_DIR}"
     local timestamp
     timestamp=$(date +"%Y%m%d_%H%M%S")
     local backup_path="${backup_dir}/backup_${timestamp}"
-    
+
     log "Creating backup of existing installation..."
     log "Backup location: $backup_path"
-    
+
     # Create backup directory structure
     if ! mkdir -p "$backup_path" 2>/dev/null; then
         error "Failed to create backup directory: $backup_path"
         return 1
     fi
-    
+
     # Backup service directory
     if [[ -d "$script_dir" ]]; then
         log "Backing up: $script_dir"
@@ -236,7 +239,7 @@ create_backup() {
             fi
         fi
     fi
-    
+
     # Backup systemd directory
     if [[ -d "$systemd_dir" ]]; then
         log "Backing up: $systemd_dir"
@@ -256,7 +259,7 @@ create_backup() {
             fi
         fi
     fi
-    
+
     # Create backup info file
     cat > "${backup_path}/backup_info.txt" << EOF
 ZTP Bootstrap Backup Information
@@ -274,33 +277,33 @@ To restore this backup, run:
 Or use the restore function:
   restore_backup "$timestamp"
 EOF
-    
+
     log "Backup completed successfully!"
     log "Backup saved to: $backup_path"
     echo ""
-    
+
     # Store backup path for later reference
     echo "$backup_path" > "${backup_dir}/.last_backup"
-    
+
     return 0
 }
 
 # Restore from backup
 restore_backup() {
     local backup_timestamp="$1"
-    
+
     # Get repository directory
     local repo_dir
     repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local backup_dir="${repo_dir}/${BACKUP_BASE_DIR}"
-    
+
     # If no timestamp provided, list available backups
     if [[ -z "$backup_timestamp" ]]; then
         if [[ ! -d "$backup_dir" ]]; then
             error "No backups found. Backup directory does not exist: $backup_dir"
             return 1
         fi
-        
+
         local backups
         # Use portable find command (works on both Linux and macOS)
         if command -v gfind >/dev/null 2>&1; then
@@ -310,12 +313,12 @@ restore_backup() {
             # Use standard find (portable)
             backups=($(find "$backup_dir" -maxdepth 1 -type d -name "backup_*" 2>/dev/null | sed 's|.*/||' | sort -r))
         fi
-        
+
         if [[ ${#backups[@]} -eq 0 ]]; then
             error "No backups found in: $backup_dir"
             return 1
         fi
-        
+
         echo ""
         echo -e "${CYAN}Available backups:${NC}"
         echo ""
@@ -330,46 +333,46 @@ restore_backup() {
             ((i++))
         done
         echo ""
-        
+
         echo -n -e "${CYAN}[?]${NC} Select backup to restore (1-${#backups[@]}) or 'q' to quit: "
         read -r selection
-        
+
         if [[ "$selection" == "q" ]] || [[ "$selection" == "Q" ]]; then
             log "Restore cancelled."
             return 1
         fi
-        
+
         if ! [[ "$selection" =~ ^[0-9]+$ ]] || [[ "$selection" -lt 1 ]] || [[ "$selection" -gt ${#backups[@]} ]]; then
             error "Invalid selection: $selection"
             return 1
         fi
-        
+
         backup_timestamp=$(echo "${backups[$((selection-1))]}" | sed 's/backup_//')
     fi
-    
+
     local backup_path="${backup_dir}/backup_${backup_timestamp}"
-    
+
     if [[ ! -d "$backup_path" ]]; then
         error "Backup not found: $backup_path"
         return 1
     fi
-    
+
     echo ""
     warn "⚠️  WARNING: This will overwrite existing files!"
     warn "The following directories will be restored:"
     warn "  - /opt/containerdata/ztpbootstrap"
     warn "  - /etc/containers/systemd/ztpbootstrap"
     echo ""
-    
+
     prompt_yes_no "Are you sure you want to restore from backup?" "n" CONFIRM_RESTORE
-    
+
     if [[ "$CONFIRM_RESTORE" != "true" ]]; then
         log "Restore cancelled."
         return 1
     fi
-    
+
     log "Restoring from backup: $backup_path"
-    
+
     # Restore service directory
     if [[ -d "${backup_path}/containerdata_ztpbootstrap" ]]; then
         log "Restoring service directory..."
@@ -401,7 +404,7 @@ restore_backup() {
     else
         warn "Service directory backup not found in: ${backup_path}/containerdata_ztpbootstrap"
     fi
-    
+
     # Restore systemd directory
     if [[ -d "${backup_path}/etc_containers_systemd_ztpbootstrap" ]]; then
         log "Restoring systemd directory..."
@@ -437,14 +440,14 @@ restore_backup() {
     else
         warn "Systemd directory backup not found in: ${backup_path}/etc_containers_systemd_ztpbootstrap"
     fi
-    
+
     log "Restore completed successfully!"
     log ""
     log "Next steps:"
     log "  1. Reload systemd: sudo systemctl daemon-reload"
     log "  2. Restart services if needed: sudo systemctl restart ztpbootstrap-pod"
     echo ""
-    
+
     return 0
 }
 
@@ -452,7 +455,7 @@ restore_backup() {
 check_running_services() {
     local running_services=()
     local service_type="none"
-    
+
     # Check for pod-based services (quadlet generates ztpbootstrap-pod.service from ztpbootstrap.pod)
     if systemctl is-active --quiet ztpbootstrap-pod.service 2>/dev/null; then
         running_services+=("ztpbootstrap-pod.service")
@@ -470,7 +473,7 @@ check_running_services() {
             service_type="pod-based"
         fi
     fi
-    
+
     # Return service type and list
     if [[ ${#running_services[@]} -gt 0 ]]; then
         echo "${service_type}:${running_services[*]}"
@@ -486,11 +489,11 @@ stop_services_gracefully() {
     local service_info="$1"
     local service_type="${service_info%%:*}"
     local services="${service_info#*:}"
-    
+
     if [[ "$service_type" == "none" ]] || [[ -z "$services" ]]; then
         return 0
     fi
-    
+
     log "Stopping services gracefully..."
     if [[ "$service_type" == "pod-based" ]]; then
         # New version: stop containers first, then pod
@@ -507,7 +510,7 @@ stop_services_gracefully() {
         fi
         sleep 2
     fi
-    
+
     # Verify services are stopped
     local still_running=false
     IFS=' ' read -ra SERVICE_ARRAY <<< "$services"
@@ -526,13 +529,13 @@ stop_services_gracefully() {
             fi
         fi
     done
-    
+
     if [[ "$still_running" == "true" ]]; then
         warn "Some services may still be running. Proceeding anyway..."
     else
         log "All services stopped successfully"
     fi
-    
+
     return 0
 }
 
@@ -540,11 +543,11 @@ stop_services_gracefully() {
 read_ztpbootstrap_env() {
     local env_file="${1:-/opt/containerdata/ztpbootstrap/ztpbootstrap.env}"
     local values=()
-    
+
     if [[ ! -f "$env_file" ]]; then
         return 1
     fi
-    
+
     # Read file (handle sudo if needed)
     local content
     if [[ $EUID -eq 0 ]]; then
@@ -552,17 +555,17 @@ read_ztpbootstrap_env() {
     else
         content=$(sudo cat "$env_file" 2>/dev/null)
     fi
-    
+
     if [[ -z "$content" ]]; then
         return 1
     fi
-    
+
     # Extract values (handle comments and empty lines)
     while IFS= read -r line; do
         # Skip comments and empty lines
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${line// }" ]] && continue
-        
+
         # Extract key=value pairs
         if [[ "$line" =~ ^[[:space:]]*([^=]+)=(.*)$ ]]; then
             local key="${BASH_REMATCH[1]// /}"
@@ -575,7 +578,7 @@ read_ztpbootstrap_env() {
             values+=("${key}=${value}")
         fi
     done <<< "$content"
-    
+
     # Output as key=value pairs (one per line)
     printf '%s\n' "${values[@]}"
     return 0
@@ -585,36 +588,36 @@ read_ztpbootstrap_env() {
 find_network_for_ip() {
     local target_ip="$1"
     local networks
-    
+
     # Check if podman is available
     if ! command -v podman >/dev/null 2>&1; then
         return 1
     fi
-    
+
     # Get list of all podman networks (skip header line)
     networks=$(podman network ls --format "{{.Name}}" 2>/dev/null || echo "")
-    
+
     if [[ -z "$networks" ]]; then
         return 1
     fi
-    
+
     # Check each network to see if the IP falls within its subnet
     while IFS= read -r network_name; do
         [[ -z "$network_name" ]] && continue
-        
+
         # Skip default networks that don't support static IPs
         if [[ "$network_name" == "podman" ]] || [[ "$network_name" == "default" ]]; then
             continue
         fi
-        
+
         # Get network subnet from inspect
         local subnet_info
         subnet_info=$(podman network inspect "$network_name" 2>/dev/null | grep -i "subnet" | head -1 || echo "")
-        
+
         if [[ -z "$subnet_info" ]]; then
             continue
         fi
-        
+
         # Extract subnet (format: "Subnet": "10.0.0.0/24" or similar)
         local subnet=""
         if [[ "$subnet_info" =~ \"Subnet\":[[:space:]]*\"([^\"]+)\" ]]; then
@@ -622,11 +625,11 @@ find_network_for_ip() {
         elif [[ "$subnet_info" =~ subnet[[:space:]]*[:=][[:space:]]*([0-9.]+/[0-9]+) ]]; then
             subnet="${BASH_REMATCH[1]}"
         fi
-        
+
         if [[ -z "$subnet" ]]; then
             continue
         fi
-        
+
         # Check if IP is in subnet
         # Try using ipcalc if available (most accurate)
         if command -v ipcalc >/dev/null 2>&1; then
@@ -645,13 +648,13 @@ find_network_for_ip() {
                 local prefix="${subnet##*/}"
                 local ip_octets=($(echo "$target_ip" | tr '.' ' '))
                 local net_octets=($(echo "$network_addr" | tr '.' ' '))
-                
+
                 if [[ ${#ip_octets[@]} -eq 4 ]] && [[ ${#net_octets[@]} -eq 4 ]]; then
                     # Calculate how many octets to check based on prefix
                     local octets_to_check=$((prefix / 8))
                     local bits_in_partial=$((prefix % 8))
                     local match=true
-                    
+
                     # Check full octets
                     for ((i=0; i<octets_to_check && i<4; i++)); do
                         if [[ "${ip_octets[$i]}" != "${net_octets[$i]}" ]]; then
@@ -659,7 +662,7 @@ find_network_for_ip() {
                             break
                         fi
                     done
-                    
+
                     # If all full octets match and we have a partial octet, check it
                     if [[ "$match" == "true" ]] && [[ $bits_in_partial -gt 0 ]] && [[ $octets_to_check -lt 4 ]]; then
                         local ip_octet="${ip_octets[$octets_to_check]}"
@@ -669,7 +672,7 @@ find_network_for_ip() {
                             match=false
                         fi
                     fi
-                    
+
                     if [[ "$match" == "true" ]]; then
                         echo "$network_name"
                         return 0
@@ -682,7 +685,7 @@ find_network_for_ip() {
             local prefix="${subnet##*/}"
             local ip_octets=($(echo "$target_ip" | tr '.' ' '))
             local net_octets=($(echo "$network_addr" | tr '.' ' '))
-            
+
             if [[ ${#ip_octets[@]} -eq 4 ]] && [[ ${#net_octets[@]} -eq 4 ]]; then
                 # Check common prefix lengths
                 if [[ "$prefix" == "24" ]] && [[ "${ip_octets[0]}" == "${net_octets[0]}" ]] && \
@@ -700,7 +703,7 @@ find_network_for_ip() {
             fi
         fi
     done <<< "$networks"
-    
+
     return 1
 }
 
@@ -710,12 +713,12 @@ read_container_file() {
     local container_file="${base_path}/ztpbootstrap.container"
     local pod_file="${base_path}/ztpbootstrap.pod"
     local target_file=""
-    
+
     # Check for pod file first (newer), then container file (older)
     # But if pod file is missing IP addresses, also check container file
     local pod_content=""
     local container_content=""
-    
+
     if [[ -f "$pod_file" ]]; then
         if [[ $EUID -eq 0 ]]; then
             pod_content=$(cat "$pod_file" 2>/dev/null)
@@ -723,7 +726,7 @@ read_container_file() {
             pod_content=$(sudo cat "$pod_file" 2>/dev/null)
         fi
     fi
-    
+
     if [[ -f "$container_file" ]]; then
         if [[ $EUID -eq 0 ]]; then
             container_content=$(cat "$container_file" 2>/dev/null)
@@ -731,7 +734,7 @@ read_container_file() {
             container_content=$(sudo cat "$container_file" 2>/dev/null)
         fi
     fi
-    
+
     # Prefer pod file, but if it's missing IP6 or DNS entries and container file has them, use container file
     if [[ -n "$pod_content" ]]; then
         # Check if pod has Network=host and no IP addresses
@@ -762,7 +765,7 @@ read_container_file() {
     else
         return 1
     fi
-    
+
     # Read file (handle sudo if needed)
     local content
     if [[ $EUID -eq 0 ]]; then
@@ -770,32 +773,32 @@ read_container_file() {
     else
         content=$(sudo cat "$target_file" 2>/dev/null)
     fi
-    
+
     if [[ -z "$content" ]]; then
         return 1
     fi
-    
+
     # Extract key=value pairs from [Container] or [Pod] section
     local in_section=false
     local values=()
-    
+
     while IFS= read -r line; do
         # Skip comments and empty lines
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${line// }" ]] && continue
-        
+
         # Check for [Container] or [Pod] section
         if [[ "$line" =~ ^[[:space:]]*\[(Container|Pod)\] ]]; then
             in_section=true
             continue
         fi
-        
+
         # Stop at next section (but continue reading if we're in the section we want)
         if [[ "$line" =~ ^[[:space:]]*\[ ]] && [[ ! "$line" =~ ^[[:space:]]*\[(Container|Pod)\] ]]; then
             in_section=false
             continue
         fi
-        
+
         # Extract key=value pairs from Container/Pod section
         if [[ "$in_section" == "true" ]] && [[ "$line" =~ ^[[:space:]]*([^=]+)=(.*)$ ]]; then
             local key="${BASH_REMATCH[1]// /}"
@@ -806,7 +809,7 @@ read_container_file() {
             values+=("${key}=${value}")
         fi
     done <<< "$content"
-    
+
     # Output as key=value pairs (one per line)
     printf '%s\n' "${values[@]}"
     return 0
@@ -816,11 +819,11 @@ read_container_file() {
 read_nginx_conf() {
     local nginx_file="${1:-/opt/containerdata/ztpbootstrap/nginx.conf}"
     local values=()
-    
+
     if [[ ! -f "$nginx_file" ]]; then
         return 1
     fi
-    
+
     # Read file (handle sudo if needed)
     local content
     if [[ $EUID -eq 0 ]]; then
@@ -828,24 +831,24 @@ read_nginx_conf() {
     else
         content=$(sudo cat "$nginx_file" 2>/dev/null)
     fi
-    
+
     if [[ -z "$content" ]]; then
         return 1
     fi
-    
+
     # Extract server_name (domain)
     # Try multiple patterns to handle different nginx.conf formats
     # Prefer domains that are not example.com or localhost
     local domain=""
     local all_domains=()
-    
+
     # First, collect all server_name values
     while IFS= read -r line; do
         # Skip comments
         [[ "$line" =~ ^[[:space:]]*# ]] && continue
         # Skip lines that don't have server_name
         [[ ! "$line" =~ server_name ]] && continue
-        
+
         # Extract server_name value
         if [[ "$line" =~ server_name[[:space:]]+([^;]+) ]]; then
             local server_names="${BASH_REMATCH[1]}"
@@ -860,12 +863,12 @@ read_nginx_conf() {
             fi
         fi
     done <<< "$content"
-    
+
     # Debug: log all found domains
     if [[ ${#all_domains[@]} -gt 0 ]]; then
         log "  Found ${#all_domains[@]} domain(s) in nginx.conf: ${all_domains[*]}"
     fi
-    
+
     # Prefer domains that are not example.com
     for candidate in "${all_domains[@]}"; do
         if [[ "$candidate" != *"example.com"* ]] && [[ "$candidate" != "localhost" ]] && [[ "$candidate" != "_" ]]; then
@@ -874,13 +877,13 @@ read_nginx_conf() {
             break
         fi
     done
-    
+
     # If no non-example domain found, use first valid domain
     if [[ -z "$domain" ]] && [[ ${#all_domains[@]} -gt 0 ]]; then
         domain="${all_domains[0]}"
         log "  No non-example domain found, using first domain: $domain"
     fi
-    
+
     # If not found with first pattern, try a more flexible pattern
     if [[ -z "$domain" ]]; then
         # Look for server_name followed by domain (handles various whitespace)
@@ -896,7 +899,7 @@ read_nginx_conf() {
             fi
         fi
     fi
-    
+
     # Additional check: if domain looks like an IP address or is invalid, try next server_name
     if [[ -n "$domain" ]] && [[ "$domain" =~ ^[0-9] ]] || [[ "$domain" == "_" ]] || [[ "$domain" == "localhost" ]]; then
         # Domain is an IP or invalid, try to find a better one
@@ -918,11 +921,11 @@ read_nginx_conf() {
             done <<< "$server_name_lines"
         fi
     fi
-    
+
     if [[ -n "$domain" ]] && [[ "$domain" != "_" ]] && [[ "$domain" != "localhost" ]]; then
         values+=("DOMAIN=${domain}")
     fi
-    
+
     # Detect HTTP-only mode
     # HTTP-only mode is indicated by:
     # 1. Presence of "HTTP-ONLY MODE" comment, OR
@@ -932,7 +935,7 @@ read_nginx_conf() {
         http_only="true"
     fi
     values+=("HTTP_ONLY=${http_only}")
-    
+
     # Extract HTTPS port from listen directives
     # Look for "listen 443 ssl" or "listen [::]:443 ssl" patterns
     local https_port="443"
@@ -945,20 +948,20 @@ read_nginx_conf() {
         fi
     fi
     values+=("HTTPS_PORT=${https_port}")
-    
+
     # Extract SSL certificate paths
     if [[ "$content" =~ ssl_certificate[[:space:]]+([^;]+) ]]; then
         local cert_path="${BASH_REMATCH[1]}"
         cert_path="${cert_path// /}"
         values+=("SSL_CERT_PATH=${cert_path}")
     fi
-    
+
     if [[ "$content" =~ ssl_certificate_key[[:space:]]+([^;]+) ]]; then
         local key_path="${BASH_REMATCH[1]}"
         key_path="${key_path// /}"
         values+=("SSL_KEY_PATH=${key_path}")
     fi
-    
+
     # Output as key=value pairs (one per line)
     printf '%s\n' "${values[@]}"
     return 0
@@ -968,7 +971,7 @@ read_nginx_conf() {
 read_config_yaml() {
     local config_file="${1:-config.yaml}"
     local base_dir="${2:-}"
-    
+
     # If base_dir is provided, use it; otherwise use repo directory
     if [[ -n "$base_dir" ]]; then
         local full_path="${base_dir}/${config_file}"
@@ -977,43 +980,43 @@ read_config_yaml() {
         repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         local full_path="${repo_dir}/${config_file}"
     fi
-    
+
     if [[ ! -f "$full_path" ]]; then
         return 1
     fi
-    
+
     if ! command -v yq >/dev/null 2>&1; then
         log "yq not found, cannot read config.yaml"
         return 1
     fi
-    
+
     local values=()
-    
+
     # Read network settings
     local domain
     domain=$(yq eval '.network.domain // ""' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$domain" ]] && [[ "$domain" != "null" ]]; then
         values+=("DOMAIN=$domain")
     fi
-    
+
     local ipv4
     ipv4=$(yq eval '.network.ipv4 // ""' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]]; then
         values+=("IPV4=$ipv4")
     fi
-    
+
     local ipv6
     ipv6=$(yq eval '.network.ipv6 // ""' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]]; then
         values+=("IPV6=$ipv6")
     fi
-    
+
     local network
     network=$(yq eval '.network.network // ""' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$network" ]] && [[ "$network" != "null" ]]; then
         values+=("NETWORK=$network")
     fi
-    
+
     local http_only
     http_only=$(yq eval '.network.http_only // false' "$full_path" 2>/dev/null || echo "false")
     if [[ "$http_only" == "true" ]]; then
@@ -1021,81 +1024,81 @@ read_config_yaml() {
     else
         values+=("HTTP_ONLY=false")
     fi
-    
+
     local https_port
     https_port=$(yq eval '.network.https_port // 443' "$full_path" 2>/dev/null || echo "443")
     values+=("HTTPS_PORT=$https_port")
-    
+
     # Read CVaaS settings
     local cv_addr
     cv_addr=$(yq eval '.cvaas.address // ""' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$cv_addr" ]] && [[ "$cv_addr" != "null" ]]; then
         values+=("CV_ADDR=$cv_addr")
     fi
-    
-    local enrollment_token
-    enrollment_token=$(yq eval '.cvaas.enrollment_token // ""' "$full_path" 2>/dev/null || echo "")
-    if [[ -n "$enrollment_token" ]] && [[ "$enrollment_token" != "null" ]]; then
-        values+=("ENROLLMENT_TOKEN=$enrollment_token")
+
+    local enroll_chars
+    enroll_chars=$(yq eval '.cvaas.enroll_chars // ""' "$full_path" 2>/dev/null || echo "")
+    if [[ -n "$enroll_chars" ]] && [[ "$enroll_chars" != "null" ]]; then
+        values+=("ENROLL_CHARS=$enroll_chars")
     fi
-    
+
     local cv_proxy
     cv_proxy=$(yq eval '.cvaas.proxy // ""' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$cv_proxy" ]] && [[ "$cv_proxy" != "null" ]]; then
         values+=("CV_PROXY=$cv_proxy")
     fi
-    
+
     local eos_url
     eos_url=$(yq eval '.cvaas.eos_url // ""' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$eos_url" ]] && [[ "$eos_url" != "null" ]]; then
         values+=("EOS_URL=$eos_url")
     fi
-    
+
     local ntp_server
     ntp_server=$(yq eval '.cvaas.ntp_server // ""' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$ntp_server" ]] && [[ "$ntp_server" != "null" ]]; then
         values+=("NTP_SERVER=$ntp_server")
     fi
-    
+
     # Read container settings
     local timezone
     timezone=$(yq eval '.container.timezone // ""' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$timezone" ]] && [[ "$timezone" != "null" ]]; then
         values+=("TIMEZONE=$timezone")
     fi
-    
+
     local host_network
     host_network=$(yq eval '.container.host_network // false' "$full_path" 2>/dev/null || echo "false")
     if [[ "$host_network" == "true" ]]; then
         values+=("HOST_NETWORK=true")
     fi
-    
+
     # Read DNS servers (array)
     local dns1
     dns1=$(yq eval '.container.dns[0] // ""' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$dns1" ]] && [[ "$dns1" != "null" ]]; then
         values+=("DNS1=$dns1")
     fi
-    
+
     local dns2
     dns2=$(yq eval '.container.dns[1] // ""' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$dns2" ]] && [[ "$dns2" != "null" ]]; then
         values+=("DNS2=$dns2")
     fi
-    
+
     # Read auth settings
     local admin_password_hash
     admin_password_hash=$(yq eval '.auth.admin_password_hash // ""' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$admin_password_hash" ]] && [[ "$admin_password_hash" != "null" ]] && [[ "$admin_password_hash" != "" ]]; then
         values+=("ADMIN_PASSWORD_HASH=$admin_password_hash")
     fi
-    
+
     local session_timeout
     session_timeout=$(yq eval '.auth.session_timeout // ""' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$session_timeout" ]] && [[ "$session_timeout" != "null" ]]; then
         values+=("SESSION_TIMEOUT=$session_timeout")
     fi
-    
+
     # Output as key=value pairs (one per line)
     printf '%s\n' "${values[@]}"
     return 0
@@ -1104,14 +1107,14 @@ read_config_yaml() {
 # Load existing installation values
 load_existing_installation_values() {
     local script_dir="${1:-/opt/containerdata/ztpbootstrap}"
-    
+
     # Initialize variables (global scope for use in interactive_config)
     EXISTING_SCRIPT_DIR="$script_dir"
     EXISTING_DOMAIN=""
     EXISTING_IPV4=""
     EXISTING_IPV6=""
     EXISTING_CV_ADDR=""
-    EXISTING_ENROLLMENT_TOKEN=""
+    EXISTING_ENROLL_CHARS=""
     EXISTING_CV_PROXY=""
     EXISTING_EOS_URL=""
     EXISTING_NTP_SERVER=""
@@ -1123,20 +1126,20 @@ load_existing_installation_values() {
     EXISTING_HTTPS_PORT=""
     EXISTING_ADMIN_PASSWORD_HASH=""
     EXISTING_SESSION_TIMEOUT=""
-    
+
     log "Reading existing installation values..."
-    
+
     # Only read from config.yaml in installation directory (not from repo)
     # The repo's config.yaml has template values that would override real values
     local install_config_file="${script_dir}/config.yaml"
     local config_file=""
-    
+
     # Only use config.yaml from installation directory, never from repo
     if [[ -f "$install_config_file" ]] && command -v yq >/dev/null 2>&1; then
         config_file="$install_config_file"
         log "Reading from config.yaml in installation directory (highest priority)..."
     fi
-    
+
     if [[ -n "$config_file" ]] && [[ -f "$config_file" ]]; then
         while IFS='=' read -r key value; do
             case "$key" in
@@ -1147,7 +1150,7 @@ load_existing_installation_values() {
                 HTTP_ONLY) EXISTING_HTTP_ONLY="$value" ;;
                 HTTPS_PORT) EXISTING_HTTPS_PORT="$value" ;;
                 CV_ADDR) EXISTING_CV_ADDR="$value" ;;
-                ENROLLMENT_TOKEN) EXISTING_ENROLLMENT_TOKEN="$value" ;;
+                ENROLL_CHARS) EXISTING_ENROLL_CHARS="$value" ;;
                 CV_PROXY) EXISTING_CV_PROXY="$value" ;;
                 EOS_URL) EXISTING_EOS_URL="$value" ;;
                 NTP_SERVER) EXISTING_NTP_SERVER="$value" ;;
@@ -1162,14 +1165,14 @@ load_existing_installation_values() {
     elif [[ -f "$install_config_file" ]]; then
         log "config.yaml found in installation directory but yq is not installed, skipping config.yaml read"
     fi
-    
+
     # Read ztpbootstrap.env (only fill in values not already set from config.yaml)
     local env_file="${script_dir}/ztpbootstrap.env"
     if [[ -f "$env_file" ]]; then
         while IFS='=' read -r key value; do
             case "$key" in
                 CV_ADDR) [[ -z "$EXISTING_CV_ADDR" ]] && EXISTING_CV_ADDR="$value" ;;
-                ENROLLMENT_TOKEN) [[ -z "$EXISTING_ENROLLMENT_TOKEN" ]] && EXISTING_ENROLLMENT_TOKEN="$value" ;;
+                ENROLL_CHARS) [[ -z "$EXISTING_ENROLL_CHARS" ]] && EXISTING_ENROLL_CHARS="$value" ;;
                 CV_PROXY) [[ -z "$EXISTING_CV_PROXY" ]] && EXISTING_CV_PROXY="$value" ;;
                 EOS_URL) [[ -z "$EXISTING_EOS_URL" ]] && EXISTING_EOS_URL="$value" ;;
                 NTP_SERVER) [[ -z "$EXISTING_NTP_SERVER" ]] && EXISTING_NTP_SERVER="$value" ;;
@@ -1177,7 +1180,7 @@ load_existing_installation_values() {
             esac
         done < <(read_ztpbootstrap_env "$env_file")
     fi
-    
+
     # Read container file
     local systemd_dir="/etc/containers/systemd/ztpbootstrap"
     local container_values=""
@@ -1192,7 +1195,7 @@ load_existing_installation_values() {
     else
         log "Container directory does not exist: $systemd_dir"
     fi
-    
+
     if [[ -n "$container_values" ]]; then
         log "Parsing container values..."
         # Use process substitution to ensure proper line-by-line reading
@@ -1209,9 +1212,9 @@ load_existing_installation_values() {
             value="${value% }"
             value="${value#\"}"
             value="${value%\"}"
-            
+
             case "$key" in
-                Network) 
+                Network)
                     # If Network is "null" or empty, treat it as not set (will be detected from IP)
                     # Only set if not already set from config.yaml
                     if [[ "$value" != "null" ]] && [[ -n "$value" ]] && [[ -z "$EXISTING_NETWORK" ]]; then
@@ -1222,7 +1225,7 @@ load_existing_installation_values() {
                         log "  Found Network: null or empty (will try to detect from IP)"
                     fi
                     ;;
-                IP) 
+                IP)
                     # Only set if not already set from config.yaml
                     if [[ -z "$EXISTING_IPV4" ]]; then
                         EXISTING_IPV4="$value"
@@ -1230,7 +1233,7 @@ load_existing_installation_values() {
                         parsed_count=$((parsed_count + 1)) || true
                     fi
                     ;;
-                IP6) 
+                IP6)
                     # Only set if not already set from config.yaml
                     if [[ -z "$EXISTING_IPV6" ]]; then
                         EXISTING_IPV6="$value"
@@ -1269,7 +1272,7 @@ load_existing_installation_values() {
     else
         log "No container values to parse"
     fi
-    
+
     # If we have an IPv4 address but no network (or network is not "host"), try to find which network it belongs to
     if [[ -n "$EXISTING_IPV4" ]] && [[ -z "$EXISTING_NETWORK" ]]; then
         log "IPv4 address found ($EXISTING_IPV4) but no network specified, attempting to detect network..."
@@ -1282,7 +1285,7 @@ load_existing_installation_values() {
             log "  Could not automatically detect network for $EXISTING_IPV4"
         fi
     fi
-    
+
     # If we have an IPv6 address but no network, try to find which network it belongs to
     if [[ -n "$EXISTING_IPV6" ]] && [[ -z "$EXISTING_NETWORK" ]]; then
         log "IPv6 address found ($EXISTING_IPV6) but no network specified, attempting to detect network..."
@@ -1295,14 +1298,14 @@ load_existing_installation_values() {
             log "  Could not automatically detect network for $EXISTING_IPV6"
         fi
     fi
-    
+
     # Read nginx.conf (only fill in values not already set from config.yaml)
     local nginx_file="${script_dir}/nginx.conf"
     if [[ -f "$nginx_file" ]]; then
         log "Reading nginx.conf from: $nginx_file"
         while IFS='=' read -r key value; do
             case "$key" in
-                DOMAIN) 
+                DOMAIN)
                     # Only set if not already set from config.yaml
                     if [[ -z "$EXISTING_DOMAIN" ]]; then
                         EXISTING_DOMAIN="$value"
@@ -1316,7 +1319,7 @@ load_existing_installation_values() {
     else
         log "nginx.conf not found at: $nginx_file"
     fi
-    
+
     # If no domain found, try to detect system hostname/FQDN
     if [[ -z "$EXISTING_DOMAIN" ]]; then
         # Try hostname -f first (FQDN), fallback to hostname if -f doesn't work
@@ -1344,7 +1347,7 @@ load_existing_installation_values() {
             fi
         fi
     fi
-    
+
     # Debug: Log loaded values
     log "Summary of loaded existing values:"
     if [[ -n "$EXISTING_DOMAIN" ]]; then
@@ -1382,10 +1385,10 @@ load_existing_installation_values() {
     else
         log "  CVaaS address: (not found)"
     fi
-    if [[ -n "$EXISTING_ENROLLMENT_TOKEN" ]]; then
-        log "  Enrollment token: (found, hidden)"
+    if [[ -n "$EXISTING_ENROLL_CHARS" ]]; then
+        log "  Enrollment chars: (found, hidden)"
     else
-        log "  Enrollment token: (not found)"
+        log "  Enrollment chars: (not found)"
     fi
     if [[ -n "$EXISTING_TIMEZONE" ]]; then
         log "  Timezone: $EXISTING_TIMEZONE"
@@ -1400,7 +1403,7 @@ load_existing_installation_values() {
     else
         log "  DNS server 2: (not found)"
     fi
-    
+
     log "Finished loading existing values from installation"
     return 0
 }
@@ -1409,9 +1412,9 @@ load_existing_installation_values() {
 clean_installation_directories() {
     local script_dir="${1:-/opt/containerdata/ztpbootstrap}"
     local systemd_dir="/etc/containers/systemd/ztpbootstrap"
-    
+
     log "Cleaning installation directories..."
-    
+
     # Clean service directory
     if [[ -d "$script_dir" ]]; then
         log "Cleaning: $script_dir"
@@ -1421,7 +1424,7 @@ clean_installation_directories() {
             sudo find "$script_dir" -mindepth 1 -delete 2>/dev/null || warn "Failed to clean $script_dir"
         fi
     fi
-    
+
     # Clean systemd directory
     if [[ -d "$systemd_dir" ]]; then
         log "Cleaning: $systemd_dir"
@@ -1431,7 +1434,7 @@ clean_installation_directories() {
             sudo find "$systemd_dir" -mindepth 1 -delete 2>/dev/null || warn "Failed to clean $systemd_dir"
         fi
     fi
-    
+
     log "Directories cleaned successfully"
     return 0
 }
@@ -1444,11 +1447,11 @@ is_nfs_mount() {
     if [[ -z "$path" ]]; then
         return 1
     fi
-    
+
     # Resolve the path to its actual location
     local resolved_path
     resolved_path=$(readlink -f "$path" 2>/dev/null || realpath "$path" 2>/dev/null || echo "$path")
-    
+
     # Check if the path is on an NFS mount using findmnt or mount
     if command -v findmnt >/dev/null 2>&1; then
         if findmnt -n -o FSTYPE -T "$resolved_path" 2>/dev/null | grep -qi "^nfs"; then
@@ -1459,13 +1462,13 @@ is_nfs_mount() {
             return 0
         fi
     fi
-    
+
     # Check parent directories if the path itself doesn't exist yet
     local check_path="$resolved_path"
     while [[ "$check_path" != "/" ]] && [[ ! -e "$check_path" ]]; do
         check_path=$(dirname "$check_path")
     done
-    
+
     if [[ -n "$check_path" ]] && [[ "$check_path" != "/" ]]; then
         if command -v findmnt >/dev/null 2>&1; then
             if findmnt -n -o FSTYPE -T "$check_path" 2>/dev/null | grep -qi "^nfs"; then
@@ -1477,7 +1480,7 @@ is_nfs_mount() {
             fi
         fi
     fi
-    
+
     return 1
 }
 
@@ -1487,17 +1490,17 @@ create_self_signed_cert() {
     local domain="${2:-${DOMAIN:-ztpboot.example.com}}"
     local cert_file="${cert_dir}/${CERT_FILE:-fullchain.pem}"
     local key_file="${cert_dir}/${KEY_FILE:-privkey.pem}"
-    
+
     # Check if certificates already exist
     if [[ -f "$cert_file" ]] && [[ -f "$key_file" ]]; then
         log "SSL certificates already exist, skipping creation"
         return 0
     fi
-    
+
     log "Creating self-signed certificate for testing..."
     log "Domain: $domain"
     log "Certificate directory: $cert_dir"
-    
+
     # Create certificate directory if it doesn't exist
     if [[ ! -d "$cert_dir" ]]; then
         if [[ ("$cert_dir" =~ ^/etc/ || "$cert_dir" =~ ^/opt/) && $EUID -ne 0 ]]; then
@@ -1506,13 +1509,13 @@ create_self_signed_cert() {
             mkdir -p "$cert_dir" 2>/dev/null || error "Failed to create certificate directory: $cert_dir"
         fi
     fi
-    
+
     # Check if openssl is available
     if ! command -v openssl >/dev/null 2>&1; then
         error "openssl is required to create self-signed certificates but is not installed"
         return 1
     fi
-    
+
     # Generate self-signed certificate
     log "Generating self-signed certificate..."
     if [[ ("$cert_dir" =~ ^/etc/ || "$cert_dir" =~ ^/opt/) && $EUID -ne 0 ]]; then
@@ -1536,7 +1539,7 @@ create_self_signed_cert() {
         # Private key file should be readable only by owner (600) for security
         chmod 600 "$key_file" 2>/dev/null || true
     fi
-    
+
     # Set SELinux context if SELinux is enabled and not on NFS
     if command -v chcon >/dev/null 2>&1 && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
         if ! is_nfs_mount "$cert_dir"; then
@@ -1550,7 +1553,7 @@ create_self_signed_cert() {
             log "Certificate directory is on NFS, skipping SELinux context"
         fi
     fi
-    
+
     log "Self-signed certificate created successfully"
     log "  Certificate: $cert_file"
     log "  Private Key: $key_file"
@@ -1563,19 +1566,19 @@ build_webui_image() {
     repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local containerfile="${repo_dir}/webui/Containerfile"
     local image_tag="ztpbootstrap-webui:local"
-    
+
     # Check if Containerfile exists
     if [[ ! -f "$containerfile" ]]; then
         log "Containerfile not found at $containerfile, skipping image build"
         return 0
     fi
-    
+
     # Check if podman is available
     if ! command -v podman >/dev/null 2>&1; then
         warn "podman not found, cannot build image. Will use base Fedora image."
         return 1
     fi
-    
+
     # Check available disk space (need at least 1.5GB free for build)
     local available_space
     if command -v df >/dev/null 2>&1; then
@@ -1587,7 +1590,7 @@ build_webui_image() {
             # BSD df (macOS) - output is in 512-byte blocks
             available_space=$(df / 2>/dev/null | tail -1 | awk '{print int($4 * 512 / 1024 / 1024)}' || echo "0")
         fi
-        
+
         if [[ -n "$available_space" ]] && [[ "$available_space" -lt 1500 ]]; then
             warn "Insufficient disk space for image build: ${available_space}MB available (need at least 1500MB)"
             warn "The build process requires temporary space for layers and package installation."
@@ -1596,7 +1599,7 @@ build_webui_image() {
             return 1
         fi
     fi
-    
+
     # Check if image already exists
     if podman image exists "$image_tag" 2>/dev/null; then
         log "Image $image_tag already exists"
@@ -1612,11 +1615,11 @@ build_webui_image() {
             fi
         fi
     fi
-    
+
     log "Building webui container image from Containerfile..."
     log "This will install Python, podman, and systemd in the image for faster container startup."
     log "Image tag: $image_tag"
-    
+
     # Build the image
     local build_cmd="podman build -t $image_tag -f $containerfile $repo_dir"
     if [[ $EUID -ne 0 ]]; then
@@ -1644,20 +1647,20 @@ build_webui_image() {
 # This replicates the setup_pod() function from setup.sh
 create_pod_files_from_config() {
     log "Creating pod and container systemd files..."
-    
+
     # Get the directory where this script is located (repository directory)
     local repo_dir
     repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    
+
     local systemd_dir="/etc/containers/systemd/ztpbootstrap"
-    
+
     # Create systemd directory (with sudo if needed)
     if [[ $EUID -eq 0 ]]; then
         mkdir -p "$systemd_dir"
     else
         sudo mkdir -p "$systemd_dir"
     fi
-    
+
     # Copy pod file
     if [[ -f "${repo_dir}/systemd/ztpbootstrap.pod" ]]; then
         if [[ $EUID -eq 0 ]]; then
@@ -1666,11 +1669,11 @@ create_pod_files_from_config() {
             sudo cp "${repo_dir}/systemd/ztpbootstrap.pod" "$systemd_dir/"
         fi
         log "Pod configuration installed"
-        
+
         # Update pod file with IP addresses from config.yaml
         local pod_file="${systemd_dir}/ztpbootstrap.pod"
         local config_file="${repo_dir}/config.yaml"
-        
+
         if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
             local host_network
             local ipv4
@@ -1680,7 +1683,7 @@ create_pod_files_from_config() {
             ipv4=$(yq eval '.network.ipv4' "$config_file" 2>/dev/null || echo "")
             ipv6=$(yq eval '.network.ipv6' "$config_file" 2>/dev/null || echo "")
             network=$(yq eval '.network.network' "$config_file" 2>/dev/null || echo "")
-            
+
             # If network is null or empty, use detected network or default
             if [[ -z "$network" ]] || [[ "$network" == "null" ]]; then
                 if [[ -n "${EXISTING_NETWORK:-}" ]] && [[ "${EXISTING_NETWORK}" != "host" ]]; then
@@ -1691,15 +1694,15 @@ create_pod_files_from_config() {
                     log "Using default network: $network"
                 fi
             fi
-            
+
             log "Reading network config: host_network=$host_network, IPv4=$ipv4, IPv6=$ipv6, network=$network"
-            
+
             # Use sudo for sed if not root
             local sed_cmd="sed"
             if [[ $EUID -ne 0 ]]; then
                 sed_cmd="sudo sed"
             fi
-            
+
             # Check if host network mode is enabled
             if [[ "$host_network" == "true" ]]; then
                 $sed_cmd -i.tmp "s|^Network=.*|Network=host|" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
@@ -1710,7 +1713,7 @@ create_pod_files_from_config() {
                 # Set Network to specified network (or default ztpbootstrap-net)
                 $sed_cmd -i.tmp "s|^Network=.*|Network=$network|" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
                 log "Set Network=$network in pod file"
-                
+
                 # Update IPv4
                 if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]] && [[ "$ipv4" != "" ]]; then
                     if grep -q "^IP=" "$pod_file" 2>/dev/null; then
@@ -1724,7 +1727,7 @@ create_pod_files_from_config() {
                     $sed_cmd -i.tmp "/^IP=/d" "$pod_file" 2>/dev/null && rm -f "${pod_file}.tmp" 2>/dev/null || true
                     log "Removed IPv4 address from pod file"
                 fi
-                
+
                 # Update IPv6
                 if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]] && [[ "$ipv6" != "" ]]; then
                     if grep -q "^IP6=" "$pod_file" 2>/dev/null; then
@@ -1748,7 +1751,7 @@ create_pod_files_from_config() {
         error "Pod configuration file not found: ${repo_dir}/systemd/ztpbootstrap.pod"
         return 1
     fi
-    
+
     # Copy nginx container file
     if [[ -f "${repo_dir}/systemd/ztpbootstrap-nginx.container" ]]; then
         if [[ $EUID -eq 0 ]]; then
@@ -1757,20 +1760,20 @@ create_pod_files_from_config() {
             sudo cp "${repo_dir}/systemd/ztpbootstrap-nginx.container" "$systemd_dir/"
         fi
         log "Nginx container configuration installed"
-        
+
         # Check if paths are on NFS and conditionally add :z flags for SELinux
         local nginx_container_file="${systemd_dir}/ztpbootstrap-nginx.container"
         local script_dir
         script_dir=$(yq eval '.paths.script_dir // "/opt/containerdata/ztpbootstrap"' "${repo_dir}/config.yaml" 2>/dev/null || echo "/opt/containerdata/ztpbootstrap")
         local cert_dir
         cert_dir=$(yq eval '.paths.cert_dir // "/opt/containerdata/certs/wild"' "${repo_dir}/config.yaml" 2>/dev/null || echo "/opt/containerdata/certs/wild")
-        
+
         # Use sudo for sed if not root
         local sed_cmd="sed"
         if [[ $EUID -ne 0 ]]; then
             sed_cmd="sudo sed"
         fi
-        
+
         # Check if certs directory is on NFS
         if ! is_nfs_mount "$cert_dir"; then
             # Not on NFS, add :z flag to certs volume mount if SELinux is enforcing
@@ -1781,7 +1784,7 @@ create_pod_files_from_config() {
         else
             log "Certs directory is on NFS, skipping :z flag"
         fi
-        
+
         # Check if logs directory is on NFS
         local logs_dir="${script_dir}/logs"
         if ! is_nfs_mount "$logs_dir"; then
@@ -1797,7 +1800,7 @@ create_pod_files_from_config() {
         error "Nginx container configuration not found: ${repo_dir}/systemd/ztpbootstrap-nginx.container"
         return 1
     fi
-    
+
     # Copy webui container file if it exists
     if [[ -f "${repo_dir}/systemd/ztpbootstrap-webui.container" ]]; then
         if [[ $EUID -eq 0 ]]; then
@@ -1806,14 +1809,14 @@ create_pod_files_from_config() {
             sudo cp "${repo_dir}/systemd/ztpbootstrap-webui.container" "$systemd_dir/"
         fi
         log "Web UI container configuration installed"
-        
+
         # Determine which image to use for webui container
         local webui_container_file="${systemd_dir}/ztpbootstrap-webui.container"
         local script_dir
         script_dir=$(yq eval '.paths.script_dir // "/opt/containerdata/ztpbootstrap"' "${repo_dir}/config.yaml" 2>/dev/null || echo "/opt/containerdata/ztpbootstrap")
         local config_file="${script_dir}/config.yaml"
         local image_tag=""
-        
+
         # First, check if a registry image was configured (from previous setup)
         if [[ -f "$config_file" ]]; then
             local registry_image
@@ -1831,13 +1834,13 @@ create_pod_files_from_config() {
                         log "Appended default image name to registry URL from config.yaml: $registry_image"
                     fi
                 fi
-                
+
                 # Check if it's a remote registry image (contains / and not localhost)
                 local is_remote_registry=false
                 if [[ "$registry_image" == *"/"* ]] && [[ "$registry_image" != "localhost"* ]] && [[ "$registry_image" != "ztpbootstrap-webui:local" ]]; then
                     is_remote_registry=true
                 fi
-                
+
                 # For remote registry images, allow them even if not locally present (Podman will pull)
                 # For local images, verify they exist
                 if [[ "$is_remote_registry" == "true" ]] || podman image exists "$registry_image" 2>/dev/null; then
@@ -1852,7 +1855,7 @@ create_pod_files_from_config() {
                 fi
             fi
         fi
-        
+
         # If no registry image (or it doesn't exist), check for local image
         if [[ -z "$image_tag" ]]; then
             local local_tag="ztpbootstrap-webui:local"
@@ -1861,7 +1864,7 @@ create_pod_files_from_config() {
                 log "Found local webui image: $image_tag"
             fi
         fi
-        
+
         # If we have an image tag, update the container file
         if [[ -n "$image_tag" ]]; then
             local sed_cmd="sed"
@@ -1877,7 +1880,7 @@ create_pod_files_from_config() {
         else
             log "No custom webui image found. Container will use base Fedora image and install packages at runtime."
         fi
-        
+
         # Copy webui directory to script directory (required for webui container)
         # Get script_dir from config.yaml or use default
         local script_dir_for_webui
@@ -1922,13 +1925,13 @@ create_pod_files_from_config() {
             warn "Web UI source directory not found: ${repo_dir}/webui"
         fi
     fi
-    
+
     return 0
 }
 
 start_services_after_install() {
     log "Starting new services..."
-    
+
     # Enable and start podman.socket if not already running
     # This is required for the webui container to access podman commands
     local socket_check_cmd="systemctl"
@@ -1939,7 +1942,7 @@ start_services_after_install() {
         socket_enable_cmd="sudo systemctl"
         socket_start_cmd="sudo systemctl"
     fi
-    
+
     if $socket_check_cmd is-enabled podman.socket >/dev/null 2>&1; then
         if ! $socket_check_cmd is-active podman.socket >/dev/null 2>&1; then
             log "Starting podman.socket..."
@@ -1959,23 +1962,23 @@ start_services_after_install() {
             warn "Failed to enable/start podman.socket (webui container may not be able to access podman commands)"
         fi
     fi
-    
+
     # Reload systemd first
     if [[ $EUID -eq 0 ]]; then
         systemctl daemon-reload
     else
         sudo systemctl daemon-reload
     fi
-    
+
     sleep 2
-    
-    
+
+
     # Verify services exist before trying to start them
     # Check both generator directory (temporary) and systemd system directory (permanent)
     local generator_dir="/run/systemd/generator"
     local systemd_system_dir="/etc/systemd/system"
     local pod_service_exists=false
-    
+
     # Check if file exists in either location (with sudo if needed)
     if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-pod.service" ]]; then
         pod_service_exists=true
@@ -1984,7 +1987,7 @@ start_services_after_install() {
             pod_service_exists=true
         fi
     fi
-    
+
     if [[ "$pod_service_exists" == "false" ]]; then
         warn "⚠️  Pod service file not found. Reloading systemd and waiting for generation..."
         if [[ $EUID -eq 0 ]]; then
@@ -1993,7 +1996,7 @@ start_services_after_install() {
             sudo systemctl daemon-reload
         fi
         sleep 5  # Give more time for systemd generator to run
-        
+
         # Check again (both locations)
         pod_service_exists=false
         if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-pod.service" ]]; then
@@ -2003,7 +2006,7 @@ start_services_after_install() {
                 pod_service_exists=true
             fi
         fi
-        
+
         if [[ "$pod_service_exists" == "false" ]]; then
             error "Pod service file still not found. Cannot start services."
             error "Please run: sudo systemctl daemon-reload"
@@ -2012,7 +2015,7 @@ start_services_after_install() {
             return 1
         fi
     fi
-    
+
     # Start pod service (quadlet generates ztpbootstrap-pod.service from ztpbootstrap.pod)
     local pod_service_name="ztpbootstrap-pod.service"
     if [[ $EUID -eq 0 ]]; then
@@ -2025,22 +2028,22 @@ start_services_after_install() {
             warn "Failed to start $pod_service_name"
             warn "Error details: ${pod_error:0:300}"
         fi
-        
+
         # Start nginx container
         if systemctl start ztpbootstrap-nginx.service 2>/dev/null; then
             log "✓ Started ztpbootstrap-nginx.service"
         else
             warn "Failed to start ztpbootstrap-nginx.service"
         fi
-        
+
         # Helper function to diagnose webui startup failures
         diagnose_webui_failure() {
             warn "=== WebUI Container Startup Diagnostics ==="
-            
+
             # Check service file locations
             local generator_file="/run/systemd/generator/ztpbootstrap-webui.service"
             local system_file="/etc/systemd/system/ztpbootstrap-webui.service"
-            
+
             warn "Service file locations:"
             if [[ -f "$generator_file" ]] || ([[ $EUID -ne 0 ]] && sudo test -f "$generator_file" 2>/dev/null); then
                 warn "  ✓ Found: $generator_file"
@@ -2052,7 +2055,7 @@ start_services_after_install() {
             else
                 warn "  ✗ Not found: $system_file"
             fi
-            
+
             # Check service status
             warn "Service status:"
             if [[ $EUID -eq 0 ]]; then
@@ -2064,7 +2067,7 @@ start_services_after_install() {
                     warn "$line"
                 done || true
             fi
-            
+
             # Check if container exists
             if podman ps -a --filter name=ztpbootstrap-webui --format "{{.Names}}" 2>/dev/null | grep -q ztpbootstrap-webui; then
                 warn "Container exists (may be stopped):"
@@ -2078,7 +2081,7 @@ start_services_after_install() {
             else
                 warn "  ✗ Container does not exist"
             fi
-            
+
             # Check journal logs
             warn "Systemd journal (last 20 lines):"
             if [[ $EUID -eq 0 ]]; then
@@ -2090,7 +2093,7 @@ start_services_after_install() {
                     warn "$line"
                 done || true
             fi
-            
+
             # Check if required files exist
             warn "Required files:"
             if [[ -f "/opt/containerdata/ztpbootstrap/webui/start-webui.sh" ]] || ([[ $EUID -ne 0 ]] && sudo test -f "/opt/containerdata/ztpbootstrap/webui/start-webui.sh" 2>/dev/null); then
@@ -2108,10 +2111,10 @@ start_services_after_install() {
             else
                 warn "  ✗ /opt/containerdata/ztpbootstrap/webui/app.py NOT FOUND"
             fi
-            
+
             warn "=== End Diagnostics ==="
         }
-        
+
         # Start webui container if it exists
         # Check both generator directory and systemd system directory for service file
         local webui_service_exists=false
@@ -2122,7 +2125,7 @@ start_services_after_install() {
                 webui_service_exists=true
             fi
         fi
-        
+
         # Also check via systemctl list-unit-files as fallback
         if [[ "$webui_service_exists" == "false" ]]; then
             if systemctl list-unit-files 2>/dev/null | grep -q ztpbootstrap-webui.service; then
@@ -2133,35 +2136,35 @@ start_services_after_install() {
                 fi
             fi
         fi
-        
+
         if [[ "$webui_service_exists" == "true" ]]; then
             log "Starting webui container..."
             local start_cmd="systemctl start ztpbootstrap-webui.service"
             if [[ $EUID -ne 0 ]]; then
                 start_cmd="sudo systemctl start ztpbootstrap-webui.service"
             fi
-            
+
             if $start_cmd 2>&1; then
                 # Wait longer for container to start (containers can take time to initialize)
                 sleep 8
-                
+
                 # Verify service is actually running
                 local is_active_cmd="systemctl is-active --quiet ztpbootstrap-webui.service"
                 if [[ $EUID -ne 0 ]]; then
                     is_active_cmd="sudo systemctl is-active --quiet ztpbootstrap-webui.service"
                 fi
-                
+
                 if $is_active_cmd; then
                     # Check container status with retries (containers may be in "starting" state)
                     local container_running=false
                     local max_retries=5
                     local retry_count=0
-                    
+
                     while [[ $retry_count -lt $max_retries ]]; do
                         # Check if container exists and is running or starting
                         local container_status
                         container_status=$(podman ps -a --filter name=ztpbootstrap-webui --format "{{.Status}}" 2>/dev/null || echo "")
-                        
+
                         if [[ -n "$container_status" ]]; then
                             # Container exists - check if it's running, starting, or healthy
                             if echo "$container_status" | grep -qE "(Up|starting|healthy)"; then
@@ -2169,13 +2172,13 @@ start_services_after_install() {
                                 break
                             fi
                         fi
-                        
+
                         retry_count=$((retry_count + 1))
                         if [[ $retry_count -lt $max_retries ]]; then
                             sleep 2
                         fi
                     done
-                    
+
                     if [[ "$container_running" == "true" ]]; then
                         log "✓ Started ztpbootstrap-webui.service and container is running"
                     else
@@ -2202,13 +2205,13 @@ start_services_after_install() {
             warn "Failed to start $pod_service_name"
             warn "Error details: ${pod_error:0:300}"
         fi
-        
+
         if sudo systemctl start ztpbootstrap-nginx.service 2>/dev/null; then
             log "✓ Started ztpbootstrap-nginx.service"
         else
             warn "Failed to start ztpbootstrap-nginx.service"
         fi
-        
+
         # Check if webui service exists (check both file locations and systemctl)
         local webui_service_exists=false
         if [[ -f "${generator_dir}/ztpbootstrap-webui.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-webui.service" ]]; then
@@ -2218,24 +2221,24 @@ start_services_after_install() {
         elif sudo systemctl list-unit-files 2>/dev/null | grep -q ztpbootstrap-webui.service; then
             webui_service_exists=true
         fi
-        
+
         if [[ "$webui_service_exists" == "true" ]]; then
             log "Starting webui container..."
             if sudo systemctl start ztpbootstrap-webui.service 2>&1; then
                 # Wait longer for container to start (containers can take time to initialize)
                 sleep 8
-                
+
                 if sudo systemctl is-active --quiet ztpbootstrap-webui.service 2>/dev/null; then
                     # Check container status with retries (containers may be in "starting" state)
                     local container_running=false
                     local max_retries=5
                     local retry_count=0
-                    
+
                     while [[ $retry_count -lt $max_retries ]]; do
                         # Check if container exists and is running or starting
                         local container_status
                         container_status=$(podman ps -a --filter name=ztpbootstrap-webui --format "{{.Status}}" 2>/dev/null || echo "")
-                        
+
                         if [[ -n "$container_status" ]]; then
                             # Container exists - check if it's running, starting, or healthy
                             if echo "$container_status" | grep -qE "(Up|starting|healthy)"; then
@@ -2243,13 +2246,13 @@ start_services_after_install() {
                                 break
                             fi
                         fi
-                        
+
                         retry_count=$((retry_count + 1))
                         if [[ $retry_count -lt $max_retries ]]; then
                             sleep 2
                         fi
                     done
-                    
+
                     if [[ "$container_running" == "true" ]]; then
                         log "✓ Started ztpbootstrap-webui.service and container is running"
                     else
@@ -2266,7 +2269,7 @@ start_services_after_install() {
             warn "WebUI service file not found. It may not have been generated yet."
         fi
     fi
-    
+
     log "Service startup completed"
     return 0
 }
@@ -2296,21 +2299,21 @@ interactive_config() {
     echo -e "${BLUE}║${NC}  ${GREEN}Arista ZTP Bootstrap Service - Interactive Setup${NC}        ${BLUE}║${NC}"
     echo -e "${BLUE}╚══════════════════════════════════════════════════════════════╝${NC}"
     echo ""
-    
+
     log "This interactive setup will guide you through configuring all paths and variables."
     log "You can press Enter to accept default values (shown in brackets)."
     echo ""
-    
+
     # Section 1: Authentication Configuration (Web UI) - moved first
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}  Authentication Configuration (Web UI)${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    
+
     log "The Web UI allows read-only access by default. Write operations (upload, delete,"
     log "modify scripts) require authentication. Set an admin password to enable this."
     echo ""
-    
+
     # Check if --reset-pass was provided (takes precedence)
     if [[ -n "${RESET_PASSWORD:-}" ]]; then
         log "Password reset requested via --reset-pass flag."
@@ -2343,7 +2346,7 @@ except ImportError:
     print(hash_value)
 PYTHON_SCRIPT
 )
-        
+
         if [[ -z "$ADMIN_PASSWORD_HASH" ]]; then
             # Fallback: use Python's built-in hashlib (should always be available)
             ADMIN_PASSWORD_HASH=$(echo "$RESET_PASSWORD" | python3 <<'PYTHON_SCRIPT' 2>/dev/null
@@ -2356,13 +2359,13 @@ print(hash_value)
 PYTHON_SCRIPT
 )
         fi
-        
+
         if [[ -n "$ADMIN_PASSWORD_HASH" ]]; then
             log "Password hash generated successfully."
             log "Hash format: $(echo "$ADMIN_PASSWORD_HASH" | cut -d: -f1)"
             log "Hash length: ${#ADMIN_PASSWORD_HASH} characters"
             log "Hash preview: ${ADMIN_PASSWORD_HASH:0:30}..."
-            
+
             # Verify the hash works with the password we just hashed
             log "Verifying hash matches password..."
             VERIFICATION_RESULT=$(echo "$RESET_PASSWORD" | python3 2>/dev/null <<PYTHON_VERIFY
@@ -2387,7 +2390,7 @@ else:
         print("ERROR")
 PYTHON_VERIFY
 )
-            
+
             if [[ "$VERIFICATION_RESULT" == "MATCH" ]]; then
                 log "✓ Hash verification successful - password and hash match"
             else
@@ -2396,7 +2399,7 @@ PYTHON_VERIFY
                 error "Password length was: ${#RESET_PASSWORD}"
                 exit 1
             fi
-            
+
             SET_ADMIN_PASSWORD="true"
             # Clear password from memory
             RESET_PASSWORD=""
@@ -2415,69 +2418,69 @@ PYTHON_VERIFY
     else
         # Ask if user wants to set a password
         prompt_yes_no "Set admin password for Web UI write operations?" "y" SET_ADMIN_PASSWORD
-        
+
         if [[ "$SET_ADMIN_PASSWORD" == "true" ]]; then
         # Prompt for password with confirmation
         local password_valid=false
         local attempts=0
         while [[ "$password_valid" == "false" ]] && [[ $attempts -lt 3 ]]; do
             attempts=$((attempts + 1))
-            
+
             # Prompt for password (hidden input)
             echo -n "Enter admin password (min 8 characters): "
             read -s ADMIN_PASSWORD
             echo ""
-            
+
             # Validate password length
             if [[ ${#ADMIN_PASSWORD} -lt 8 ]]; then
                 warn "Password must be at least 8 characters long."
                 continue
             fi
-            
+
             # Prompt for confirmation
             echo -n "Confirm admin password: "
             read -s ADMIN_PASSWORD_CONFIRM
             echo ""
-            
+
             # Check if passwords match
             if [[ "$ADMIN_PASSWORD" != "$ADMIN_PASSWORD_CONFIRM" ]]; then
                 warn "Passwords do not match. Please try again."
                 continue
             fi
-            
+
             # Password is valid
             password_valid=true
-            
+
             # Hash the password using Python
             log "Hashing password..."
             # Try werkzeug first (if available in webui container), but fall back to hashlib
             # Use || true to prevent script exit due to set -e
             ADMIN_PASSWORD_HASH=$(python3 -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('$ADMIN_PASSWORD'))" 2>/dev/null || true)
-            
+
             if [[ -z "$ADMIN_PASSWORD_HASH" ]]; then
                 # Fallback: use Python's built-in hashlib (should always be available)
                 ADMIN_PASSWORD_HASH=$(python3 -c "import hashlib, base64; print('pbkdf2:sha256:' + base64.b64encode(hashlib.pbkdf2_hmac('sha256', b'$ADMIN_PASSWORD', b'ztpbootstrap', 100000)).decode())" 2>/dev/null || true)
             fi
-            
+
             if [[ -n "$ADMIN_PASSWORD_HASH" ]]; then
                 log "Password set successfully (hashed)"
             else
                 error "Failed to hash password. Authentication will not be configured."
                 ADMIN_PASSWORD_HASH=""
             fi
-            
+
             # Clear plain text password from memory
             ADMIN_PASSWORD=""
             ADMIN_PASSWORD_CONFIRM=""
         done
-        
+
         if [[ "$password_valid" == "false" ]]; then
             warn "Failed to set password after $attempts attempts. Skipping authentication setup."
             ADMIN_PASSWORD_HASH=""
         fi
         fi
     fi
-    
+
     # Session timeout - only prompt in extended mode
     if [[ "${EXTENDED_MODE:-false}" == "true" ]]; then
         prompt_with_default "Session timeout in seconds" "3600" SESSION_TIMEOUT
@@ -2485,30 +2488,30 @@ PYTHON_VERIFY
         # Use default when not in extended mode
         SESSION_TIMEOUT="${SESSION_TIMEOUT:-3600}"
     fi
-    
+
     # Generate session secret
     if command -v python3 >/dev/null 2>&1; then
         SESSION_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || true)
     fi
-    
+
     # Fallback to openssl if python3 method failed or is not available
     if [[ -z "$SESSION_SECRET" ]] && command -v openssl >/dev/null 2>&1; then
         SESSION_SECRET=$(openssl rand -hex 32 2>/dev/null || true)
     fi
-    
+
     if [[ -z "$SESSION_SECRET" ]]; then
         warn "Failed to generate session secret. A default will be used (less secure)."
         SESSION_SECRET=""
     fi
-    
+
     echo ""
-    
+
     # Section 2: Directory Paths
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}  Directory Paths${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    
+
     prompt_with_default "Main service directory" "${EXISTING_SCRIPT_DIR:-/opt/containerdata/ztpbootstrap}" SCRIPT_DIR
     # Validate SCRIPT_DIR is a reasonable path (not just a single character or yes/no)
     if [[ "${#SCRIPT_DIR}" -lt 3 ]] || [[ "$SCRIPT_DIR" =~ ^[yYnN]$ ]]; then
@@ -2522,9 +2525,9 @@ PYTHON_VERIFY
     prompt_with_default "Environment file path" "${SCRIPT_DIR}/ztpbootstrap.env" ENV_FILE
     prompt_with_default "Bootstrap script path" "${SCRIPT_DIR}/bootstrap.py" BOOTSTRAP_SCRIPT
     prompt_with_default "Nginx config file" "${SCRIPT_DIR}/nginx.conf" NGINX_CONF
-    
+
     echo ""
-    
+
     # WebUI Image Registry (ask early if user has pre-built image)
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}  WebUI Container Image${NC}"
@@ -2533,7 +2536,7 @@ PYTHON_VERIFY
     log "If you have previously built and pushed the webui image to a remote registry,"
     log "you can specify it here. Otherwise, you can build it locally later in the setup."
     echo ""
-    
+
     # Check if there's an existing registry image in config.yaml
     local existing_registry_image=""
     if [[ -f "${SCRIPT_DIR}/config.yaml" ]]; then
@@ -2561,7 +2564,7 @@ PYTHON_VERIFY
     else
         prompt_with_default "Remote registry image (e.g., registry.example.com/ztpbootstrap-webui:latest)" "" WEBUI_REGISTRY_IMAGE
     fi
-    
+
     # If user provided a registry image, extract registry and tag
     if [[ -n "${WEBUI_REGISTRY_IMAGE:-}" ]] && [[ "${WEBUI_REGISTRY_IMAGE}" != "" ]]; then
         # If user provided just a registry URL (no / or no image name), append default image name
@@ -2577,7 +2580,7 @@ PYTHON_VERIFY
             # User provided full image tag
             WEBUI_IMAGE_TAG="${WEBUI_REGISTRY_IMAGE}"
         fi
-        
+
         # Extract registry URL (everything before the last /)
         if [[ "$WEBUI_IMAGE_TAG" == *"/"* ]]; then
             WEBUI_IMAGE_REGISTRY="${WEBUI_IMAGE_TAG%/*}"
@@ -2590,15 +2593,15 @@ PYTHON_VERIFY
         WEBUI_IMAGE_REGISTRY=""
         log "No remote registry image specified. Will build locally or use base Fedora image."
     fi
-    
+
     echo ""
-    
+
     # Section 3: Network Configuration
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}  Network Configuration${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    
+
     # Determine default domain (existing, system FQDN, or example)
     local default_domain="${EXISTING_DOMAIN:-}"
     if [[ -z "$default_domain" ]]; then
@@ -2628,7 +2631,7 @@ PYTHON_VERIFY
         fi
     fi
     prompt_with_default "Domain name" "$default_domain" DOMAIN
-    
+
     # Ask about host network mode FIRST, so user can override detected IP addresses
     # Determine default host network mode from existing network config
     local default_host_network="n"
@@ -2636,7 +2639,7 @@ PYTHON_VERIFY
         default_host_network="y"
     fi
     prompt_yes_no "Use host network mode? (overrides IP addresses, useful for testing)" "$default_host_network" HOST_NETWORK
-    
+
     # If host network is enabled, clear IP addresses and skip IP prompts
     if [[ "$HOST_NETWORK" == "true" ]]; then
         IPV4=""
@@ -2654,7 +2657,7 @@ PYTHON_VERIFY
         else
             prompt_with_default "IPv4 address (leave empty for host network)" "" IPV4 "false" "true"
         fi
-        
+
         # For IPv6, use existing value if set (even if empty), otherwise default to empty
         local default_ipv6=""
         if [[ -n "${EXISTING_IPV6:-}" ]]; then
@@ -2688,24 +2691,25 @@ PYTHON_VERIFY
         default_http_only="y"
     fi
     prompt_yes_no "Use HTTP-only mode (insecure, not recommended)" "$default_http_only" HTTP_ONLY
-    
+
     echo ""
-    
+
     # Section 4: CVaaS Configuration
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}  CVaaS Configuration${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    
+
     log "CVaaS Address options:"
     log "  - www.arista.io (recommended - works for all clusters)"
     log "  - www.cv-prod-us-central1-b.arista.io (US 1b)"
     log "  - www.cv-prod-euwest-2.arista.io (Europe West 2)"
     log "  - See config.yaml.template for all regional options"
     echo ""
-    
+
     prompt_with_default "CVaaS address" "${EXISTING_CV_ADDR:-www.arista.io}" CV_ADDR
-    prompt_with_default "Enrollment token (from CVaaS Device Registration)" "${EXISTING_ENROLLMENT_TOKEN:-}" ENROLLMENT_TOKEN "true"
+    # ENROLL_CHARS written to config and used by bootstrap.py (Apache 2.0, Arista) as enrollChars.
+    prompt_with_default "Enrollment chars (from CVaaS Device Registration)" "${EXISTING_ENROLL_CHARS:-}" ENROLL_CHARS "true"
     # Proxy URL and EOS image URL - only prompt in extended mode
     if [[ "${EXTENDED_MODE:-false}" == "true" ]]; then
         prompt_with_default "Proxy URL (leave empty if not needed)" "${EXISTING_CV_PROXY:-}" CV_PROXY
@@ -2716,23 +2720,23 @@ PYTHON_VERIFY
         EOS_URL="${EOS_URL:-${EXISTING_EOS_URL:-}}"
     fi
     prompt_with_default "NTP server" "${EXISTING_NTP_SERVER:-time.nist.gov}" NTP_SERVER
-    
+
     echo ""
-    
+
     # Section 5: SSL Certificate Configuration
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}  SSL Certificate Configuration${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    
+
     prompt_with_default "Certificate filename" "fullchain.pem" CERT_FILE
     prompt_with_default "Private key filename" "privkey.pem" KEY_FILE
-    
+
     # Check if certificates already exist (use the cert_dir_for_check variable set earlier)
     local cert_path="${cert_dir_for_check}/${CERT_FILE}"
     local key_path="${cert_dir_for_check}/${KEY_FILE}"
     local certs_exist=false
-    
+
     if [[ -f "$cert_path" ]] && [[ -f "$key_path" ]]; then
         certs_exist=true
         log "Existing SSL certificates detected at:"
@@ -2740,23 +2744,23 @@ PYTHON_VERIFY
         log "  Private Key: $key_path"
         log "Skipping Let's Encrypt and self-signed certificate prompts (certificates managed externally)"
     fi
-    
+
     if [[ "$certs_exist" == "false" ]]; then
         prompt_yes_no "Use Let's Encrypt with certbot?" "n" USE_LETSENCRYPT
-        
+
         if [[ "$USE_LETSENCRYPT" == "true" ]]; then
             prompt_with_default "Email for Let's Encrypt registration" "admin@example.com" LETSENCRYPT_EMAIL
         else
             LETSENCRYPT_EMAIL="admin@example.com"
         fi
-        
+
         # Default to creating self-signed certificate if HTTP_ONLY is false (HTTPS mode)
         # This ensures nginx can start without manual certificate creation
         local default_self_signed="n"
         if [[ "${HTTP_ONLY:-false}" == "false" ]]; then
             default_self_signed="y"
         fi
-        
+
         prompt_yes_no "Create self-signed certificate for testing (if no cert exists)?" "$default_self_signed" CREATE_SELF_SIGNED
     else
         # Certificates exist, skip these prompts
@@ -2764,15 +2768,15 @@ PYTHON_VERIFY
         LETSENCRYPT_EMAIL="admin@example.com"
         CREATE_SELF_SIGNED="false"
     fi
-    
+
     echo ""
-    
+
     # Section 6: Container Configuration
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${CYAN}  Container Configuration${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    
+
     prompt_with_default "Container name" "ztpbootstrap" CONTAINER_NAME
     # Container image is not prompted - nginx uses alpine, webui uses fedora (or built image)
     # Set default value for config generation
@@ -2788,14 +2792,14 @@ PYTHON_VERIFY
     # This ensures it can override detected IP addresses
     prompt_with_default "DNS server 1" "${EXISTING_DNS1:-8.8.8.8}" DNS1
     prompt_with_default "DNS server 2" "${EXISTING_DNS2:-8.8.4.4}" DNS2
-    
+
     echo ""
-    
+
     # Section 7: WebUI Image Configuration (only shown if Containerfile exists and no registry image was provided)
     local repo_dir
     repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local containerfile="${repo_dir}/webui/Containerfile"
-    
+
     # Skip image build section if user already provided a registry image
     if [[ -z "${WEBUI_IMAGE_TAG:-}" ]] || [[ "${WEBUI_IMAGE_TAG}" == "" ]]; then
         if [[ -f "$containerfile" ]]; then
@@ -2803,19 +2807,19 @@ PYTHON_VERIFY
             echo -e "${CYAN}  WebUI Container Image Build${NC}"
             echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
             echo ""
-            
+
             log "A Containerfile is available to build an optimized webui image."
             log "Building the image will pre-install Python, podman, and systemd,"
             log "resulting in much faster container startup times (no package installation)."
             echo ""
-            
+
             if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
                 BUILD_WEBUI_IMAGE="true"
                 log "Non-interactive mode: Will build webui image from Containerfile"
             else
                 prompt_yes_no "Build optimized webui image from Containerfile? (recommended)" "y" BUILD_WEBUI_IMAGE
             fi
-        
+
         # Build the image now if requested
         if [[ "${BUILD_WEBUI_IMAGE:-false}" == "true" ]]; then
             if build_webui_image; then
@@ -2824,19 +2828,19 @@ PYTHON_VERIFY
                     echo ""
                     log "Image built successfully. You can push it to a remote registry for use on other hosts."
                     prompt_yes_no "Push image to a remote registry?" "n" PUSH_TO_REGISTRY
-                    
+
                     if [[ "${PUSH_TO_REGISTRY:-false}" == "true" ]]; then
                         prompt_with_default "Registry URL (e.g., registry.example.com or quay.io/username)" "" WEBUI_REGISTRY
-                        
+
                         if [[ -n "${WEBUI_REGISTRY:-}" ]]; then
                             # Build and push multi-arch image
                             local local_tag="ztpbootstrap-webui:local"
                             local remote_tag="${WEBUI_REGISTRY}/ztpbootstrap-webui:latest"
-                            
+
                             log "Building and pushing multi-arch image to $remote_tag..."
                             log "This will build for both amd64 (x86_64) and arm64 (aarch64) architectures..."
                             log "Note: Cross-platform builds may take longer and require emulation for non-native architectures."
-                            
+
                             local repo_dir
                             repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
                             local containerfile="${repo_dir}/webui/Containerfile"
@@ -2845,11 +2849,11 @@ PYTHON_VERIFY
                             local arm64_built=false
                             local amd64_tag="${remote_tag}-amd64"
                             local arm64_tag="${remote_tag}-arm64"
-                            
+
                             # Check if we can build multi-arch (requires buildah or podman with cross-platform support)
                             if command -v buildah >/dev/null 2>&1; then
                                 # Use buildah for multi-arch builds (supports cross-platform via qemu)
-                                
+
                                 # Build for amd64 (x86_64) - needed for production servers
                                 log "Building for amd64 (x86_64)..."
                                 if buildah build --arch amd64 --tag "$amd64_tag" -f "$containerfile" "$repo_dir" 2>&1; then
@@ -2863,7 +2867,7 @@ PYTHON_VERIFY
                                 else
                                     warn "Failed to build amd64 image (may need qemu-user-static for cross-platform builds)"
                                 fi
-                                
+
                                 # Build for arm64 (aarch64) - needed for ARM-based dev machines
                                 log "Building for arm64 (aarch64)..."
                                 if buildah build --arch arm64 --tag "$arm64_tag" -f "$containerfile" "$repo_dir" 2>&1; then
@@ -2877,13 +2881,13 @@ PYTHON_VERIFY
                                 else
                                     warn "Failed to build arm64 image"
                                 fi
-                                
+
                                 # Create and push multi-arch manifest if at least one arch succeeded
                                 if [[ "$amd64_built" == "true" ]] || [[ "$arm64_built" == "true" ]]; then
                                     log "Creating multi-arch manifest..."
                                     # Remove existing manifest if it exists (both local and remote)
                                     podman manifest rm "$remote_tag" 2>/dev/null || true
-                                    
+
                                     if podman manifest create "$remote_tag" 2>/dev/null; then
                                         # Add remote registry images to the manifest (not local images)
                                         if [[ "$amd64_built" == "true" ]]; then
@@ -2900,7 +2904,7 @@ PYTHON_VERIFY
                                                 warn "Failed to add arm64 image to manifest"
                                             fi
                                         fi
-                                        
+
                                         if podman manifest push --all "$remote_tag" "docker://$remote_tag" 2>&1; then
                                             log "✓ Successfully created and pushed multi-arch manifest"
                                             WEBUI_IMAGE_REGISTRY="$WEBUI_REGISTRY"
@@ -2925,7 +2929,7 @@ PYTHON_VERIFY
                                 warn "buildah not found. Multi-arch builds require buildah."
                                 warn "To build multi-arch images, install buildah: sudo dnf install buildah"
                                 warn "For cross-platform builds, also install: sudo dnf install qemu-user-static"
-                                
+
                                 if [[ "${NON_INTERACTIVE:-false}" != "true" ]]; then
                                     prompt_yes_no "Install buildah now to enable multi-arch builds?" "y" INSTALL_BUILDAH
                                     if [[ "${INSTALL_BUILDAH:-false}" == "true" ]]; then
@@ -2937,12 +2941,12 @@ PYTHON_VERIFY
                                                 # Re-execute the multi-arch build logic (jump back to buildah section)
                                                 log "Building and pushing multi-arch image to $remote_tag..."
                                                 log "This will build for both amd64 (x86_64) and arm64 (aarch64) architectures..."
-                                                
+
                                                 local amd64_built=false
                                                 local arm64_built=false
                                                 local amd64_tag="${remote_tag}-amd64"
                                                 local arm64_tag="${remote_tag}-arm64"
-                                                
+
                                                 # Build for amd64 (x86_64) - needed for production servers
                                                 log "Building for amd64 (x86_64)..."
                                                 if buildah build --arch amd64 --tag "$amd64_tag" -f "$containerfile" "$repo_dir" 2>&1; then
@@ -2956,7 +2960,7 @@ PYTHON_VERIFY
                                                 else
                                                     warn "Failed to build amd64 image (may need qemu-user-static for cross-platform builds)"
                                                 fi
-                                                
+
                                                 # Build for arm64 (aarch64) - needed for ARM-based dev machines
                                                 log "Building for arm64 (aarch64)..."
                                                 if buildah build --arch arm64 --tag "$arm64_tag" -f "$containerfile" "$repo_dir" 2>&1; then
@@ -2970,12 +2974,12 @@ PYTHON_VERIFY
                                                 else
                                                     warn "Failed to build arm64 image"
                                                 fi
-                                                
+
                                                 # Create and push multi-arch manifest if at least one arch succeeded
                                                 if [[ "$amd64_built" == "true" ]] || [[ "$arm64_built" == "true" ]]; then
                                                     log "Creating multi-arch manifest..."
                                                     podman manifest rm "$remote_tag" 2>/dev/null || true
-                                                    
+
                                                     if podman manifest create "$remote_tag" 2>/dev/null; then
                                                         if [[ "$amd64_built" == "true" ]]; then
                                                             if podman manifest add "$remote_tag" "docker://$amd64_tag" 2>&1; then
@@ -2987,7 +2991,7 @@ PYTHON_VERIFY
                                                                 log "✓ Added arm64 image to manifest"
                                                             fi
                                                         fi
-                                                        
+
                                                         if podman manifest push --all "$remote_tag" "docker://$remote_tag" 2>&1; then
                                                             log "✓ Successfully created and pushed multi-arch manifest"
                                                             WEBUI_IMAGE_REGISTRY="$WEBUI_REGISTRY"
@@ -3007,7 +3011,7 @@ PYTHON_VERIFY
                                                     WEBUI_IMAGE_REGISTRY=""
                                                     WEBUI_IMAGE_TAG="ztpbootstrap-webui:local"
                                                 fi
-                                                
+
                                                 # Skip single-arch build since we just did multi-arch
                                                 MULTI_ARCH_BUILT=true
                                             else
@@ -3018,7 +3022,7 @@ PYTHON_VERIFY
                                         fi
                                     fi
                                 fi
-                                
+
                                 # Build and push single-arch (current architecture) - only if multi-arch wasn't built
                                 if [[ "${MULTI_ARCH_BUILT:-false}" != "true" ]]; then
                                     log "Building single-arch image for current platform only..."
@@ -3029,7 +3033,7 @@ PYTHON_VERIFY
                                     current_arch="amd64"
                                     warn "Building amd64 only. ARM64 dev machines will need arm64 image."
                                 fi
-                                
+
                                 if podman tag "$local_tag" "$remote_tag" 2>/dev/null; then
                                     log "Pushing $current_arch image to $remote_tag..."
                                     if podman push "$remote_tag" 2>&1; then
@@ -3074,27 +3078,27 @@ PYTHON_VERIFY
             WEBUI_IMAGE_REGISTRY=""
             WEBUI_IMAGE_TAG=""
         fi
-        
+
         echo ""
         fi
     else
         # User already provided a registry image earlier, skip build section
         log "Using previously specified registry image: ${WEBUI_IMAGE_TAG}"
     fi
-    
+
     # Section 8: Service Configuration (only shown in extended mode)
     if [[ "${EXTENDED_MODE:-false}" == "true" ]]; then
         echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo -e "${CYAN}  Service Configuration${NC}"
         echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
-        
+
         prompt_with_default "Health check interval" "30s" HEALTH_INTERVAL
         prompt_with_default "Health check timeout" "10s" HEALTH_TIMEOUT
         prompt_with_default "Health check retries" "3" HEALTH_RETRIES
         prompt_with_default "Health check start period" "60s" HEALTH_START_PERIOD
         prompt_with_default "Restart policy" "on-failure" RESTART_POLICY
-        
+
         echo ""
     else
         # Use defaults when not in extended mode
@@ -3109,15 +3113,15 @@ PYTHON_VERIFY
 # Copy source files to target directory
 copy_source_files() {
     log "Copying source files to target directory..."
-    
+
     local repo_dir
     repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    
+
     # Get target paths from config variables
     local script_dir="${SCRIPT_DIR:-}"
     local bootstrap_script="${BOOTSTRAP_SCRIPT:-}"
     local nginx_conf="${NGINX_CONF:-}"
-    
+
     # Copy bootstrap.py
     if [[ -n "$bootstrap_script" ]] && [[ "$bootstrap_script" != "null" ]]; then
         local source_bootstrap="${repo_dir}/bootstrap.py"
@@ -3149,7 +3153,7 @@ copy_source_files() {
             warn "Source file not found: $source_bootstrap"
         fi
     fi
-    
+
     # Copy nginx.conf
     if [[ -n "$nginx_conf" ]] && [[ "$nginx_conf" != "null" ]]; then
         local source_nginx="${repo_dir}/nginx.conf"
@@ -3181,41 +3185,41 @@ copy_source_files() {
             warn "Source file not found: $source_nginx"
         fi
     fi
-    
+
     echo ""
 }
 
 # Create necessary directories
 create_directories() {
     log "Creating necessary directories..."
-    
+
     local dirs_to_create=()
     local need_sudo=false
-    
+
     # Extract directories from config variables
     # Main service directory
     if [[ -n "${SCRIPT_DIR:-}" ]]; then
         dirs_to_create+=("$SCRIPT_DIR")
     fi
-    
+
     # Certificate directory
     if [[ -n "${CERT_DIR:-}" ]]; then
         dirs_to_create+=("$CERT_DIR")
     fi
-    
+
     # Systemd pod directory (may need sudo)
     local pod_dir="/etc/containers/systemd/ztpbootstrap"
     if [[ "$pod_dir" == /etc/* ]] && [[ $EUID -ne 0 ]]; then
         need_sudo=true
     fi
     dirs_to_create+=("$pod_dir")
-    
+
     # Create directories (mkdir -p creates parent directories automatically)
     for dir in "${dirs_to_create[@]}"; do
         if [[ -z "$dir" ]] || [[ "$dir" == "null" ]]; then
             continue
         fi
-        
+
         if [[ ! -d "$dir" ]]; then
             if [[ ("$dir" =~ ^/etc/ || "$dir" =~ ^/opt/) && $EUID -ne 0 ]]; then
                 log "Creating directory (requires sudo): $dir"
@@ -3269,28 +3273,28 @@ create_directories() {
             fi
         fi
     done
-    
+
     echo ""
 }
 
 # Generate YAML configuration file
 generate_yaml_config() {
     log "Generating YAML configuration file: $CONFIG_FILE"
-    
+
     # Validate that required variables are set
     local missing_vars=()
     [[ -z "${SCRIPT_DIR:-}" ]] && missing_vars+=("SCRIPT_DIR")
     [[ -z "${CERT_DIR:-}" ]] && missing_vars+=("CERT_DIR")
     [[ -z "${DOMAIN:-}" ]] && missing_vars+=("DOMAIN")
     [[ -z "${CV_ADDR:-}" ]] && missing_vars+=("CV_ADDR")
-    [[ -z "${ENROLLMENT_TOKEN:-}" ]] && missing_vars+=("ENROLLMENT_TOKEN")
-    
+    [[ -z "${ENROLL_CHARS:-}" ]] && missing_vars+=("ENROLL_CHARS")
+
     if [[ ${#missing_vars[@]} -gt 0 ]]; then
         error "Cannot generate config.yaml: Missing required variables: ${missing_vars[*]}"
         error "This indicates a bug in the interactive setup. Please report this issue."
         return 1
     fi
-    
+
     # Ensure optional variables have defaults
     ENV_FILE="${ENV_FILE:-${SCRIPT_DIR}/ztpbootstrap.env}"
     BOOTSTRAP_SCRIPT="${BOOTSTRAP_SCRIPT:-${SCRIPT_DIR}/bootstrap.py}"
@@ -3320,7 +3324,7 @@ generate_yaml_config() {
     ADMIN_PASSWORD_HASH="${ADMIN_PASSWORD_HASH:-}"
     SESSION_TIMEOUT="${SESSION_TIMEOUT:-3600}"
     SESSION_SECRET="${SESSION_SECRET:-}"
-    
+
     cat > "$CONFIG_FILE" << EOF
 # Arista ZTP Bootstrap Service Configuration
 # Generated by interactive setup on $(date)
@@ -3348,11 +3352,11 @@ network:
   http_only: $HTTP_ONLY
 
 # ============================================================================
-# CVaaS Configuration
+# CVaaS Configuration (enroll_chars used by bootstrap.py - Apache 2.0, Arista)
 # ============================================================================
 cvaas:
   address: "$CV_ADDR"
-  enrollment_token: "$ENROLLMENT_TOKEN"
+  enroll_chars: "$ENROLL_CHARS"
   proxy: "$CV_PROXY"
   eos_url: "$EOS_URL"
   ntp_server: "$NTP_SERVER"
@@ -3396,10 +3400,10 @@ auth:
   # Admin password hash (never store plain text passwords)
   # Set during setup or via ZTP_ADMIN_PASSWORD environment variable
   admin_password_hash: "${ADMIN_PASSWORD_HASH:-}"
-  
+
   # Session timeout in seconds (default: 3600 = 1 hour)
   session_timeout: ${SESSION_TIMEOUT:-3600}
-  
+
   # Session secret key for signing session tokens
   # Auto-generated during setup
   session_secret: "${SESSION_SECRET:-}"
@@ -3411,15 +3415,15 @@ webui:
   # Registry image (if pushed to remote registry)
   # Format: registry.example.com/ztpbootstrap-webui:latest
   registry_image: "${WEBUI_IMAGE_TAG:-}"
-  
+
   # Registry URL (without image name/tag)
   # Format: registry.example.com or quay.io/username
   registry: "${WEBUI_IMAGE_REGISTRY:-}"
 EOF
-    
+
     log "Configuration saved to: $CONFIG_FILE"
     echo ""
-    
+
     # Show summary
     echo -e "${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${GREEN}║${NC}  ${GREEN}Configuration Summary${NC}                                    ${GREEN}║${NC}"
@@ -3430,31 +3434,31 @@ EOF
     log "IPv4: ${IPV4:-host network}"
     log "IPv6: ${IPV6:-disabled}"
     log "CVaaS Address: $CV_ADDR"
-    log "Enrollment Token: ${ENROLLMENT_TOKEN:0:20}... (hidden)"
+    log "Enrollment Chars: ${ENROLL_CHARS:0:20}... (hidden)"
     echo ""
-    
+
     prompt_yes_no "Apply this configuration to all files now?" "y" APPLY_NOW
-    
+
     if [[ "$APPLY_NOW" == "true" ]]; then
         # Create directories before applying config
         create_directories
-        
+
         # Create self-signed certificate if requested and certificates don't exist
         if [[ "${CREATE_SELF_SIGNED:-false}" == "true" ]]; then
             local cert_dir_for_check="${CERT_DIR:-/opt/containerdata/certs/wild}"
             local cert_path="${cert_dir_for_check}/${CERT_FILE:-fullchain.pem}"
             local key_path="${cert_dir_for_check}/${KEY_FILE:-privkey.pem}"
-            
+
             if [[ ! -f "$cert_path" ]] || [[ ! -f "$key_path" ]]; then
                 create_self_signed_cert "${CERT_DIR:-/opt/containerdata/certs/wild}" "${DOMAIN:-ztpboot.example.com}"
             else
                 log "SSL certificates already exist, skipping self-signed certificate creation"
             fi
         fi
-        
+
         # Copy source files to target directory
         copy_source_files
-        
+
         # Copy config.yaml to installation directory (copy_source_files handles this, but ensure it's done)
         if [[ -f "$CONFIG_FILE" ]] && [[ -n "${SCRIPT_DIR:-}" ]]; then
             if [[ ("$SCRIPT_DIR" =~ ^/etc/ || "$SCRIPT_DIR" =~ ^/opt/) && $EUID -ne 0 ]]; then
@@ -3474,21 +3478,21 @@ EOF
                 fi
             fi
         fi
-        
+
         # Verify config file exists and is readable
         if [[ ! -f "$CONFIG_FILE" ]]; then
             error "Config file not found: $CONFIG_FILE"
             error "Cannot proceed with update-config.sh"
             return 1
         fi
-        
+
         # Verify config file has content (at least 100 bytes to ensure it's not empty)
         if [[ ! -s "$CONFIG_FILE" ]] || [[ $(stat -f%z "$CONFIG_FILE" 2>/dev/null || stat -c%s "$CONFIG_FILE" 2>/dev/null || echo 0) -lt 100 ]]; then
             error "Config file appears to be empty or too small: $CONFIG_FILE"
             error "This indicates the YAML generation failed. Please check the file contents."
             return 1
         fi
-        
+
         if [[ -f "update-config.sh" ]]; then
             log "Running update-config.sh to apply configuration..."
             log "Using config file: $CONFIG_FILE"
@@ -3497,7 +3501,7 @@ EOF
             warn "update-config.sh not found. Please run it manually:"
             warn "  bash update-config.sh $CONFIG_FILE"
         fi
-        
+
         # After updating config, we need to create the pod/container systemd files
         # This is done by setup.sh's setup_pod() function, which copies files from systemd/ directory
         # We'll call setup.sh which will handle this, but we need to make sure it doesn't fail
@@ -3509,17 +3513,17 @@ EOF
             # But that's complex due to dependencies. Instead, let's just run setup.sh
             # which should be mostly idempotent. However, setup.sh requires root and
             # does full setup. Let's create a simpler function that just does the pod setup.
-            
+
             # Note: WebUI image build happens in Section 7 (interactive_config) if requested
-            
+
             create_pod_files_from_config
-            
+
             # Manually run quadlet generator for pod and container files to ensure services are created
             # This is needed because systemd's automatic generator may not always process all files
             local systemd_dir="/etc/containers/systemd/ztpbootstrap"
             local generator_dir="/run/systemd/generator"
             local systemd_system_dir="/etc/systemd/system"
-            
+
             # Ensure generator directory exists
             if [[ $EUID -eq 0 ]]; then
                 mkdir -p "$generator_dir" 2>/dev/null || true
@@ -3528,7 +3532,7 @@ EOF
                 sudo mkdir -p "$generator_dir" 2>/dev/null || true
                 sudo mkdir -p "$systemd_system_dir" 2>/dev/null || true
             fi
-            
+
             # Reload systemd first to trigger the quadlet generator
             log "Reloading systemd to trigger quadlet generator..."
             if [[ $EUID -eq 0 ]]; then
@@ -3537,7 +3541,7 @@ EOF
                 sudo systemctl daemon-reload
             fi
             sleep 3  # Give systemd time to generate service files via automatic generator
-            
+
             # Check both generator directory and systemd system directory
             # Generator files are temporary, systemd system files are permanent
             local pod_service_path=""
@@ -3546,13 +3550,13 @@ EOF
             elif [[ -f "${systemd_system_dir}/ztpbootstrap-pod.service" ]]; then
                 pod_service_path="${systemd_system_dir}/ztpbootstrap-pod.service"
             fi
-            
+
             # Verify services were generated, if not try manual quadlet execution
             local services_generated=true
             if [[ -z "$pod_service_path" ]]; then
                 warn "Pod service not auto-generated, trying manual quadlet execution..."
                 services_generated=false
-                
+
                 if command -v /usr/libexec/podman/quadlet >/dev/null 2>&1; then
                     # Generate pod service manually
                     local pod_file="${systemd_dir}/ztpbootstrap.pod"
@@ -3570,7 +3574,7 @@ EOF
                         if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-pod.service" ]]; then
                             pod_generated=true
                         fi
-                        
+
                         if [[ $pod_exit_code -eq 0 ]] && [[ "$pod_generated" == "true" ]]; then
                             log "Pod service file generated successfully"
                             services_generated=true
@@ -3674,7 +3678,7 @@ EOFPOD2
                                     fi
                                 fi
                             fi
-                            
+
                             # Verify file exists (check both locations) - outside if/else block
                             local pod_verified=false
                             if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-pod.service" ]]; then
@@ -3684,7 +3688,7 @@ EOFPOD2
                                     pod_verified=true
                                 fi
                             fi
-                            
+
                             if [[ "$pod_verified" == "true" ]]; then
                                 log "✓ Pod service file verified"
                                 services_generated=true
@@ -3693,7 +3697,7 @@ EOFPOD2
                             fi
                         fi
                     fi
-                    
+
                     # Generate nginx container service manually
                     local nginx_container_file="${systemd_dir}/ztpbootstrap-nginx.container"
                     if [[ -f "$nginx_container_file" ]]; then
@@ -3710,7 +3714,7 @@ EOFPOD2
                         if [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-nginx.service" ]]; then
                             nginx_generated=true
                         fi
-                        
+
                         if [[ $nginx_exit_code -eq 0 ]] && [[ "$nginx_generated" == "true" ]]; then
                             log "Nginx container service file generated successfully"
                         else
@@ -3734,13 +3738,13 @@ EOFPOD2
                             if [[ -f /etc/os-release ]]; then
                                 distro=$(grep "^ID=" /etc/os-release | cut -d'=' -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]')
                             fi
-                            
+
                             if [[ -f "$nginx_container_file" ]]; then
                                 while IFS= read -r line; do
                                     if [[ "$line" =~ ^Volume= ]]; then
                                         local volume_path="${line#Volume=}"
                                         local source_path="${volume_path%%:*}"
-                                        
+
                                         # Skip Fedora-specific systemd library paths on non-RHEL-based systems
                                         # RHEL-based distros (Fedora, RHEL, CentOS, CentOS Stream, Rocky, AlmaLinux) have these paths
                                         if [[ "$distro" != "fedora" ]] && [[ "$distro" != "rhel" ]] && [[ "$distro" != "centos" ]] && [[ "$distro" != "centos-stream" ]] && [[ "$distro" != "almalinux" ]] && [[ "$distro" != "rocky" ]]; then
@@ -3748,7 +3752,7 @@ EOFPOD2
                                                 continue
                                             fi
                                         fi
-                                        
+
                                         # Only include volume if source path exists (or is a special path like /run)
                                         if [[ "$source_path" =~ ^/run ]] || [[ "$source_path" =~ ^/opt ]] || [[ -e "$source_path" ]] || ([[ $EUID -ne 0 ]] && sudo test -e "$source_path" 2>/dev/null); then
                                             volumes="${volumes} -v ${volume_path}"
@@ -3826,13 +3830,13 @@ EOFNGINX
                                     if [[ -f /etc/os-release ]]; then
                                         distro_tee=$(grep "^ID=" /etc/os-release | cut -d'=' -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]')
                                     fi
-                                    
+
                                     if [[ -f "$nginx_container_file" ]]; then
                                         while IFS= read -r line; do
                                             if [[ "$line" =~ ^Volume= ]]; then
                                                 local volume_path_tee="${line#Volume=}"
                                                 local source_path_tee="${volume_path_tee%%:*}"
-                                                
+
                                                 # Skip Fedora-specific systemd library paths on non-RHEL-based systems
                                                 # RHEL-based distros (Fedora, RHEL, CentOS, Rocky, AlmaLinux) have these paths
                                                 local is_dnf_distro_tee=false
@@ -3844,7 +3848,7 @@ EOFNGINX
                                                         continue
                                                     fi
                                                 fi
-                                                
+
                                                 # Only include if path exists
                                                 if [[ "$source_path_tee" =~ ^/run ]] || [[ "$source_path_tee" =~ ^/opt ]] || [[ -e "$source_path_tee" ]] || ([[ $EUID -ne 0 ]] && sudo test -e "$source_path_tee" 2>/dev/null); then
                                                     volumes_tee="${volumes_tee} -v ${volume_path_tee}"
@@ -3879,7 +3883,7 @@ EOFNGINX2
                                     fi
                                 fi
                             fi
-                            
+
                             # Verify file exists (check both locations) - outside if/else block
                             local nginx_verified=false
                             if [[ -f "${generator_dir}/ztpbootstrap-nginx.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-nginx.service" ]]; then
@@ -3889,7 +3893,7 @@ EOFNGINX2
                                     nginx_verified=true
                                 fi
                             fi
-                            
+
                             if [[ "$nginx_verified" == "true" ]]; then
                                 log "✓ Nginx service file verified"
                             else
@@ -3897,7 +3901,7 @@ EOFNGINX2
                             fi
                         fi
                     fi
-                    
+
                     # Reload systemd again after manual generation
                     if [[ "$services_generated" == "true" ]]; then
                         log "Reloading systemd after manual service generation..."
@@ -3914,7 +3918,7 @@ EOFNGINX2
             else
                 log "✓ Pod service auto-generated by systemd"
             fi
-            
+
             # Final verification that services exist (check both locations)
             local pod_service_exists=false
             if [[ -f "${generator_dir}/ztpbootstrap-pod.service" ]] || [[ -f "${systemd_system_dir}/ztpbootstrap-pod.service" ]]; then
@@ -3924,7 +3928,7 @@ EOFNGINX2
                     pod_service_exists=true
                 fi
             fi
-            
+
             if [[ "$pod_service_exists" == "false" ]]; then
                 warn "⚠️  Warning: Pod service file still not found after generation attempts"
                 warn "   Checking if files exist in generator and systemd directories..."
@@ -3943,7 +3947,7 @@ EOFNGINX2
             warn "setup.sh not found. Pod files will not be created automatically."
             warn "You will need to run: sudo ./setup.sh"
         fi
-        
+
         # Create logs directory (required for nginx container)
         if [[ -n "${SCRIPT_DIR:-}" ]]; then
             log "Creating logs directory..."
@@ -3976,7 +3980,7 @@ EOFNGINX2
             fi
             log "Created logs directory: $logs_dir"
         fi
-        
+
         # Ensure script directory is writable by webui container (runs as root)
         # This allows the webui to upload bootstrap scripts
         if [[ -n "${SCRIPT_DIR:-}" ]] && [[ -d "$SCRIPT_DIR" ]]; then
@@ -4034,13 +4038,13 @@ check_and_install_dependencies() {
     local auto_installable=()
     local manual_install=()
     local distro=""
-    
+
     # Detect distribution
     if [[ -f /etc/os-release ]]; then
         . /etc/os-release
         distro="${ID:-}"
     fi
-    
+
     # Helper: Check if distro uses dnf (RHEL-based)
     is_dnf_distro() {
         [[ "$distro" == "fedora" ]] || \
@@ -4050,13 +4054,13 @@ check_and_install_dependencies() {
         [[ "$distro" == "almalinux" ]] || \
         [[ "$distro" == "rocky" ]]
     }
-    
+
     # Helper: Check if distro uses apt (Debian-based)
     is_apt_distro() {
         [[ "$distro" == "ubuntu" ]] || \
         [[ "$distro" == "debian" ]]
     }
-    
+
     # Helper: Check if distro uses zypper (SUSE-based)
     is_zypper_distro() {
         [[ "$distro" == "opensuse-leap" ]] || \
@@ -4064,19 +4068,19 @@ check_and_install_dependencies() {
         [[ "$distro" == "sles" ]] || \
         [[ "$distro" == "opensuse-tumbleweed" ]]
     }
-    
+
     log "Checking dependencies..."
-    
+
     # Check for yq (required for YAML parsing)
     local yq_path
     yq_path=$(command -v yq 2>/dev/null || echo "")
     local yq_ok=false
-    
+
     if [[ -n "$yq_path" ]]; then
         # Check if it's the correct yq (mikefarah/yq) or Python wrapper
         local yq_version_output
         yq_version_output=$(yq --version 2>&1 || echo "")
-        
+
         if echo "$yq_version_output" | grep -q "yq version\|v[0-9]"; then
             # Correct yq found
             yq_ok=true
@@ -4093,7 +4097,7 @@ check_and_install_dependencies() {
             fi
         fi
     fi
-    
+
     if [[ "$yq_ok" == "false" ]]; then
         # Try to install yq
         if install_correct_yq; then
@@ -4112,7 +4116,7 @@ check_and_install_dependencies() {
             fi
         fi
     fi
-    
+
     # Check for podman
     if ! command -v podman >/dev/null 2>&1; then
         missing_deps+=("podman")
@@ -4128,7 +4132,7 @@ check_and_install_dependencies() {
     else
         log "✓ podman found: $(command -v podman)"
     fi
-    
+
     # Check for openssl (needed for certificate generation)
     if ! command -v openssl >/dev/null 2>&1; then
         missing_deps+=("openssl")
@@ -4144,7 +4148,7 @@ check_and_install_dependencies() {
     else
         log "✓ openssl found: $(command -v openssl)"
     fi
-    
+
     # Check for wget or curl (needed for downloads)
     if ! command -v wget >/dev/null 2>&1 && ! command -v curl >/dev/null 2>&1; then
         missing_deps+=("wget or curl")
@@ -4164,7 +4168,7 @@ check_and_install_dependencies() {
             log "✓ curl found: $(command -v curl)"
         fi
     fi
-    
+
     # Check for git (optional but recommended)
     if ! command -v git >/dev/null 2>&1; then
         warn "git not found (optional, but recommended for repository management)"
@@ -4178,7 +4182,7 @@ check_and_install_dependencies() {
     else
         log "✓ git found: $(command -v git)"
     fi
-    
+
     # Check for sudo (needed for privileged operations)
     if ! command -v sudo >/dev/null 2>&1; then
         if [[ $EUID -eq 0 ]]; then
@@ -4190,7 +4194,7 @@ check_and_install_dependencies() {
     else
         log "✓ sudo found: $(command -v sudo)"
     fi
-    
+
     # Check for systemctl (needed for service management)
     if ! command -v systemctl >/dev/null 2>&1; then
         warn "systemctl not found - service management may not work"
@@ -4198,7 +4202,7 @@ check_and_install_dependencies() {
     else
         log "✓ systemctl found: $(command -v systemctl)"
     fi
-    
+
     # If there are auto-installable dependencies, offer to install them
     if [[ ${#auto_installable[@]} -gt 0 ]]; then
         echo ""
@@ -4262,13 +4266,13 @@ check_and_install_dependencies() {
             fi
         fi
     fi
-    
+
     # Check if config template exists
     if [[ ! -f "$CONFIG_TEMPLATE" ]]; then
         error "Configuration template not found: $CONFIG_TEMPLATE"
         return 1
     fi
-    
+
     # Report missing dependencies that require manual installation
     if [[ ${#manual_install[@]} -gt 0 ]]; then
         echo ""
@@ -4281,18 +4285,18 @@ check_and_install_dependencies() {
         echo ""
         return 1
     fi
-    
+
     # Final check: verify all critical dependencies are available
     local critical_missing=()
     [[ -z "$(command -v yq 2>/dev/null)" ]] && critical_missing+=("yq")
     [[ -z "$(command -v podman 2>/dev/null)" ]] && critical_missing+=("podman")
     [[ -z "$(command -v openssl 2>/dev/null)" ]] && critical_missing+=("openssl")
-    
+
     if [[ ${#critical_missing[@]} -gt 0 ]]; then
         error "Critical dependencies still missing: ${critical_missing[*]}"
         return 1
     fi
-    
+
     log "All dependencies satisfied"
     return 0
 }
@@ -4302,7 +4306,7 @@ install_correct_yq() {
     local arch
     arch=$(uname -m)
     local yq_arch=""
-    
+
     # Determine architecture
     if [[ "$arch" == "aarch64" ]] || [[ "$arch" == "arm64" ]]; then
         yq_arch="arm64"
@@ -4312,11 +4316,11 @@ install_correct_yq() {
         warn "Unsupported architecture for yq: $arch"
         return 1
     fi
-    
+
     local yq_version="v4.44.3"
     local yq_url="https://github.com/mikefarah/yq/releases/download/${yq_version}/yq_linux_${yq_arch}"
     local yq_dest="/usr/local/bin/yq"
-    
+
     # Try wget first, then curl
     if command -v wget >/dev/null 2>&1; then
         if [[ $EUID -eq 0 ]]; then
@@ -4334,17 +4338,17 @@ install_correct_yq() {
         warn "Neither wget nor curl available to download yq"
         return 1
     fi
-    
+
     # Make executable
     if [[ $EUID -eq 0 ]]; then
         chmod +x "$yq_dest" 2>/dev/null || return 1
     else
         sudo chmod +x "$yq_dest" 2>/dev/null || return 1
     fi
-    
+
     # Ensure /usr/local/bin is in PATH
     export PATH="/usr/local/bin:$PATH"
-    
+
     # Verify it works
     if "$yq_dest" --version >/dev/null 2>&1; then
         return 0
@@ -4365,7 +4369,7 @@ parse_args() {
     NON_INTERACTIVE=false
     RESET_PASSWORD=""
     EXTENDED_MODE=false
-    
+
     while [[ $# -gt 0 ]]; do
         case $1 in
             --restore)
@@ -4458,7 +4462,7 @@ EOF
 main() {
     # Parse command line arguments
     parse_args "$@"
-    
+
     # Handle restore mode
     if [[ "$RESTORE_MODE" == "true" ]]; then
         if ! restore_backup "$RESTORE_TIMESTAMP"; then
@@ -4466,21 +4470,21 @@ main() {
         fi
         exit 0
     fi
-    
+
     # Check prerequisites first
     if ! check_prerequisites; then
         exit 1
     fi
-    
+
     # Check if running as root (optional for interactive mode)
     if [[ $EUID -ne 0 ]]; then
         warn "Not running as root. Some operations may require sudo."
     fi
-    
+
     # Check for previous installation
     local default_script_dir="/opt/containerdata/ztpbootstrap"
     local had_previous_install=false
-    
+
     # If --upgrade flag is used, require a previous installation
     if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
         log "Upgrade mode: Checking for existing installation..."
@@ -4492,13 +4496,13 @@ main() {
         log "Upgrade mode: Previous installation detected. Proceeding with upgrade..."
         echo ""
     fi
-    
+
     # Always try to load existing values first (before any cleanup)
     # This allows us to use existing values even if detection fails
     log "Attempting to load existing installation values..."
     load_existing_installation_values "$default_script_dir"
     echo ""
-    
+
     if detect_previous_install "$default_script_dir"; then
         had_previous_install=true
         echo ""
@@ -4511,13 +4515,13 @@ main() {
             warn "  - /etc/containers/systemd/ztpbootstrap"
         fi
         echo ""
-        
+
         # Check for running services
         local service_info
         service_info=$(check_running_services 2>/dev/null || echo "none:")
         local service_type="${service_info%%:*}"
         local services="${service_info#*:}"
-        
+
         if [[ "$service_type" != "none" ]] && [[ -n "$services" ]]; then
             warn "⚠️  Services are currently running:"
             IFS=' ' read -ra SERVICE_ARRAY <<< "$services"
@@ -4536,20 +4540,20 @@ main() {
                 log "Non-interactive mode: Auto-stopping services..."
             else
                 prompt_yes_no "Stop services gracefully before proceeding?" "n" STOP_SERVICES
-                
+
                 if [[ "$STOP_SERVICES" != "true" ]]; then
                     log "Setup cancelled. Please stop services manually and try again."
                     exit 0
                 fi
             fi
-            
+
             # Stop services gracefully
             if ! stop_services_gracefully "$service_info"; then
                 warn "Failed to stop some services. Proceeding anyway..."
             fi
             echo ""
         fi
-        
+
         # Create backup
         if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
             CREATE_BACKUP="true"
@@ -4560,7 +4564,7 @@ main() {
         else
             prompt_yes_no "Would you like to create a backup before proceeding?" "y" CREATE_BACKUP
         fi
-        
+
         if [[ "$CREATE_BACKUP" == "true" ]]; then
             if ! create_backup "$default_script_dir"; then
                 if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
@@ -4595,16 +4599,16 @@ main() {
             fi
         fi
         echo ""
-        
+
         # Clean installation directories (after backup is safe)
         log "Cleaning installation directories for fresh installation..."
         clean_installation_directories "$default_script_dir"
         echo ""
     fi
-    
+
     # Try to load existing config
     load_existing_config || true
-    
+
     # Run interactive configuration
     if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
         log "Upgrade mode: Using all previous installation values for configuration..."
@@ -4624,22 +4628,22 @@ main() {
     else
         interactive_config
     fi
-    
+
     # Generate YAML config
     generate_yaml_config
-    
+
     log "Interactive setup completed!"
     echo ""
     if [[ "$APPLY_NOW" == "true" ]]; then
         log "Configuration has been applied to all files."
         log ""
-        
+
         # Offer to start services if we had a previous installation
         if [[ -n "${default_script_dir:-}" ]] && detect_previous_install "$default_script_dir" 2>/dev/null; then
             # This shouldn't happen since we cleaned directories, but check anyway
             true
         fi
-        
+
         # Offer to start services
         echo ""
         if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
@@ -4651,7 +4655,7 @@ main() {
         else
             prompt_yes_no "Would you like to start the services now?" "y" START_SERVICES
         fi
-        
+
         if [[ "$START_SERVICES" == "true" ]]; then
             start_services_after_install
             echo ""
