@@ -6,12 +6,8 @@ title = "ztpbootstrap Secret Detection"
 useDefault = true
 
 # Additional custom patterns for this project
-[[rules]]
-id = "ztpbootstrap-enroll-chars"
-description = "Arista CVaaS Enrollment Chars"
-regex = '''(?i)(enroll[_-]?chars|enrollChars)\s*[=:]\s*['"]?[A-Za-z0-9_-]{20,}['"]?'''
-tags = ["secret", "arista", "cvaas"]
-
+# Note: We do not add a rule for enroll_chars/enrollChars; placeholders and test
+# values (bootstrap.py, test_validate_config.bats) would trigger false positives.
 [[rules]]
 id = "ztpbootstrap-jwt-token"
 description = "JWT Token Pattern"
