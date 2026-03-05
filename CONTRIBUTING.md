@@ -151,26 +151,13 @@ The `dev/tests/test-interactive-setup.sh` script automatically:
 
 #### Manual Restore
 
-If you need to restore manually:
+If you need to restore manually, use `dev/tests/test-interactive-setup.sh` with backup restore enabled:
 
 ```bash
-# SSH into the VM (replace 'user' with your username)
-ssh user@localhost -p 2222
-
-# Run the restore script (it detects it's running inside the VM)
-cd ~/ztpbootstrap
-./dev/scripts/restore-backup-from-fedora1.sh
+RESTORE_BACKUP=y BACKUP_HOST=your-production-host BACKUP_USER=your-user ./dev/tests/test-interactive-setup.sh --skip-vm
 ```
 
-**Note:** The restore script (`dev/scripts/restore-backup-from-fedora1.sh`) references a production server hostname. Update the script or set environment variables to point to your production server.
-
-**What gets restored:**
-- All configuration files (`nginx.conf`, `ztpbootstrap.env`, etc.)
-- Systemd quadlet files (`.pod`, `.container`)
-- SSL certificates (if present)
-- Any custom scripts or configurations
-
-**Note:** The restore script is in `dev/scripts/` and is a development tool.
+Or manually copy a backup from your production server to the VM, extract it, and restore the directories (`/opt/containerdata/ztpbootstrap/`, `/etc/containers/systemd/ztpbootstrap/`, `/opt/containerdata/certs/wild/`).
 
 ---
 
@@ -295,11 +282,8 @@ ps aux | grep qemu-system-aarch64
 ssh user@production-server
 sudo bash -c 'BACKUP_DIR="/tmp/ztpbootstrap-backup-$(date +%Y%m%d_%H%M%S)"; mkdir -p "$BACKUP_DIR"; cp -r /opt/containerdata/ztpbootstrap "$BACKUP_DIR/containerdata_ztpbootstrap" && cp -r /etc/containers/systemd/ztpbootstrap "$BACKUP_DIR/etc_containers_systemd_ztpbootstrap" && cp -r /opt/containerdata/certs/wild "$BACKUP_DIR/certs_wild" && cd /tmp && tar -czf ~user/ztpbootstrap-backup-$(date +%Y%m%d_%H%M%S).tar.gz -C "$BACKUP_DIR" . && rm -rf "$BACKUP_DIR" && echo "Backup: ~user/ztpbootstrap-backup-$(date +%Y%m%d_%H%M%S).tar.gz"'
 
-# Restore backup in VM (from inside VM)
-./dev/scripts/restore-backup-from-fedora1.sh
-
-# Restore backup in VM (from host, replace 'user' with your username)
-ssh -p 2222 user@localhost './dev/scripts/restore-backup-from-fedora1.sh'
+# Restore backup in VM (from host, replace with your production host and user)
+RESTORE_BACKUP=y BACKUP_HOST=production-server BACKUP_USER=user ./dev/tests/test-interactive-setup.sh --skip-vm
 ```
 
 ### Testing Commands
@@ -547,7 +531,6 @@ sudo systemctl restart ztpbootstrap
 The following scripts are development tools and are not part of the standard deployment:
 
 - `dev/tests/test-interactive-setup.sh` - Automated VM creation and backup restore
-- `dev/scripts/restore-backup-from-fedora1.sh` - Backup restore utility
 - `dev/scripts/vm-create-native.sh` - VM creation script
 - `dev/scripts/wait-for-ssh.sh` - SSH readiness checker
 - `run-full-e2e-test.sh` - End-to-end test runner
