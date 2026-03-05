@@ -331,6 +331,57 @@ Consider implementing log rotation to manage log file size:
 - **Quarterly**: Security audit and penetration testing
 - **On Release**: Full security testing suite
 
+## Known Security Trade-offs and Limitations
+
+The following are documented trade-offs. Mitigation would require significant effort.
+
+### Content Security Policy: `unsafe-eval` Required for Alpine.js
+
+**Location:** `nginx.conf` (Web UI location block)
+
+**Issue:** The Web UI uses Alpine.js for reactivity. Alpine.js requires `'unsafe-eval'` in the CSP because it uses `Function()` internally for its reactivity system.
+
+**Risk:** MEDIUM - `unsafe-eval` can enable XSS if an attacker can inject script. The Web UI has input sanitization and escaping; this is a defense-in-depth concern.
+
+**Current state:** Documented in nginx.conf. Acceptable for internal/lab deployments.
+
+**Alternatives and effort:**
+
+| Alternative | Effort | Notes |
+|-------------|--------|-------|
+| **Alpine.js CSP build** | Low (if available) | Check if Alpine.js v4+ supports CSP-compatible build. May require version upgrade. |
+| **Migrate to Petite Vue** | Medium | Similar API, smaller. May not support all Alpine.js features. |
+| **Migrate to Vanilla JS** | High | Replace ~15–20 Alpine components. Significant refactor. |
+| **Migrate to Vue/React** | High | Full framework migration. Build system changes. |
+| **Nonce-based CSP** | Medium | Requires server-side nonce generation per request. |
+
+**Recommendation:** For production deployments requiring stricter CSP, plan a migration to Petite Vue or Vanilla JS (estimated 2–4 days effort).
+
+---
+
+### NFS Mounts: Permissive File Permissions (777/666)
+
+**Location:** `setup.sh`, `setup-interactive.sh` (script directory permissions)
+
+**Issue:** When the script directory is on an NFS mount, we use `chmod 777` (directory) and `chmod 666` (files) because NFS does not reliably support Unix ownership/group changes. Standard permissions (775/664) may prevent the webui container from writing.
+
+**Risk:** MEDIUM on NFS - Any user on the NFS client can modify bootstrap scripts. Lower risk on isolated lab networks.
+
+**Current state:** We detect NFS via `is_nfs_mount()` and only apply 777/666 when on NFS. **For local filesystems, we use tighter 775/664** (already implemented).
+
+**Alternatives and effort:**
+
+| Alternative | Effort | Notes |
+|-------------|--------|-------|
+| **Use local storage** | Low | Deploy script directory on local disk (e.g. `/opt` on root) instead of NFS. |
+| **NFSv4 with Kerberos** | High | NFSv4 + ACLs can provide finer control. Requires NFS server reconfiguration. |
+| **Bind mount from local** | Medium | Store data on local disk, bind-mount into NFS path. Complex. |
+| **Different container user** | Medium | Run webui as specific UID/GID matching NFS export. May not work with all NFS setups. |
+
+**Recommendation:** For production, use local storage for the script directory. If NFS is required, document the risk and restrict NFS access to trusted clients.
+
+---
+
 ## Reporting Security Issues
 
 If you discover a security vulnerability, please:

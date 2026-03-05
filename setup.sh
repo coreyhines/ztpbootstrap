@@ -894,6 +894,7 @@ main() {
         # Change ownership to root:root so root can write, or use 777 for world-writable
         # Check if on NFS first - NFS may have different permission requirements
         if ! is_nfs_mount "$SCRIPT_DIR"; then
+            # Local filesystem: use tighter permissions (775/664). See docs/SECURITY.md for NFS trade-offs.
             # Change ownership to root so webui (running as root) can write
             chown root:root "$SCRIPT_DIR" 2>/dev/null || sudo chown root:root "$SCRIPT_DIR" 2>/dev/null || true
             chmod 775 "$SCRIPT_DIR" 2>/dev/null || sudo chmod 775 "$SCRIPT_DIR" 2>/dev/null || true
