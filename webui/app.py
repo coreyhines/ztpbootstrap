@@ -25,7 +25,9 @@ try:
     from security_utils import (
         sanitize_filename,
         validate_filename_for_api,
+        validate_password_complexity,
         validate_path_in_directory,
+        validate_python_file_content,
     )
 except ImportError:
     # Fallback if security_utils not available
@@ -43,10 +45,15 @@ except ImportError:
         try:
             resolved_path = file_path.resolve()
             resolved_base = base_directory.resolve()
-            # Use os.path.commonpath to securely check for directory containment
             return os.path.commonpath([str(resolved_path), str(resolved_base)]) == str(resolved_base)
         except (OSError, ValueError):
             return False
+
+    def validate_python_file_content(file_stream, max_preview_bytes=2048):
+        return True, ""
+
+    def validate_password_complexity(password):
+        return len(password) >= 8, ""
 
     def validate_filename_for_api(filename):
         if (
@@ -432,8 +439,38 @@ def auth_login():
             # Successful login
             record_login_attempt(client_ip, True)
 
-            # Log security event
-            log_security_event('login', 'success', client_ip, 'user=admin')
+            # Migrate from legacy fallback format to Werkzeug (per-user salt)
+            if (
+                password_hash
+                and password_hash.startswith("pbkdf2:sha256:")
+                and "$" not in password_hash
+            ):
+                try:
+                    new_hash = generate_password_hash(password)
+                    with open(CONFIG_FILE, "r") as f:
+                        yaml_config = yaml.safe_load(f) or {}
+                    if "auth" not in yaml_config:
+                        yaml_config["auth"] = {}
+                    yaml_config["auth"]["admin_password_hash"] = new_hash
+                    with open(CONFIG_FILE, "w") as f:
+                        yaml.dump(
+                            yaml_config,
+                            f,
+                            default_flow_style=False,
+                            sort_keys=False,
+                            allow_unicode=True,
+                        )
+                    reload_auth_config()
+                    log_security_event(
+                        "login",
+                        "success",
+                        client_ip,
+                        "user=admin details=migrated_legacy_password_to_werkzeug",
+                    )
+                except Exception:
+                    log_security_event("login", "success", client_ip, "user=admin")
+            else:
+                log_security_event("login", "success", client_ip, "user=admin")
 
             # Create session
             session['authenticated'] = True
@@ -490,12 +527,10 @@ def auth_change_password():
         current_password = data['current_password']
         new_password = data['new_password']
 
-        # Validate new password
-        if len(new_password) < 8:
-            return jsonify({
-                'error': 'New password must be at least 8 characters long',
-                'code': 'PASSWORD_TOO_SHORT'
-            }), 400
+        # Validate new password (12 chars min, 2+ character types per best practices)
+        pwd_valid, pwd_error = validate_password_complexity(new_password)
+        if not pwd_valid:
+            return jsonify({"error": pwd_error, "code": "PASSWORD_WEAK"}), 400
 
         # Declare global before using it
         global AUTH_CONFIG
@@ -1249,6 +1284,15 @@ def upload_bootstrap_script():
         file_path = safe_path_join(CONFIG_DIR, filename)
         if file_path is None:
             return jsonify({"error": "Invalid file path"}), 400
+
+        # Validate file content (Python source, not binary)
+        content_valid, content_error = validate_python_file_content(file)
+        if not content_valid:
+            client_ip = request.remote_addr or "unknown"
+            log_security_event(
+                "file_upload", "failure", client_ip, f"filename={filename} reason={content_error}"
+            )
+            return jsonify({"error": content_error}), 400
 
         # Try to save with proper error handling
         try:

@@ -6,6 +6,7 @@ Security utility functions for the ZTP Bootstrap Web UI
 import os
 import re
 from pathlib import Path
+from typing import Tuple
 
 
 def sanitize_filename(filename):
@@ -109,3 +110,73 @@ def validate_filename_for_api(filename):
         return False, None
     
     return True, sanitized
+
+
+def validate_python_file_content(file_stream, max_preview_bytes: int = 2048) -> Tuple[bool, str]:
+    """
+    Validate that uploaded file content appears to be Python source (not binary or malicious).
+
+    Checks: valid UTF-8, no null bytes, Python-like structure.
+
+    Args:
+        file_stream: File-like object (e.g. Flask request.files["file"])
+        max_preview_bytes: Number of bytes to read for validation
+
+    Returns:
+        Tuple of (is_valid, error_message). If valid, error_message is empty.
+    """
+    try:
+        file_stream.seek(0)
+        content = file_stream.read(max_preview_bytes)
+        file_stream.seek(0)
+    except Exception as e:
+        return False, f"Could not read file: {e}"
+
+    if not content:
+        return False, "File is empty"
+
+    if b"\x00" in content:
+        return False, "File appears to be binary (contains null bytes)"
+
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return False, "File is not valid UTF-8 text"
+
+    stripped = text.lstrip()
+    if not stripped:
+        return False, "File contains only whitespace"
+
+    first_char = stripped[0]
+    if first_char not in ("#", '"', "'") and not first_char.isalpha() and first_char != "_":
+        return False, "File does not appear to be valid Python source"
+
+    return True, ""
+
+
+def validate_password_complexity(password: str) -> Tuple[bool, str]:
+    """
+    Validate password against current best practices (NIST 800-63B, OWASP).
+
+    Requirements: minimum 12 characters, at least 2 character types
+    (uppercase, lowercase, digit, special).
+
+    Returns:
+        Tuple of (is_valid, error_message).
+    """
+    if len(password) < 12:
+        return False, "Password must be at least 12 characters long"
+
+    has_upper = bool(re.search(r"[A-Z]", password))
+    has_lower = bool(re.search(r"[a-z]", password))
+    has_digit = bool(re.search(r"\d", password))
+    has_special = bool(re.search(r"[^A-Za-z0-9]", password))
+    types_count = sum([has_upper, has_lower, has_digit, has_special])
+
+    if types_count < 2:
+        return (
+            False,
+            "Password must contain at least 2 character types (uppercase, lowercase, digits, special)",
+        )
+
+    return True, ""

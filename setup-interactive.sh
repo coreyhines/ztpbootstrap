@@ -58,6 +58,22 @@ info() {
     echo -e "${CYAN}[?]${NC} $1"
 }
 
+# Validate password complexity (12 chars min, 2+ character types per best practices)
+validate_password_complexity() {
+    local pwd="$1"
+    [[ ${#pwd} -lt 12 ]] && { warn "Password must be at least 12 characters long."; return 1; }
+    local types=0
+    [[ "$pwd" =~ [A-Z] ]] && ((types++)) || true
+    [[ "$pwd" =~ [a-z] ]] && ((types++)) || true
+    [[ "$pwd" =~ [0-9] ]] && ((types++)) || true
+    [[ "$pwd" =~ [^A-Za-z0-9] ]] && ((types++)) || true
+    if [[ $types -lt 2 ]]; then
+        warn "Password must contain at least 2 character types (uppercase, lowercase, digits, special)."
+        return 1
+    fi
+    return 0
+}
+
 # Prompt for input with default value
 prompt_with_default() {
     local prompt_text="$1"
@@ -2320,8 +2336,8 @@ interactive_config() {
         # Debug: log password details (without exposing the actual password)
         log "Password length: ${#RESET_PASSWORD} characters"
         # Validate password length
-        if [[ ${#RESET_PASSWORD} -lt 8 ]]; then
-            error "Password must be at least 8 characters long."
+        if ! validate_password_complexity "$RESET_PASSWORD"; then
+            error "Password does not meet complexity requirements."
             exit 1
         fi
         # Hash the password using Python (use stdin to avoid shell escaping issues)
@@ -2416,6 +2432,41 @@ PYTHON_VERIFY
             SESSION_TIMEOUT="${EXISTING_SESSION_TIMEOUT}"
         fi
     else
+        # In non-interactive mode, check for ADMIN_PASSWORD_HASH from environment first
+        if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
+            if [[ -n "${ADMIN_PASSWORD_HASH:-}" ]]; then
+                log "Non-interactive: Using ADMIN_PASSWORD_HASH from environment."
+                SET_ADMIN_PASSWORD="true"
+            elif [[ -n "${EXISTING_ADMIN_PASSWORD_HASH:-}" ]]; then
+                log "Non-interactive: Using existing admin password hash from config."
+                ADMIN_PASSWORD_HASH="${EXISTING_ADMIN_PASSWORD_HASH}"
+                SET_ADMIN_PASSWORD="true"
+            else
+                # No password provided - generate secure random password (same as --reset-pass)
+                ADMIN_PASSWORD=$(python3 -c "import secrets, string; print(''.join(secrets.choice(string.ascii_letters + string.digits + string.punctuation) for _ in range(15)))" 2>/dev/null || openssl rand -base64 12 | tr -d "=+/" | cut -c1-15)
+                warn "⚠️  No admin password provided. Generated secure random password: $ADMIN_PASSWORD"
+                warn "⚠️  IMPORTANT: Save this password! It will be needed to access the Web UI."
+                ADMIN_PASSWORD_HASH=$(echo "$ADMIN_PASSWORD" | python3 2>/dev/null <<'PYTHON_SCRIPT'
+import sys
+import hashlib
+import base64
+try:
+    from werkzeug.security import generate_password_hash
+    password = sys.stdin.read().rstrip('\n')
+    print(generate_password_hash(password))
+except ImportError:
+    password = sys.stdin.read().rstrip('\n')
+    hash_bytes = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)
+    print('pbkdf2:sha256:' + base64.b64encode(hash_bytes).decode())
+PYTHON_SCRIPT
+)
+                if [[ -z "$ADMIN_PASSWORD_HASH" ]]; then
+                    error "Failed to hash generated password. Authentication will not be configured."
+                    exit 1
+                fi
+                SET_ADMIN_PASSWORD="true"
+            fi
+        else
         # Ask if user wants to set a password
         prompt_yes_no "Set admin password for Web UI write operations?" "y" SET_ADMIN_PASSWORD
 
@@ -2427,13 +2478,12 @@ PYTHON_VERIFY
             attempts=$((attempts + 1))
 
             # Prompt for password (hidden input)
-            echo -n "Enter admin password (min 8 characters): "
+            echo -n "Enter admin password (min 12 characters, 2+ character types): "
             read -s ADMIN_PASSWORD
             echo ""
 
-            # Validate password length
-            if [[ ${#ADMIN_PASSWORD} -lt 8 ]]; then
-                warn "Password must be at least 8 characters long."
+            # Validate password complexity
+            if ! validate_password_complexity "$ADMIN_PASSWORD"; then
                 continue
             fi
 
@@ -2477,6 +2527,7 @@ PYTHON_VERIFY
         if [[ "$password_valid" == "false" ]]; then
             warn "Failed to set password after $attempts attempts. Skipping authentication setup."
             ADMIN_PASSWORD_HASH=""
+        fi
         fi
         fi
     fi
@@ -3464,16 +3515,16 @@ EOF
             if [[ ("$SCRIPT_DIR" =~ ^/etc/ || "$SCRIPT_DIR" =~ ^/opt/) && $EUID -ne 0 ]]; then
                 if sudo cp "$CONFIG_FILE" "${SCRIPT_DIR}/config.yaml" 2>/dev/null; then
                     sudo chown root:root "${SCRIPT_DIR}/config.yaml" 2>/dev/null || true
-                    sudo chmod 644 "${SCRIPT_DIR}/config.yaml" 2>/dev/null || true
+                    sudo chmod 600 "${SCRIPT_DIR}/config.yaml" 2>/dev/null || true
                     log "Copied config.yaml to installation directory: ${SCRIPT_DIR}/config.yaml"
                 fi
             else
                 if cp "$CONFIG_FILE" "${SCRIPT_DIR}/config.yaml" 2>/dev/null; then
-                    chmod 644 "${SCRIPT_DIR}/config.yaml" 2>/dev/null || true
+                    chmod 600 "${SCRIPT_DIR}/config.yaml" 2>/dev/null || true
                     log "Copied config.yaml to installation directory: ${SCRIPT_DIR}/config.yaml"
                 elif sudo cp "$CONFIG_FILE" "${SCRIPT_DIR}/config.yaml" 2>/dev/null; then
                     sudo chown root:root "${SCRIPT_DIR}/config.yaml" 2>/dev/null || true
-                    sudo chmod 644 "${SCRIPT_DIR}/config.yaml" 2>/dev/null || true
+                    sudo chmod 600 "${SCRIPT_DIR}/config.yaml" 2>/dev/null || true
                     log "Copied config.yaml with sudo to installation directory: ${SCRIPT_DIR}/config.yaml"
                 fi
             fi
@@ -3987,6 +4038,7 @@ EOFNGINX2
             log "Setting permissions for webui script uploads..."
             # Check if on NFS first
             if ! is_nfs_mount "$SCRIPT_DIR"; then
+                # Local filesystem: use tighter permissions (775/664). See docs/SECURITY.md for NFS trade-offs.
                 # Change ownership to root so webui (running as root) can write
                 if [[ ("$SCRIPT_DIR" =~ ^/etc/ || "$SCRIPT_DIR" =~ ^/opt/) && $EUID -ne 0 ]]; then
                     sudo chown root:root "$SCRIPT_DIR" 2>/dev/null || true
@@ -4220,7 +4272,7 @@ check_and_install_dependencies() {
                 install_cmd=$(echo "$dep_cmd" | sed -n 's/.*(\(.*\))/\1/p')
                 if [[ -n "$install_cmd" ]]; then
                     log "Running: $install_cmd"
-                    if eval "$install_cmd" 2>&1; then
+                    if bash -c "$install_cmd" 2>&1; then
                         # Verify the dependency is actually available after installation
                         local dep_name
                         dep_name=$(echo "$dep_cmd" | sed -n 's/^\([^ ]*\).*/\1/p')
@@ -4247,7 +4299,7 @@ check_and_install_dependencies() {
                     install_cmd=$(echo "$dep_cmd" | sed -n 's/.*(\(.*\))/\1/p')
                     if [[ -n "$install_cmd" ]]; then
                         log "Running: $install_cmd"
-                        if eval "$install_cmd" 2>&1; then
+                        if bash -c "$install_cmd" 2>&1; then
                             # Verify the dependency is actually available after installation
                             local dep_name
                             dep_name=$(echo "$dep_cmd" | sed -n 's/^\([^ ]*\).*/\1/p')
