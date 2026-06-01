@@ -18,7 +18,7 @@ jobs:
         fetch-depth: 0  # Full history needed for secret detection
     
     - name: Run Gitleaks Secret Detection
-      uses: gitleaks/gitleaks-action@v2
+      uses: gitleaks/gitleaks-action@v3
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
