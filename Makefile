@@ -1,7 +1,7 @@
 # Makefile for ZTP Bootstrap Service
 # Provides common development tasks
 
-.PHONY: help test test-quick test-unit test-integration test-all lint format check install-deps clean test-ci test-integration-dev security-check
+.PHONY: help test test-quick test-unit test-integration test-dhcp-e2e-podman test-all lint format check install-deps clean test-ci test-integration-dev security-check
 
 help: ## Show this help message
 	@echo "Available targets:"
@@ -82,6 +82,12 @@ test-dhcp-e2e: ## Run DHCP end-to-end test (requires VM)
 	else \
 		echo "test-dhcp-e2e.sh not found"; exit 1; \
 	fi
+
+test-dhcp-e2e-podman: ## Run DHCP e2e test via isolated Podman bridge (requires root + Podman)
+	@bash tests/integration/test_dhcp_e2e.sh; \
+	  rc=$$?; \
+	  [ $$rc -eq 77 ] && echo "SKIPPED (prerequisites not met)" && exit 0; \
+	  exit $$rc
 
 test-dhcp-automated: ## Run fully automated DHCP tests (creates VM, installs, tests)
 	@if [ -f dev/tests/test-dhcp-automated.sh ]; then \
