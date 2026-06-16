@@ -11,7 +11,8 @@ FROM registry.fedoraproject.org/fedora:41
 RUN dnf install -y -q \
         kea \
         kea-hooks \
-        nc \
+        nmap-ncat \
+        curl \
     && dnf clean all
 
 # kea-admin is used for DB schema init/upgrade

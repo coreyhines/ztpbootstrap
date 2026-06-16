@@ -238,9 +238,9 @@ sleep 8
 # directly: any lease in .100-.200 proves Kea served a real DHCP request.
 echo "==> Querying Kea Control Agent (lease4-get-all)"
 LEASE_JSON=$(podman exec "$KEA_SERVER" \
-    wget -q -O - \
-    --header "Content-Type: application/json" \
-    --post-data '{"command":"lease4-get-all","service":["dhcp4"]}' \
+    curl -s -X POST \
+    -H "Content-Type: application/json" \
+    -d '{"command":"lease4-get-all","service":["dhcp4"]}' \
     "http://127.0.0.1:${CTRL_PORT}" 2>/dev/null || echo "")
 
 if [[ -z "$LEASE_JSON" ]]; then
