@@ -1,41 +1,40 @@
-image.png# Building a Custom WebUI Container Image
+# Building the WebUI Container Image
 
-To avoid installing packages on every container start, you can build a local image with all dependencies pre-installed.
+The WebUI image (`registry.fedoraproject.org/fedora:41`) is built from `webui/Containerfile`
+and has all dependencies baked in — no packages are installed at container start.
 
-## Quick Start
+## Build
 
-1. Build the image locally:
-   ```bash
-   podman build -t ztpbootstrap-webui:local -f webui/Containerfile .
-   ```
-
-2. Update the container file to use your local image:
-   ```bash
-   sudo sed -i 's|Image=registry.fedoraproject.org/fedora:latest|Image=ztpbootstrap-webui:local|' /etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container
-   ```
-
-3. Reload and restart:
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl restart ztpbootstrap-webui
-   ```
-
-## Benefits
-
-- **Faster startup**: No package installation on every container start
-- **Local only**: No need for a public registry or version control
-- **One-time build**: Build once, use many times
-- **Easy updates**: Rebuild when you need to update packages
-
-## Using the Pre-built Image
-
-The container will start much faster since all packages are already installed. The application files are still mounted at runtime, so you can update the code without rebuilding the image.
-
-## Reverting to Runtime Installation
-
-If you want to go back to installing packages at runtime, simply change the image back:
 ```bash
-sudo sed -i 's|Image=ztpbootstrap-webui:local|Image=registry.fedoraproject.org/fedora:latest|' /etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container
-sudo systemctl daemon-reload
-sudo systemctl restart ztpbootstrap-webui
+# Build from the repo root
+podman build -t ztpbootstrap-webui:local -f webui/Containerfile .
 ```
+
+## Use the Local Build
+
+Update `versions.env` to point at your local tag:
+
+```bash
+# In versions.env, change:
+WEBUI_IMAGE=ztpbootstrap-webui:local
+```
+
+Then re-run the installer (`./setup.sh` or `./setup-interactive.sh`) so the quadlet
+is updated and the service restarted.
+
+## Update Dependencies
+
+To pick up new Python packages:
+
+1. Edit `webui/requirements.txt`
+2. Rebuild: `podman build -t ztpbootstrap-webui:local -f webui/Containerfile .`
+3. Update `WEBUI_IMAGE` in `versions.env` and redeploy
+
+## Runtime Installs Are Removed
+
+The default image has everything pre-installed. `start-webui.sh` does not run
+`dnf install` or `pip install` at startup. If you see install commands running, the
+wrong image tag is in use.
+
+> **Do not use `:latest`** — all `Image=` lines in quadlets must be pinned tags.
+> See `versions.env` for the single source of truth.

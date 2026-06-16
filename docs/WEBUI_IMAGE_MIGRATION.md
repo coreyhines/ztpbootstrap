@@ -1,148 +1,69 @@
-# WebUI Container Image Migration: Alpine to Debian-based
+# WebUI Container Image
 
-## Overview
+## Current Image
 
-The WebUI container image has been migrated from `docker.io/python:alpine` to `docker.io/python:3-slim` to enable container log access via mounted Fedora binaries (podman/journalctl).
+The WebUI container uses a **pinned Fedora-based image** with all dependencies baked in at build time:
 
-## Image Size Impact
-
-### Before (Alpine)
-- **Image**: `docker.io/python:alpine`
-- **Base Size**: ~50MB
-- **With Dependencies**: ~80-100MB (estimated)
-
-### After (Debian-based)
-- **Image**: `docker.io/python:3-slim`
-- **Base Size**: ~155MB
-- **With Dependencies**: ~180-200MB (estimated)
-
-### Impact Summary
-- **Size Increase**: ~3x larger (100MB → 200MB)
-- **Disk Usage**: Additional ~100MB per container instance
-- **Pull Time**: Slightly longer initial download (one-time)
-- **Memory**: Minimal increase (~10-20MB at runtime)
-- **Startup Time**: Negligible difference after first pull
-
-## Why This Change?
-
-### Problem
-Alpine Linux uses musl libc, which is incompatible with Fedora binaries (podman, journalctl) that use glibc. The mounted binaries could not execute in the Alpine container, preventing container log access from the WebUI.
-
-### Solution
-Switching to `python:3-slim` (Debian-based) provides:
-- ✅ glibc compatibility (matches Fedora host binaries)
-- ✅ Native execution of mounted podman/journalctl binaries
-- ✅ Container log access in WebUI
-- ✅ Still relatively small compared to full Python image (~1GB)
-
-## Migration Steps
-
-### 1. Update Container Configuration
-The following files have been updated:
-- `systemd/ztpbootstrap-webui.container`: Image changed to `docker.io/python:3-slim`
-- `setup.sh`: Image reference updated
-- `webui/start-webui.sh`: Comment updated
-- `webui/app.py`: Comments updated
-
-### 2. Deploy Changes
-```bash
-# Copy updated container file
-sudo cp systemd/ztpbootstrap-webui.container /etc/containers/systemd/ztpbootstrap/
-
-# Reload systemd
-sudo systemctl daemon-reload
-
-# Restart webui service
-sudo systemctl restart ztpbootstrap-webui
+```
+registry.fedoraproject.org/fedora:41
 ```
 
-### 3. Verify
+The base image and all pinned versions are tracked in `versions.env` at the repo root.
+
+## What's in the Image
+
+The `webui/Containerfile` builds from `fedora:41` and installs at build time:
+- Python 3 + pip
+- Podman (for container management from inside the webui)
+- systemd tools (for journalctl log access)
+- All Python dependencies from `webui/requirements.txt`
+
+At runtime, `start-webui.sh` only does environment configuration and starts the Flask
+app — **no package installation happens at container start**.
+
+## Why Fedora (not python:slim or Alpine)
+
+The WebUI manages Podman containers and reads systemd journal logs via mounted host
+binaries. These binaries are compiled for glibc, which is incompatible with Alpine
+(musl libc). Fedora is the same base as the host deployment targets, providing native
+binary compatibility.
+
+## Updating the WebUI Image
+
+The webui base image tag is defined in `versions.env`:
+
 ```bash
-# Check container is running
-sudo podman ps | grep ztpbootstrap-webui
-
-# Check container logs
-sudo podman logs ztpbootstrap-webui
-
-# Test log access from within container
-sudo podman exec ztpbootstrap-webui /usr/bin/podman ps
-sudo podman exec ztpbootstrap-webui /usr/bin/journalctl --version
+WEBUI_IMAGE=registry.fedoraproject.org/fedora:41
 ```
 
-### 4. Test WebUI
-1. Access WebUI: `https://your-domain/ui/`
-2. Navigate to Logs tab
-3. Select "Container Logs"
-4. Verify logs are displayed correctly
+To update:
+1. Change `WEBUI_IMAGE` in `versions.env`
+2. Update `FROM` in `webui/Containerfile` to match
+3. Rebuild: `podman build -t <registry>/ztpbootstrap-webui:<tag> -f webui/Containerfile .`
+4. Push to your registry, then run the installer to redeploy
 
-## Rollback Procedure
+## Building Locally
 
-If issues arise, rollback to Alpine:
-
-### 1. Revert Container File
 ```bash
-# Edit container file
-sudo nano /etc/containers/systemd/ztpbootstrap/ztpbootstrap-webui.container
-
-# Change line 5:
-# FROM: Image=docker.io/python:3-slim
-# TO:   Image=docker.io/python:alpine
+# Build from the repo root
+podman build -t ztpbootstrap-webui:local -f webui/Containerfile .
 ```
 
-### 2. Reload and Restart
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart ztpbootstrap-webui
-```
+Then update `WEBUI_IMAGE` in `versions.env` to point at your local tag and re-run
+the installer.
 
-### 3. Verify Rollback
+## Rollback
+
+To roll back to a previous tag, change `WEBUI_IMAGE` in `versions.env` and redeploy.
+There is no `:latest` fallback — all tags must be pinned.
+
+## Verify Running Image
+
 ```bash
-sudo podman ps | grep ztpbootstrap-webui
+# Check which image is running
 sudo podman inspect ztpbootstrap-webui | grep Image
+
+# Check container is healthy
+sudo podman ps | grep ztpbootstrap-webui
+sudo podman logs ztpbootstrap-webui
 ```
-
-## Compatibility Notes
-
-### Binary Compatibility
-- ✅ `podman` binary: Works (glibc compatible)
-- ✅ `journalctl` binary: Works (glibc compatible)
-- ✅ Python packages: No changes needed (Flask, Werkzeug, PyYAML)
-- ✅ Start script: No changes needed (uses generic shell)
-
-### Architecture Support
-- ✅ x86_64: Fully supported
-- ✅ ARM64: Fully supported (python:3-slim available for both)
-
-## Testing Checklist
-
-After migration, verify:
-- [ ] Container starts successfully
-- [ ] Flask application runs correctly
-- [ ] Python dependencies install without issues
-- [ ] `podman logs` command works from within container
-- [ ] `journalctl` command works from within container
-- [ ] Container logs display correctly in WebUI
-- [ ] Health checks pass
-- [ ] No performance degradation
-- [ ] All existing functionality works
-
-## Future Considerations
-
-### Alternative Options (if needed)
-1. **Fedora-based image**: `registry.fedoraproject.org/fedora:latest` + install Python
-   - Pros: Perfect binary compatibility
-   - Cons: Larger image (~264MB base)
-
-2. **Custom image**: Build optimized image with only required packages
-   - Pros: Minimal size
-   - Cons: Requires maintenance
-
-3. **Log forwarding**: Use alternative log access methods
-   - Pros: Keep Alpine
-   - Cons: More complex implementation
-
-## References
-
-- [Docker Hub - Python Images](https://hub.docker.com/_/python)
-- [Alpine vs Debian Docker Images](https://www.alpinelinux.org/about/)
-- [glibc vs musl Compatibility](https://wiki.musl-libc.org/functional-differences-from-glibc.html)
