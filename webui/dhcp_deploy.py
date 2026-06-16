@@ -9,7 +9,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,6 @@ def get_podman_cmd() -> List[str]:
             error_msg = test_result.stderr or test_result.stdout or "unknown error"
             logger.debug(f"Podman direct access test failed: {error_msg}")
             # Check for specific permission errors (only log once to avoid spam)
-            global _socket_warning_logged
             if not _socket_warning_logged and (
                 "permission denied" in error_msg.lower()
                 or "connect: permission denied" in error_msg.lower()
@@ -1351,7 +1350,7 @@ def remove_dhcp_container() -> bool:
         return False
 
 
-def check_dhcp_container_status() -> Dict[str, any]:
+def check_dhcp_container_status() -> Dict[str, Any]:
     """
     Get container status.
 
