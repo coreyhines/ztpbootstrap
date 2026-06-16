@@ -70,6 +70,12 @@ trap cleanup EXIT
 # ---------------------------------------------------------------------------
 fail() {
     echo "FAIL: $*" >&2
+    echo "==> Kea server logs:" >&2
+    podman logs "$KEA_SERVER" 2>&1 | tail -60 >&2 || true
+    echo "==> kea-dhcp4 process status in container:" >&2
+    podman exec "$KEA_SERVER" sh -c "pgrep -a kea-dhcp4 2>/dev/null || echo 'kea-dhcp4 not running'" >&2 || true
+    echo "==> /run/kea contents:" >&2
+    podman exec "$KEA_SERVER" sh -c "ls -la /run/kea/ 2>/dev/null || echo '/run/kea missing or empty'" >&2 || true
     exit 1
 }
 
