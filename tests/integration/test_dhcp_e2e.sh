@@ -115,8 +115,9 @@ podman network create \
 # Step 2: Write Kea configuration files into a temp directory
 # ---------------------------------------------------------------------------
 TMPDIR_TEST="$(mktemp -d /tmp/tmp_dhcp_e2e_XXXXXX)"
-mkdir -p "$TMPDIR_TEST/kea" "$TMPDIR_TEST/leases"
+mkdir -p "$TMPDIR_TEST/kea" "$TMPDIR_TEST/leases" "$TMPDIR_TEST/run-kea"
 
+# Kea 2.6+ requires control socket path to be under /run/kea (not /tmp)
 cat > "$TMPDIR_TEST/kea/kea-dhcp4.conf" << 'KEATPL'
 {
   "Dhcp4": {
@@ -125,7 +126,7 @@ cat > "$TMPDIR_TEST/kea/kea-dhcp4.conf" << 'KEATPL'
     },
     "control-socket": {
       "socket-type": "unix",
-      "socket-name": "/tmp/kea4-ctrl.sock"
+      "socket-name": "/run/kea/kea4-ctrl.sock"
     },
     "lease-database": {
       "type": "memfile",
@@ -164,7 +165,7 @@ cat > "$TMPDIR_TEST/kea/kea-ctrl-agent.conf" << 'CTLCFG'
     "control-sockets": {
       "dhcp4": {
         "socket-type": "unix",
-        "socket-name": "/tmp/kea4-ctrl.sock"
+        "socket-name": "/run/kea/kea4-ctrl.sock"
       }
     },
     "loggers": [
@@ -182,11 +183,12 @@ CTLCFG
 cat > "$TMPDIR_TEST/kea/start.sh" << 'STARTSH'
 #!/bin/sh
 set -e
+mkdir -p /run/kea
 kea-dhcp4 -c /etc/kea/kea-dhcp4.conf &
 echo "kea-dhcp4 started (PID $!)"
-# wait for control socket to appear before starting control agent
-for i in $(seq 1 15); do
-    [ -S /tmp/kea4-ctrl.sock ] && break
+# wait for control socket under /run/kea before starting control agent
+for i in $(seq 1 20); do
+    [ -S /run/kea/kea4-ctrl.sock ] && break
     sleep 1
 done
 exec kea-ctrl-agent -c /etc/kea/kea-ctrl-agent.conf
@@ -201,8 +203,10 @@ podman run -d \
     --name "$KEA_SERVER" \
     --network "$TEST_NET:ip=$KEA_IP" \
     --cap-add NET_BIND_SERVICE \
+    --cap-add NET_RAW \
     -v "$TMPDIR_TEST/kea:/etc/kea:ro,z" \
     -v "$TMPDIR_TEST/leases:/leases:rw,z" \
+    -v "$TMPDIR_TEST/run-kea:/run/kea:rw,z" \
     --entrypoint "/etc/kea/start.sh" \
     "$KEA_IMAGE"
 
