@@ -37,11 +37,14 @@ fi
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TEST_NET="ztpbootstrap-test-net"
 TEST_SUBNET="192.168.253.0/24"
 KEA_SERVER="kea-test-server"
 KEA_CLIENT="dhcp-test-client"
-KEA_IMAGE="docker.io/iscorg/kea:2.6.1"
+# ISC does not publish free public Kea images; we build from kea/Containerfile.
+# Allow override via KEA_IMAGE env var for CI environments that pre-build.
+KEA_IMAGE="${KEA_IMAGE:-ztpbootstrap-kea:3.0}"
 CLIENT_IMAGE="docker.io/alpine:3.19"
 KEA_IP="192.168.253.2"
 RANGE_START="192.168.253.100"
@@ -89,6 +92,14 @@ wait_for_port() {
     done
     return 1
 }
+
+# ---------------------------------------------------------------------------
+# Step 0: Ensure Kea image is available (build locally if needed)
+# ---------------------------------------------------------------------------
+if ! podman image exists "$KEA_IMAGE" 2>/dev/null; then
+    echo "==> Kea image '$KEA_IMAGE' not found — building from kea/Containerfile"
+    podman build -t "$KEA_IMAGE" -f "${REPO_DIR}/kea/Containerfile" "${REPO_DIR}" 2>&1
+fi
 
 # ---------------------------------------------------------------------------
 # Step 1: Create isolated bridge network

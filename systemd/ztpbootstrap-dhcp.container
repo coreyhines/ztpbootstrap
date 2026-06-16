@@ -5,7 +5,7 @@ Requires=ztpbootstrap-pod.service
 Wants=ztpbootstrap-postgresql.service
 
 [Container]
-Image=docker.io/iscorg/kea:2.6.1
+Image=ztpbootstrap-kea:3.0
 ContainerName=ztpbootstrap-dhcp
 Pod=ztpbootstrap.pod
 Exec=/bin/sh /app/start-kea.sh

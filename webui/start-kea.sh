@@ -1,5 +1,5 @@
 #!/bin/sh
-# Start Kea DHCP services using the official ISC Kea image (docker.io/iscorg/kea:2.6.1)
+# Start Kea DHCP services (image built from kea/Containerfile, tagged ztpbootstrap-kea:3.0)
 # No runtime package installation - all binaries are baked into the image
 
 set -e
