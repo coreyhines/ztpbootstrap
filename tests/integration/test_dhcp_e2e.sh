@@ -183,7 +183,7 @@ CTLCFG
 cat > "$TMPDIR_TEST/kea/start.sh" << 'STARTSH'
 #!/bin/sh
 set -e
-mkdir -p /run/kea
+mkdir -p /run/kea && chmod 750 /run/kea
 kea-dhcp4 -c /etc/kea/kea-dhcp4.conf &
 echo "kea-dhcp4 started (PID $!)"
 # wait for control socket under /run/kea before starting control agent
