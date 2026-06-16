@@ -977,17 +977,8 @@ def start_dhcp_container() -> bool:
             if status.get("container_running", False) or status.get("service_active", False):
                 logger.info("DHCP container is running (final check after exception)")
                 return True
-            # If container file exists, assume it's running (fail open)
-            if status.get("exists", False) or DHCP_CONTAINER_FILE.exists():
-                logger.info("Container file exists - assuming container is running")
-                return True
         except Exception:
-            # If we can't check but file exists, assume running
-            if DHCP_CONTAINER_FILE.exists():
-                logger.info(
-                    "Container file exists - assuming container is running (exception case)"
-                )
-                return True
+            pass
         return False
 
 
