@@ -25,3 +25,16 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+
+  # Enable version updates for Python pip dependencies
+  - package-ecosystem: "pip"
+    directory: "/webui"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "pip"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
