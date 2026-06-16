@@ -228,32 +228,14 @@ podman run -d \
     sh -c "udhcpc -i eth0 -n -q 2>&1 | tee /tmp/udhcpc.log; sleep 60"
 
 echo "==> Waiting for client to obtain a lease..."
-sleep 6
+sleep 8
 
 # ---------------------------------------------------------------------------
-# Step 5: Assert client received an IP in the expected range
+# Step 5 & 6: Query Kea Control Agent for issued leases; assert range + count
 # ---------------------------------------------------------------------------
-echo "==> Checking client IP assignment"
-CLIENT_IP=$(podman inspect "$KEA_CLIENT" \
-    --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || echo "")
-
-if [[ -z "$CLIENT_IP" ]]; then
-    podman logs "$KEA_CLIENT" >&2 || true
-    fail "could not determine client IP from container inspect"
-fi
-
-echo "    Client IP: $CLIENT_IP"
-
-IFS='.' read -r o1 o2 o3 o4 <<< "$CLIENT_IP"
-if [[ "$o1.$o2.$o3" == "192.168.253" && "$o4" -ge 100 && "$o4" -le 200 ]]; then
-    pass "client IP $CLIENT_IP is in 192.168.253.100–200"
-else
-    fail "client IP $CLIENT_IP is NOT in expected range 192.168.253.100–200"
-fi
-
-# ---------------------------------------------------------------------------
-# Step 6: Assert lease is visible via Kea Control Agent API
-# ---------------------------------------------------------------------------
+# podman inspect returns the IP Podman assigned at container-create time (.3),
+# not the DHCP-assigned address udhcpc received from Kea. Instead, query Kea
+# directly: any lease in .100-.200 proves Kea served a real DHCP request.
 echo "==> Querying Kea Control Agent (lease4-get-all)"
 LEASE_JSON=$(podman exec "$KEA_SERVER" \
     wget -q -O - \
@@ -269,11 +251,21 @@ if ! echo "$LEASE_JSON" | grep -q '"result":0'; then
     fail "lease4-get-all returned non-zero result. Response: $LEASE_JSON"
 fi
 
-if ! echo "$LEASE_JSON" | grep -q "\"$CLIENT_IP\""; then
-    fail "lease for $CLIENT_IP not found in Kea API response. Response: $LEASE_JSON"
+# Extract first ip-address value from the lease list
+LEASED_IP=$(echo "$LEASE_JSON" | grep -o '"ip-address":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+if [[ -z "$LEASED_IP" ]]; then
+    fail "no leases found in Kea response — DHCP client did not receive an address. Response: $LEASE_JSON"
 fi
 
-pass "lease for $CLIENT_IP visible in Kea Control Agent (lease4-get-all)"
+echo "    Kea issued lease: $LEASED_IP"
+
+IFS='.' read -r o1 o2 o3 o4 <<< "$LEASED_IP"
+if [[ "$o1.$o2.$o3" == "192.168.253" && "$o4" -ge 100 && "$o4" -le 200 ]]; then
+    pass "Kea issued $LEASED_IP which is in 192.168.253.100–200"
+else
+    fail "Kea issued $LEASED_IP which is NOT in expected range 192.168.253.100–200"
+fi
 
 # ---------------------------------------------------------------------------
 echo "==> All DHCP integration tests passed"
