@@ -7,6 +7,7 @@ Generates Kea JSON configuration from YAML config
 import ipaddress
 import json
 import logging
+import os
 from typing import Dict, List, Optional
 
 from dhcp_utils import detect_networking_mode, get_interfaces_for_kea
@@ -198,6 +199,14 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     if backend_type in ["postgresql", "mysql"]:
         config["hosts-database"] = generate_lease_database(backend_config)
 
+    # Add hooks for lease and host commands (required for Control Agent access with PG backend)
+    if backend_type in ["postgresql", "mysql"]:
+        hook_path = backend_config.get("hook_library_path", "/usr/lib/x86_64-linux-gnu/kea/hooks")
+        config["hooks-libraries"] = [
+            {"library": f"{hook_path}/libdhcp_lease_cmds.so"},
+            {"library": f"{hook_path}/libdhcp_host_cmds.so"},
+        ]
+
     # Add client classification for OUI filtering
     oui_config = dhcp_config.get("oui_filtering", {})
     if (
@@ -346,6 +355,14 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     # For memfile, we omit it to avoid entrypoint script errors
     if backend_type in ["postgresql", "mysql"]:
         config["hosts-database"] = generate_lease_database(backend_config)
+
+    # Add hooks for lease and host commands (required for Control Agent access with PG backend)
+    if backend_type in ["postgresql", "mysql"]:
+        hook_path = backend_config.get("hook_library_path", "/usr/lib/x86_64-linux-gnu/kea/hooks")
+        config["hooks-libraries"] = [
+            {"library": f"{hook_path}/libdhcp_lease_cmds.so"},
+            {"library": f"{hook_path}/libdhcp_host_cmds.so"},
+        ]
 
     # Add client classification for OUI filtering
     oui_config = dhcp_config.get("oui_filtering", {})
@@ -633,13 +650,15 @@ def generate_lease_database(backend_config: Dict) -> Dict:
 
     if backend_type == "postgresql":
         postgresql_config = backend_config.get("postgresql", {})
+        # Password sourced from env at config-render time (never hardcoded in config.yaml)
+        password = postgresql_config.get("password") or os.environ.get("POSTGRES_PASSWORD", "")
         return {
             "type": "postgresql",
-            "host": postgresql_config.get("host", "localhost"),
+            "host": postgresql_config.get("host", "127.0.0.1"),
             "port": postgresql_config.get("port", 5432),
             "name": postgresql_config.get("database", "kea"),
             "user": postgresql_config.get("user", "kea"),
-            "password": postgresql_config.get("password", ""),
+            "password": password,
         }
     else:
         # Default to memfile

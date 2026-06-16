@@ -11,9 +11,9 @@ Exec=/usr/local/bin/docker-entrypoint.sh postgres
 Volume=/opt/containerdata/ztpbootstrap/postgresql:/var/lib/postgresql/data:rw
 Environment=POSTGRES_DB=kea
 Environment=POSTGRES_USER=kea
-Environment=POSTGRES_PASSWORD=kea_password
 Environment=TZ=UTC
 Environment=PGDATA=/var/lib/postgresql/data/pgdata
+EnvironmentFile=-/opt/containerdata/ztpbootstrap/.env
 
 [Service]
 Restart=always
