@@ -3,7 +3,7 @@ Description=ZTP Bootstrap Script Server for Arista CVaaS
 
 [Container]
 ContainerName=ztpbootstrap
-Image=docker.io/nginx:alpine
+Image=docker.io/nginx:1.27.3
 Network=host
 # IP=10.0.0.10  # Uncomment and set your IPv4 address if not using host network
 # IP6=2001:db8::10  # Uncomment and set your IPv6 address if not using host network

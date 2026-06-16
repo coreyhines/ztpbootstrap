@@ -2,7 +2,7 @@
 Description=ZTP Bootstrap Nginx Container
 
 [Container]
-Image=docker.io/nginx:alpine
+Image=docker.io/nginx:1.27.3
 ContainerName=ztpbootstrap-nginx
 Pod=ztpbootstrap.pod
 Volume=/opt/containerdata/ztpbootstrap:/usr/share/nginx/html:ro
