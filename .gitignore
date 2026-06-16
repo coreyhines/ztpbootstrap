@@ -31,6 +31,7 @@ security-reports/
 __pycache__/
 *.pyc
 *.pyo
+.coverage
 
 # Logs
 *.log
@@ -45,3 +46,10 @@ SANITIZATION_NOTES.md
 
 # Test reports (dev use only, can be recreated)
 tests/test-reports/
+TEST_RESULTS.md
+
+# DHCP runtime files (generated at runtime)
+dhcp/leases/*
+dhcp/logs/*
+!dhcp/leases/.gitkeep
+!dhcp/logs/.gitkeep
