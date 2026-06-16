@@ -4,11 +4,9 @@ Kea DHCP Configuration Generator
 Generates Kea JSON configuration from YAML config
 """
 
-import ipaddress
-import json
 import logging
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from dhcp_utils import detect_networking_mode, get_interfaces_for_kea
 

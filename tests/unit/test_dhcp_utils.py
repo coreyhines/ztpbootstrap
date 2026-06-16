@@ -116,11 +116,8 @@ class TestDHCPUtils(unittest.TestCase):
         mode = detect_networking_mode({"container": {"host_network": True}})
         self.assertEqual(mode, "host")
 
-    @patch("dhcp_utils.Path.exists")
-    def test_detect_networking_mode_macvlan(self, mock_exists):
+    def test_detect_networking_mode_macvlan(self):
         """Test macvlan networking mode detection"""
-        mock_exists.return_value = True
-
         mode = detect_networking_mode({"container": {"host_network": False}})
         self.assertEqual(mode, "macvlan")
 

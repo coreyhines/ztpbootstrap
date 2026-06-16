@@ -12,7 +12,6 @@ import re
 import secrets
 import subprocess
 import time
-from collections import defaultdict
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -42,7 +41,6 @@ try:
     from dhcp_deploy import (
         check_dhcp_container_status,
         create_dhcp_container,
-        remove_dhcp_container,
         start_dhcp_container,
         stop_dhcp_container,
     )
@@ -53,7 +51,6 @@ try:
         detect_host_interfaces,
         detect_networking_mode,
         detect_subnet,
-        validate_dhcp_range,
     )
     from kea_client import (
         add_reservation,
@@ -93,7 +90,9 @@ except ImportError:
         try:
             resolved_path = file_path.resolve()
             resolved_base = base_directory.resolve()
-            return os.path.commonpath([str(resolved_path), str(resolved_base)]) == str(resolved_base)
+            return os.path.commonpath([str(resolved_path), str(resolved_base)]) == str(
+                resolved_base
+            )
         except (OSError, ValueError):
             return False
 
@@ -295,7 +294,6 @@ def reload_auth_config():
     # a request breaks Flask session cookie signing. The secret key should only
     # be set once at startup. If the session_secret changes, the app must be
     # restarted for it to take effect.
-
 
 
 # Configure Flask session
@@ -760,8 +758,6 @@ def auth_change_password():
                 yaml_config["auth"]["admin_password_hash"] = str(new_password_hash).strip()
 
                 # Write back to file using atomic write with file locking (write to temp, then rename)
-                import shutil
-                import tempfile
 
                 temp_file = CONFIG_FILE.with_suffix(".yaml.tmp")
                 try:
@@ -848,7 +844,7 @@ def auth_change_password():
                 if not test_result:
                     if DEBUG:
                         print(
-                            f"ERROR: New password hash verification failed after reload!",
+                            "ERROR: New password hash verification failed after reload!",
                             flush=True,
                         )
 
@@ -918,7 +914,7 @@ def get_config():
             try:
                 parsed_config = yaml.safe_load(raw_content)
                 return jsonify({"parsed": parsed_config, "raw": raw_content})
-            except yaml.YAMLError as e:
+            except yaml.YAMLError:
                 # YAML parsing failed, return raw content
                 return jsonify(
                     {
@@ -939,7 +935,7 @@ def load_scripts_metadata():
         try:
             with open(SCRIPTS_METADATA, "r") as f:
                 return json.load(f)
-        except:
+        except Exception:
             return {}
     return {}
 
@@ -992,7 +988,6 @@ def list_bootstrap_scripts():
     scripts = []
     script_dir = CONFIG_DIR
     active_script = None
-    metadata = load_scripts_metadata()
 
     # Check which script is currently active (bootstrap.py is the active one)
     active_path = BOOTSTRAP_SCRIPT
@@ -1002,7 +997,7 @@ def list_bootstrap_scripts():
             try:
                 resolved = active_path.resolve()
                 active_script = resolved.name
-            except:
+            except Exception:
                 active_script = active_path.name
         else:
             # bootstrap.py is a regular file, so it's the active one
@@ -1017,7 +1012,7 @@ def list_bootstrap_scripts():
             if active_file.exists():
                 active_resolved_path = active_file.resolve()
                 active_resolved_name = active_resolved_path.name
-        except:
+        except Exception:
             pass
 
     for file in script_dir.glob("bootstrap*.py"):
@@ -1049,7 +1044,6 @@ def list_bootstrap_scripts():
             # For bootstrap.py, if it's a symlink, we still want to show it
             # but we'll mark the target as active instead
             file_stat = file.stat()
-            script_meta = metadata.get(file.name, {})
             scripts.append(
                 {
                     "name": file.name,
@@ -1059,7 +1053,7 @@ def list_bootstrap_scripts():
                     "active": is_active,
                 }
             )
-        except OSError as e:
+        except OSError:
             # Skip files that can't be stat'd (e.g., symlink loops)
             continue
 
@@ -1075,7 +1069,7 @@ def list_bootstrap_scripts():
                     try:
                         resolved = bootstrap_py_path.resolve()
                         is_active = resolved.name == active_resolved_name
-                    except:
+                    except Exception:
                         pass
                 else:
                     is_active = "bootstrap.py" == active_resolved_name
@@ -1083,7 +1077,6 @@ def list_bootstrap_scripts():
                 is_active = "bootstrap.py" == active_script
 
             file_stat = bootstrap_py_path.stat()
-            script_meta = metadata.get("bootstrap.py", {})
             scripts.append(
                 {
                     "name": "bootstrap.py",
@@ -1135,7 +1128,7 @@ def get_bootstrap_script(filename):
                     is_active = script_path.resolve() == active_path.resolve()
                 else:
                     is_active = script_path.name == active_path.name
-            except:
+            except Exception:
                 is_active = script_path.name == active_path.name
 
         # lgtm[py/path-injection]
@@ -1530,7 +1523,7 @@ def restore_backup_script(filename):
                 timestamp = int(timestamp_str)
                 dt = datetime.fromtimestamp(timestamp)
                 new_name = f"bootstrap_restored_{dt.strftime('%Y%m%d_%H%M%S')}.py"
-            except:
+            except Exception:
                 new_name = f"bootstrap_restored_{int(time.time())}.py"
 
             new_path = safe_path_join(CONFIG_DIR, new_name)
@@ -1681,7 +1674,7 @@ def get_status():
                 # Also check the response body for health status
                 health_body = response.read().decode().strip()
                 health_ok = health_body == "healthy"
-        except Exception as e:
+        except Exception:
             # Health endpoint not reachable - try systemctl as fallback
             try:
                 result = subprocess.run(
@@ -1715,7 +1708,7 @@ def load_device_connections():
         try:
             with open(DEVICE_CONNECTIONS_FILE, "r") as f:
                 return json.load(f)
-        except:
+        except Exception:
             return {}
     return {}
 
@@ -1757,13 +1750,13 @@ def parse_nginx_access_log():
                             line_timestamp = dt.timestamp()
                             if line_timestamp > cutoff_time:
                                 processed_lines.add(line)
-                        except:
+                        except Exception:
                             # If we can't parse timestamp, keep the line (conservative approach)
                             processed_lines.add(line)
                     else:
                         # If it doesn't match log format, it might be a MARK line, keep it
                         processed_lines.add(line)
-        except:
+        except Exception:
             pass
 
     # Nginx log format: IP - - [timestamp] "method path protocol" status size "referer" "user-agent"
@@ -1798,7 +1791,6 @@ def parse_nginx_access_log():
 
             ip = match.group(1)
             timestamp_str = match.group(2)
-            method = match.group(3)
             path = match.group(4)
             status = int(match.group(6))
             user_agent = match.group(9)
@@ -1841,7 +1833,7 @@ def parse_nginx_access_log():
             try:
                 dt = datetime.strptime(timestamp_str.split()[0], "%d/%b/%Y:%H:%M:%S")
                 timestamp = dt.timestamp()
-            except:
+            except Exception:
                 continue
 
             # Initialize device entry if not exists
@@ -2207,7 +2199,7 @@ def get_logs():
                                     journal_accessible = True
                                     journal_path = jpath
                                     break
-                            except:
+                            except Exception:
                                 pass
 
                     if journal_accessible and journal_path:
@@ -2234,9 +2226,9 @@ def get_logs():
                             if result.returncode == 0 and result.stdout.strip():
                                 logs = result.stdout
                                 log_found = True
-                        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+                        except (FileNotFoundError, subprocess.TimeoutExpired):
                             pass
-                        except Exception as e:
+                        except Exception:
                             # Try without sudo
                             try:
                                 result = subprocess.run(
@@ -2385,7 +2377,7 @@ def get_logs():
                         env=env,
                     )
                     podman_available = podman_check.returncode == 0
-                except:
+                except Exception:
                     # Try without LD_LIBRARY_PATH
                     try:
                         podman_check = subprocess.run(
@@ -2395,7 +2387,7 @@ def get_logs():
                             timeout=2,
                         )
                         podman_available = podman_check.returncode == 0
-                    except:
+                    except Exception:
                         pass
             else:
                 # Fallback: try to run podman to see if it's in PATH
@@ -2404,7 +2396,7 @@ def get_logs():
                         ["podman", "--version"], capture_output=True, text=True, timeout=1
                     )
                     podman_available = podman_check.returncode == 0
-                except:
+                except Exception:
                     pass
 
             # Check podman socket accessibility
@@ -2421,7 +2413,7 @@ def get_logs():
                         if os.access(socket_path, os.R_OK):
                             podman_socket_accessible = True
                             break
-                    except:
+                    except Exception:
                         pass
 
             # Also try to test podman connectivity directly
@@ -2436,7 +2428,7 @@ def get_logs():
                     )
                     if test_result.returncode == 0:
                         podman_socket_accessible = True
-                except:
+                except Exception:
                     pass
 
             # Check journalctl availability and ability to actually execute
@@ -2457,7 +2449,7 @@ def get_logs():
                         env=env,
                     )
                     journalctl_available = journalctl_check.returncode == 0
-                except:
+                except Exception:
                     # Try without LD_LIBRARY_PATH
                     try:
                         journalctl_check = subprocess.run(
@@ -2467,7 +2459,7 @@ def get_logs():
                             timeout=2,
                         )
                         journalctl_available = journalctl_check.returncode == 0
-                    except:
+                    except Exception:
                         pass
             else:
                 # Fallback: try to run journalctl to see if it's in PATH
@@ -2476,7 +2468,7 @@ def get_logs():
                         ["journalctl", "--version"], capture_output=True, text=True, timeout=1
                     )
                     journalctl_available = journalctl_check.returncode == 0
-                except:
+                except Exception:
                     pass
 
             # Check journal directory accessibility
@@ -2491,12 +2483,12 @@ def get_logs():
                         if os.access(journal_path, os.R_OK):
                             journal_accessible = True
                             break
-                    except:
+                    except Exception:
                         pass
 
             # Collect diagnostic information
             diagnostics = []
-            diagnostics.append(f"Deployment mode: Pod-based")
+            diagnostics.append("Deployment mode: Pod-based")
             diagnostics.append(f"Services detected: {', '.join(containers.keys())}")
             diagnostics.append(
                 f"Podman binary exists: {podman_binary_path.exists() if 'podman_binary_path' in locals() else 'Unknown'}"
@@ -2509,7 +2501,7 @@ def get_logs():
             diagnostics.append(f"Journalctl executable: {journalctl_available}")
             diagnostics.append(f"Journal accessible: {journal_accessible}")
             diagnostics.append(
-                f"Note: Container uses Fedora-based image with podman and journalctl installed via dnf."
+                "Note: Container uses Fedora-based image with podman and journalctl installed via dnf."
             )
 
             # Try to get container logs using multiple methods
@@ -2564,7 +2556,7 @@ def get_logs():
                                     else journal_result.stdout.strip()
                                 )
                                 method_used = "journalctl"
-                        except Exception as e:
+                        except Exception:
                             logging.exception(
                                 f"Exception while retrieving logs via journalctl for {service}"
                             )
@@ -2619,7 +2611,7 @@ def get_logs():
                                 f"podman logs {container_name} returned code {result.returncode}: {result.stderr}"
                             )
                     except FileNotFoundError:
-                        diagnostics.append(f"podman binary not found")
+                        diagnostics.append("podman binary not found")
                     except subprocess.TimeoutExpired:
                         diagnostics.append(f"podman logs {container_name} timed out")
                     except Exception as e:
@@ -2671,7 +2663,7 @@ def get_logs():
                                 f"journalctl -u {service} returned code {journal_result.returncode}: {journal_result.stderr}"
                             )
                     except FileNotFoundError:
-                        diagnostics.append(f"journalctl binary not found")
+                        diagnostics.append("journalctl binary not found")
                     except subprocess.TimeoutExpired:
                         diagnostics.append(f"journalctl -u {service} timed out")
                     except Exception as e:
@@ -2715,7 +2707,7 @@ def get_logs():
                         hostname_file = Path("/etc/hostname")
                         if hostname_file.exists():
                             hostname = hostname_file.read_text().strip()
-                    except:
+                    except Exception:
                         pass
 
                     if not hostname:
@@ -2724,7 +2716,7 @@ def get_logs():
                             # If it's a pod/container name, try to get actual hostname
                             if "pod" in hostname.lower() or "container" in hostname.lower():
                                 hostname = None
-                        except:
+                        except Exception:
                             pass
 
                     # Try to get host IP from environment or network
@@ -2732,7 +2724,7 @@ def get_logs():
                         # Check if we can get host IP from hostname resolution
                         if hostname:
                             host_ip = socket.gethostbyname(hostname)
-                    except:
+                    except Exception:
                         pass
 
                     # Build SSH instruction

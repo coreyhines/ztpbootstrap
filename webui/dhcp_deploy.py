@@ -553,7 +553,6 @@ def stop_dhcp_container() -> bool:
         podman_cmd = get_podman_cmd()
 
         # Method 1: Direct systemctl (with sudo if not root)
-        systemctl_success = False
         try:
             if os.geteuid() == 0:
                 result = subprocess.run(
@@ -571,7 +570,6 @@ def stop_dhcp_container() -> bool:
                 )
             if result.returncode == 0:
                 logger.info("systemctl stop command succeeded")
-                systemctl_success = True
             else:
                 logger.warning(f"Failed to stop DHCP container via systemctl: {result.stderr}")
                 # Don't fail if service doesn't exist

@@ -4,7 +4,6 @@ Kea Control Agent Client
 Communicates with Kea Control Agent API for DHCP management
 """
 
-import json
 import logging
 from typing import Dict, List, Optional
 

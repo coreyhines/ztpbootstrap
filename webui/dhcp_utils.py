@@ -10,7 +10,6 @@ import logging
 import re
 import socket
 import subprocess
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)

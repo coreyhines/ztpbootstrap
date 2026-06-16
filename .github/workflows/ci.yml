@@ -135,7 +135,7 @@ jobs:
 
       - name: Install Python linting tools
         run: |
-          pip3 install black isort
+          pip3 install black isort ruff
 
       - name: Run shellcheck
         run: |
@@ -148,7 +148,13 @@ jobs:
 
       - name: Check Python formatting with black
         run: |
-          black --check bootstrap.py || echo "Python formatting check (install black to auto-format)"
+          black --check bootstrap.py
+
+      - name: Run ruff (webui + tests)
+        run: ruff check webui/ tests/unit/
+
+      - name: Run black check (webui + tests)
+        run: black --check webui/ tests/unit/
 
       - name: Check Python imports with isort
         run: |
