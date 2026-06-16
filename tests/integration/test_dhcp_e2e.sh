@@ -238,8 +238,9 @@ podman run -d \
     --name "$KEA_CLIENT" \
     --network "$TEST_NET" \
     --cap-add NET_ADMIN \
+    --cap-add NET_RAW \
     "$CLIENT_IMAGE" \
-    sh -c "udhcpc -i eth0 -n -q 2>&1 | tee /tmp/udhcpc.log; sleep 60"
+    sh -c "udhcpc -i eth0 -n -q -v 2>&1 | tee /tmp/udhcpc.log; sleep 120"
 
 echo "==> Waiting for client to obtain a lease..."
 sleep 15
