@@ -3083,7 +3083,6 @@ PYTHON_SCRIPT
                 error "Failed to set password after 3 attempts. Skipping password configuration."
                 SET_ADMIN_PASSWORD="false"
             fi
-            fi
         fi
         fi
     fi
