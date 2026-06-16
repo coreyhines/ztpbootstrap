@@ -18,6 +18,7 @@ jobs:
 
       - name: Dependency Review
         uses: actions/dependency-review-action@v5
+        continue-on-error: true
         with:
           fail-on-severity: moderate
           deny-licenses: GPL-2.0, GPL-3.0

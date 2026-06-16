@@ -429,16 +429,19 @@ jobs:
 
       - name: Start DHCP relay server
         run: |
+          # Mount config to /tmp first so dpkg doesn't hit a conffile conflict
+          # when installing isc-dhcp-server; copy to the real path afterwards.
           sudo podman run -d \
             --name dhcp-relay-server \
             --network dhcp-server-net \
             --ip 192.168.1.10 \
             --cap-add=NET_ADMIN \
             --cap-add=NET_RAW \
-            -v $(pwd)/dhcpd-relay.conf:/etc/dhcp/dhcpd.conf:ro \
-            ubuntu:22.04 sh -c "\
-              apt-get update && \
-              DEBIAN_FRONTEND=noninteractive apt-get install -y isc-dhcp-server && \
+            -v $(pwd)/dhcpd-relay.conf:/tmp/dhcpd-relay.conf:ro \
+            ubuntu:22.04 sh -c "
+              apt-get update -q && \
+              DEBIAN_FRONTEND=noninteractive apt-get install -y -q isc-dhcp-server && \
+              cp /tmp/dhcpd-relay.conf /etc/dhcp/dhcpd.conf && \
               mkdir -p /var/lib/dhcp && \
               touch /var/lib/dhcp/dhcpd.leases && \
               /usr/sbin/dhcpd -f -d -cf /etc/dhcp/dhcpd.conf"
