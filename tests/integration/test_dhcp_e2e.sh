@@ -262,11 +262,11 @@ if [[ -z "$LEASE_JSON" ]]; then
     fail "no response from Kea Control Agent at http://127.0.0.1:${CTRL_PORT}"
 fi
 
-if echo "$LEASE_JSON" | grep -q '"result":3'; then
+if echo "$LEASE_JSON" | grep -qE '"result": *3'; then
     fail "Kea issued 0 leases — DHCP client did not reach the server. Response: $LEASE_JSON"
 fi
 
-if ! echo "$LEASE_JSON" | grep -q '"result":0'; then
+if ! echo "$LEASE_JSON" | grep -qE '"result": *0'; then
     fail "lease4-get-all returned non-zero result. Response: $LEASE_JSON"
 fi
 
