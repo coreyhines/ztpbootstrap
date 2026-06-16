@@ -290,7 +290,7 @@ Requires=ztpbootstrap-pod.service
 Wants=ztpbootstrap-postgresql.service
 
 [Container]
-Image=registry.fedoraproject.org/fedora:latest
+Image=docker.io/iscorg/kea:2.6.1
 ContainerName=ztpbootstrap-dhcp
 Pod=ztpbootstrap.pod
 Exec=/bin/sh /app/start-kea.sh
@@ -798,7 +798,7 @@ def start_dhcp_container() -> bool:
                     "NET_RAW",
                     "--cap-add",
                     "NET_BIND_SERVICE",
-                    "registry.fedoraproject.org/fedora:latest",
+                    "docker.io/iscorg/kea:2.6.1",
                     "/bin/sh",
                     "/app/start-kea.sh",
                 ]
