@@ -122,7 +122,8 @@ cat > "$TMPDIR_TEST/kea/kea-dhcp4.conf" << 'KEATPL'
 {
   "Dhcp4": {
     "interfaces-config": {
-      "interfaces": ["*"]
+      "interfaces": ["eth0"],
+      "dhcp-socket-type": "udp"
     },
     "control-socket": {
       "socket-type": "unix",
