@@ -138,8 +138,8 @@ start_vm() {
                 log_info "Creating qcow2 copy of cloud image for fresh cloud-init runs..."
                 if qemu-img convert -f raw -O qcow2 "$ISO_PATH" "$qcow2_copy"; then
                     log_info "✓ Created qcow2 copy: $qcow2_copy"
-                    # Resize the cloud image copy to the requested disk size
-                    if [[ -n "$VM_DISK_SIZE" ]] && [[ "$VM_DISK_SIZE" != "20G" ]]; then
+                    # Always resize the cloud image copy to the requested disk size
+                    if [[ -n "$VM_DISK_SIZE" ]]; then
                         log_info "Resizing cloud image to ${VM_DISK_SIZE}..."
                         if qemu-img resize "$qcow2_copy" "$VM_DISK_SIZE" 2>/dev/null; then
                             log_info "✓ Resized cloud image to ${VM_DISK_SIZE}"
@@ -154,8 +154,8 @@ start_vm() {
                 fi
             else
                 log_info "Using existing qcow2 copy: $qcow2_copy"
-                # Resize existing copy if size parameter was provided and differs
-                if [[ -n "$VM_DISK_SIZE" ]] && [[ "$VM_DISK_SIZE" != "20G" ]]; then
+                # Always resize existing copy to the requested size if it differs
+                if [[ -n "$VM_DISK_SIZE" ]]; then
                     local current_size=$(qemu-img info "$qcow2_copy" 2>/dev/null | grep "virtual size" | awk '{print $3$4}' || echo "")
                     if [[ "$current_size" != "$VM_DISK_SIZE" ]]; then
                         log_info "Resizing existing cloud image from $current_size to ${VM_DISK_SIZE}..."
@@ -164,6 +164,8 @@ start_vm() {
                         else
                             log_warn "Failed to resize cloud image (may be in use), using existing size"
                         fi
+                    else
+                        log_info "Cloud image already at requested size: ${VM_DISK_SIZE}"
                     fi
                 fi
             fi
@@ -188,8 +190,8 @@ start_vm() {
                     if [[ ! -f "$qcow2_copy" ]] || [[ "$ISO_PATH" -nt "$qcow2_copy" ]]; then
                         if qemu-img convert -f qcow2 -O qcow2 "$ISO_PATH" "$qcow2_copy"; then
                             log_info "✓ Created qcow2 copy: $qcow2_copy"
-                            # Resize the cloud image copy to the requested disk size
-                            if [[ -n "$VM_DISK_SIZE" ]] && [[ "$VM_DISK_SIZE" != "20G" ]]; then
+                            # Always resize the cloud image copy to the requested disk size
+                            if [[ -n "$VM_DISK_SIZE" ]]; then
                                 log_info "Resizing cloud image to ${VM_DISK_SIZE}..."
                                 if qemu-img resize "$qcow2_copy" "$VM_DISK_SIZE" 2>/dev/null; then
                                     log_info "✓ Resized cloud image to ${VM_DISK_SIZE}"
@@ -204,8 +206,8 @@ start_vm() {
                         fi
                     else
                         log_info "Using existing qcow2 copy: $qcow2_copy"
-                        # Resize existing copy if size parameter was provided and differs
-                        if [[ -n "$VM_DISK_SIZE" ]] && [[ "$VM_DISK_SIZE" != "20G" ]]; then
+                        # Always resize existing copy to the requested size if it differs
+                        if [[ -n "$VM_DISK_SIZE" ]]; then
                             local current_size=$(qemu-img info "$qcow2_copy" 2>/dev/null | grep "virtual size" | awk '{print $3$4}' || echo "")
                             if [[ "$current_size" != "$VM_DISK_SIZE" ]]; then
                                 log_info "Resizing existing cloud image from $current_size to ${VM_DISK_SIZE}..."
@@ -214,6 +216,8 @@ start_vm() {
                                 else
                                     log_warn "Failed to resize cloud image (may be in use), using existing size"
                                 fi
+                            else
+                                log_info "Cloud image already at requested size: ${VM_DISK_SIZE}"
                             fi
                         fi
                     fi
@@ -223,8 +227,8 @@ start_vm() {
                     if [[ ! -f "$qcow2_copy" ]] || [[ "$ISO_PATH" -nt "$qcow2_copy" ]]; then
                         if qemu-img convert -f raw -O qcow2 "$ISO_PATH" "$qcow2_copy"; then
                             log_info "✓ Created qcow2 copy: $qcow2_copy"
-                            # Resize the cloud image copy to the requested disk size
-                            if [[ -n "$VM_DISK_SIZE" ]] && [[ "$VM_DISK_SIZE" != "20G" ]]; then
+                            # Always resize the cloud image copy to the requested disk size
+                            if [[ -n "$VM_DISK_SIZE" ]]; then
                                 log_info "Resizing cloud image to ${VM_DISK_SIZE}..."
                                 if qemu-img resize "$qcow2_copy" "$VM_DISK_SIZE" 2>/dev/null; then
                                     log_info "✓ Resized cloud image to ${VM_DISK_SIZE}"
@@ -239,8 +243,8 @@ start_vm() {
                         fi
                     else
                         log_info "Using existing qcow2 copy: $qcow2_copy"
-                        # Resize existing copy if size parameter was provided and differs
-                        if [[ -n "$VM_DISK_SIZE" ]] && [[ "$VM_DISK_SIZE" != "20G" ]]; then
+                        # Always resize existing copy to the requested size if it differs
+                        if [[ -n "$VM_DISK_SIZE" ]]; then
                             local current_size=$(qemu-img info "$qcow2_copy" 2>/dev/null | grep "virtual size" | awk '{print $3$4}' || echo "")
                             if [[ "$current_size" != "$VM_DISK_SIZE" ]]; then
                                 log_info "Resizing existing cloud image from $current_size to ${VM_DISK_SIZE}..."
@@ -249,6 +253,8 @@ start_vm() {
                                 else
                                     log_warn "Failed to resize cloud image (may be in use), using existing size"
                                 fi
+                            else
+                                log_info "Cloud image already at requested size: ${VM_DISK_SIZE}"
                             fi
                         fi
                     fi
@@ -489,6 +495,9 @@ fqdn: __VM_FQDN__
 manage_etc_hosts: true
 preserve_hostname: false
 
+# Network configuration (static IP for DHCP testing - only if STATIC_IP_ENABLED is set)
+__NETWORK_CONFIG__
+
 # Disable default user (if any) and create our own
 system_info:
   default_user:
@@ -668,6 +677,22 @@ runcmd:
       echo "SSH key from host added to authorized_keys"
     else
       echo "No SSH key found at /tmp/host_ssh_key.pub - password authentication will be required"
+    fi
+  - |
+    # Block QEMU's DHCP server (10.0.2.2) from responding to DHCP clients
+    # This allows Kea (running on this VM) to be the only DHCP server for clients
+    # Note: The VM itself can still get its IP from QEMU's DHCP during boot
+    if command -v iptables &>/dev/null; then
+      # Block UDP port 67 (DHCP) from QEMU's DHCP server IP
+      iptables -I INPUT -s 10.0.2.2 -p udp --dport 67 -j DROP 2>/dev/null || true
+      echo "✓ Blocked QEMU DHCP server (10.0.2.2) using iptables"
+    elif command -v firewall-cmd &>/dev/null; then
+      # For systems using firewalld (Fedora/RHEL)
+      firewall-cmd --permanent --direct --add-rule ipv4 filter INPUT 0 -s 10.0.2.2 -p udp --dport 67 -j DROP 2>/dev/null || true
+      firewall-cmd --reload 2>/dev/null || true
+      echo "✓ Blocked QEMU DHCP server (10.0.2.2) using firewalld"
+    else
+      echo "⚠ No firewall tool found (iptables/firewalld), QEMU DHCP may interfere with Kea"
     fi
   - |
     # Ensure home directory has correct ownership before cloning
@@ -874,6 +899,30 @@ CLOUDINITEOF
           "$cloud_init_dir/user-data" 2>/dev/null || true
         rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
 
+        # Add static IP network configuration if STATIC_IP_ENABLED is set
+        if [[ "${STATIC_IP_ENABLED:-false}" == "true" ]]; then
+            # Use cloud-init's network-config v2 format for Fedora
+            # This is applied during boot before SSH starts, avoiding SSH disconnection
+            cat > "$cloud_init_dir/network-config" << 'NETWORK_EOF'
+version: 2
+ethernets:
+  eth0:
+    dhcp4: false
+    addresses:
+      - 10.0.2.10/24
+    gateway4: 10.0.2.2
+    nameservers:
+      addresses:
+        - 10.0.2.3
+        - 8.8.8.8
+NETWORK_EOF
+            log_info "Created network-config for static IP (10.0.2.10)"
+        else
+            # Remove the placeholder
+            sed -i.bak '/__NETWORK_CONFIG__/d' "$cloud_init_dir/user-data" 2>/dev/null || true
+            rm -f "$cloud_init_dir/user-data.bak" 2>/dev/null || true
+        fi
+
         # Remove auto-setup flag file creation if auto-setup is disabled
         if [[ "$AUTO_SETUP" != "true" ]]; then
             # Remove only the auto-setup-flag write_files entry, not the entire write_files section
@@ -883,10 +932,13 @@ CLOUDINITEOF
 
         # Create cloud-init ISO
         cloud_init_iso="/tmp/cloud-init-${VM_NAME}.iso"
-        # Include SSH key file if it exists
+        # Include SSH key file and network-config if they exist
         local iso_files=("$cloud_init_dir/user-data" "$cloud_init_dir/meta-data")
         if [[ -f "$cloud_init_dir/host_ssh_key.pub" ]]; then
             iso_files+=("$cloud_init_dir/host_ssh_key.pub")
+        fi
+        if [[ -f "$cloud_init_dir/network-config" ]]; then
+            iso_files+=("$cloud_init_dir/network-config")
         fi
 
         if command -v mkisofs &> /dev/null; then
@@ -963,7 +1015,7 @@ CLOUDINITEOF
         $drive_arg \
         $iso_arg \
         $cloud_init_drive \
-        -netdev user,id=net0,hostfwd=tcp::2222-:22,hostfwd=tcp::8080-:80,hostfwd=tcp::8443-:443 \
+        -netdev user,id=net0,net=172.16.0.0/24,hostfwd=tcp::2222-:22,hostfwd=tcp::8080-:80,hostfwd=tcp::8443-:443 \
         -device virtio-net-device,netdev=net0 \
         -device qemu-xhci,id=xhci \
         -device usb-tablet,bus=xhci.0 \

@@ -1,218 +1,232 @@
+---
 name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches:
+      - main
+      - develop
+      - feature/*
+      - copilot/*
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
 
 jobs:
   security:
     name: Security Checks
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-      with:
-        fetch-depth: 0  # Full history needed for secret detection
-    
-    - name: Run Gitleaks Secret Detection
-      uses: gitleaks/gitleaks-action@v2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Check if commits differ (for push events)
-      id: check_commits
-      if: github.event_name == 'push'
-      run: |
-        BASE_SHA=$(git rev-parse ${{ github.event.repository.default_branch }})
-        HEAD_SHA=$(git rev-parse HEAD)
-        if [ "$BASE_SHA" = "$HEAD_SHA" ]; then
-          echo "commits_differ=false" >> $GITHUB_OUTPUT
-        else
-          echo "commits_differ=true" >> $GITHUB_OUTPUT
-        fi
-    
-    - name: Run TruffleHog Secret Detection (PR)
-      if: github.event_name == 'pull_request'
-      uses: trufflesecurity/trufflehog@main
-      with:
-        path: ./
-        base: ${{ github.event.pull_request.base.sha }}
-        head: ${{ github.event.pull_request.head.sha }}
-        extra_args: --only-verified
-    
-    - name: Run TruffleHog Secret Detection (Push)
-      if: github.event_name == 'push' && steps.check_commits.outputs.commits_differ == 'true'
-      uses: trufflesecurity/trufflehog@main
-      with:
-        path: ./
-        base: ${{ github.event.repository.default_branch }}
-        head: HEAD
-        extra_args: --only-verified
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+          fetch-tags: true
+
+      - name: Run Gitleaks Secret Detection
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if commits differ (for push events)
+        id: check_commits
+        if: github.event_name == 'push'
+        run: |
+          DEFAULT_BRANCH="${{ github.event.repository.default_branch }}"
+          if ! git rev-parse --verify "$DEFAULT_BRANCH" >/dev/null 2>&1; then
+            echo "Default branch $DEFAULT_BRANCH not found; assuming commits differ."
+            echo "commits_differ=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BASE_SHA=$(git rev-parse "$DEFAULT_BRANCH")
+          HEAD_SHA=$(git rev-parse HEAD)
+          if [ "$BASE_SHA" = "$HEAD_SHA" ]; then
+            echo "commits_differ=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "commits_differ=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run TruffleHog Secret Detection (PR)
+        if: github.event_name == 'pull_request'
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+          extra_args: --only-verified
+
+      - name: Run TruffleHog Secret Detection (Push)
+        if: github.event_name == 'push' && steps.check_commits.outputs.commits_differ == 'true'
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
+          extra_args: --only-verified
 
   dependency-scan:
     name: Dependency Scanning
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-    
-    - name: Run OWASP Dependency-Check
-      uses: dependency-check/Dependency-Check_Action@main
-      with:
-        project: 'ztpbootstrap'
-        path: '.'
-        format: 'HTML'
-        args: >
-          --failOnCVSS 7
-          --enableRetired
-          --enableExperimental
-          --scan ./setup.sh ./dev/tests/test-service.sh ./dev/tests/integration-test.sh ./dev/tests/ci-test.sh
-    
-    - name: Upload Dependency-Check results
-      uses: actions/upload-artifact@v6
-      if: always()
-      with:
-        name: dependency-check-report
-        path: reports/
-        retention-days: 30
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Run OWASP Dependency-Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'ztpbootstrap'
+          path: '.'
+          format: 'HTML'
+          args: >
+            --failOnCVSS 7
+            --enableRetired
+            --enableExperimental
+            --scan ./setup.sh ./dev/tests/test-service.sh ./dev/tests/integration-test.sh ./dev/tests/ci-test.sh
+
+      - name: Upload Dependency-Check results
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: dependency-check-report
+          path: reports/
+          retention-days: 30
 
   sbom:
     name: Generate SBOM
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-    
-    - name: Generate SBOM with Syft
-      uses: anchore/sbom-action@v0
-      with:
-        path: "."
-        format: "cyclonedx-json"
-        output-file: "sbom.cyclonedx.json"
-    
-    - name: Upload SBOM
-      uses: actions/upload-artifact@v6
-      with:
-        name: sbom
-        path: sbom.cyclonedx.json
-        retention-days: 90
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          path: "."
+          format: "cyclonedx-json"
+          output-file: "sbom.cyclonedx.json"
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: sbom.cyclonedx.json
+          retention-days: 90
 
   lint:
     name: Code Quality Checks
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-    
-    - name: Install shellcheck
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y shellcheck
-    
-    - name: Install yamllint
-      run: |
-        sudo apt-get install -y yamllint
-    
-    - name: Install Python linting tools
-      run: |
-        pip3 install black isort
-    
-    - name: Run shellcheck
-      run: |
-        shellcheck -S error *.sh || true
-        shellcheck -S error dev/scripts/*.sh dev/tests/*.sh 2>/dev/null || true
-    
-    - name: Run yamllint
-      run: |
-        yamllint *.yaml *.yml config.yaml.template dev/tests/*.yaml 2>/dev/null || echo "No YAML files to lint"
-    
-    - name: Check Python formatting with black
-      run: |
-        black --check bootstrap.py || echo "Python formatting check (install black to auto-format)"
-    
-    - name: Check Python imports with isort
-      run: |
-        isort --check-only bootstrap.py || echo "Python import sorting check (install isort to auto-fix)"
-    
-    - name: Run container security checks
-      run: |
-        chmod +x dev/scripts/security-check-container-access.sh
-        ./dev/scripts/security-check-container-access.sh
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Install yamllint
+        run: |
+          sudo apt-get install -y yamllint
+
+      - name: Install Python linting tools
+        run: |
+          pip3 install black isort
+
+      - name: Run shellcheck
+        run: |
+          shellcheck -S error *.sh || true
+          shellcheck -S error dev/scripts/*.sh dev/tests/*.sh 2>/dev/null || true
+
+      - name: Run yamllint
+        run: |
+          yamllint *.yaml *.yml config.yaml.template dev/tests/*.yaml 2>/dev/null || echo "No YAML files to lint"
+
+      - name: Check Python formatting with black
+        run: |
+          black --check bootstrap.py || echo "Python formatting check (install black to auto-format)"
+
+      - name: Check Python imports with isort
+        run: |
+          isort --check-only bootstrap.py || echo "Python import sorting check (install isort to auto-fix)"
+
+      - name: Run container security checks
+        run: |
+          chmod +x dev/scripts/security-check-container-access.sh
+          ./dev/scripts/security-check-container-access.sh
 
   test:
     name: Run Tests
     runs-on: ubuntu-latest
     needs: [security, dependency-scan, lint]
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-    
-    - name: Set up environment
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y podman python3 curl nginx openssl
-    
-    - name: Verify Podman installation
-      run: |
-        podman --version
-        python3 --version
-        curl --version
-    
-    - name: Make test scripts executable
-      run: |
-        chmod +x dev/tests/ci-test.sh
-        chmod +x dev/tests/integration-test.sh
-        chmod +x dev/tests/test-service.sh
-        chmod +x setup.sh
-        chmod +x setup-interactive.sh
-        chmod +x update-config.sh
-    
-    - name: Create test directories
-      run: |
-        sudo mkdir -p /opt/containerdata/ztpbootstrap
-        sudo mkdir -p /opt/containerdata/certs/wild
-        sudo mkdir -p /opt/containerdata/ztpbootstrap/systemd
-        sudo cp bootstrap.py /opt/containerdata/ztpbootstrap/
-        sudo cp nginx.conf /opt/containerdata/ztpbootstrap/
-        sudo cp setup.sh /opt/containerdata/ztpbootstrap/
-        sudo cp setup-interactive.sh /opt/containerdata/ztpbootstrap/
-        sudo cp update-config.sh /opt/containerdata/ztpbootstrap/
-        sudo cp dev/tests/test-service.sh /opt/containerdata/ztpbootstrap/
-        sudo cp dev/tests/integration-test.sh /opt/containerdata/ztpbootstrap/
-        sudo cp dev/tests/ci-test.sh /opt/containerdata/ztpbootstrap/
-        sudo cp README.md /opt/containerdata/ztpbootstrap/
-        sudo cp config.yaml.template /opt/containerdata/ztpbootstrap/
-        sudo cp systemd/*.pod /opt/containerdata/ztpbootstrap/systemd/ 2>/dev/null || true
-        sudo cp systemd/*.container /opt/containerdata/ztpbootstrap/systemd/ 2>/dev/null || true
-    
-    - name: Run CI validation tests
-      run: |
-        cd /opt/containerdata/ztpbootstrap
-        sudo ./ci-test.sh
-    
-    - name: Create test SSL certificate (for HTTPS tests)
-      run: |
-        sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-          -keyout /opt/containerdata/certs/wild/privkey.pem \
-          -out /opt/containerdata/certs/wild/fullchain.pem \
-          -subj "/C=US/ST=Test/L=Test/O=Test/CN=ztpboot.example.com" \
-          -addext "subjectAltName=DNS:ztpboot.example.com,DNS:*.example.com"
-    
-    - name: Run integration test (HTTP-only mode)
-      run: |
-        cd /opt/containerdata/ztpbootstrap
-        sudo ./integration-test.sh --http-only
-    
-    - name: Check for test artifacts
-      if: failure()
-      run: |
-        echo "Test failed. Checking for container logs..."
-        sudo podman ps -a || true
-        sudo podman logs ztpbootstrap-test 2>&1 || true
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman python3 curl nginx openssl
+
+      - name: Verify Podman installation
+        run: |
+          podman --version
+          python3 --version
+          curl --version
+
+      - name: Make test scripts executable
+        run: |
+          chmod +x dev/tests/ci-test.sh
+          chmod +x dev/tests/integration-test.sh
+          chmod +x dev/tests/test-service.sh
+          chmod +x setup.sh
+          chmod +x setup-interactive.sh
+          chmod +x update-config.sh
+
+      - name: Create test directories
+        run: |
+          sudo mkdir -p /opt/containerdata/ztpbootstrap
+          sudo mkdir -p /opt/containerdata/certs/wild
+          sudo mkdir -p /opt/containerdata/ztpbootstrap/systemd
+          sudo cp bootstrap.py /opt/containerdata/ztpbootstrap/
+          sudo cp nginx.conf /opt/containerdata/ztpbootstrap/
+          sudo cp setup.sh /opt/containerdata/ztpbootstrap/
+          sudo cp setup-interactive.sh /opt/containerdata/ztpbootstrap/
+          sudo cp update-config.sh /opt/containerdata/ztpbootstrap/
+          sudo cp dev/tests/test-service.sh /opt/containerdata/ztpbootstrap/
+          sudo cp dev/tests/integration-test.sh /opt/containerdata/ztpbootstrap/
+          sudo cp dev/tests/ci-test.sh /opt/containerdata/ztpbootstrap/
+          sudo cp README.md /opt/containerdata/ztpbootstrap/
+          sudo cp config.yaml.template /opt/containerdata/ztpbootstrap/
+          sudo cp systemd/*.pod /opt/containerdata/ztpbootstrap/systemd/ 2>/dev/null || true
+          sudo cp systemd/*.container /opt/containerdata/ztpbootstrap/systemd/ 2>/dev/null || true
+
+      - name: Run CI validation tests
+        run: |
+          cd /opt/containerdata/ztpbootstrap
+          sudo ./ci-test.sh
+
+      - name: Create test SSL certificate (for HTTPS tests)
+        run: |
+          sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout /opt/containerdata/certs/wild/privkey.pem \
+            -out /opt/containerdata/certs/wild/fullchain.pem \
+            -subj "/C=US/ST=Test/L=Test/O=Test/CN=ztpboot.example.com" \
+            -addext "subjectAltName=DNS:ztpboot.example.com,DNS:*.example.com"
+
+      - name: Run integration test (HTTP-only mode)
+        run: |
+          cd /opt/containerdata/ztpbootstrap
+          sudo ./integration-test.sh --http-only
+
+      - name: Check for test artifacts
+        if: failure()
+        run: |
+          echo "Test failed. Checking for container logs..."
+          sudo podman ps -a || true
+          sudo podman logs ztpbootstrap-test 2>&1 || true
