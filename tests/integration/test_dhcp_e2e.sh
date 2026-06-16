@@ -76,6 +76,10 @@ fail() {
     podman exec "$KEA_SERVER" sh -c "pgrep -a kea-dhcp4 2>/dev/null || echo 'kea-dhcp4 not running'" >&2 || true
     echo "==> /run/kea contents:" >&2
     podman exec "$KEA_SERVER" sh -c "ls -la /run/kea/ 2>/dev/null || echo '/run/kea missing or empty'" >&2 || true
+    echo "==> DHCP client log:" >&2
+    podman exec "$KEA_CLIENT" cat /tmp/udhcpc.log 2>/dev/null >&2 || echo "  (client log unavailable)" >&2
+    echo "==> DHCP client ip addr:" >&2
+    podman exec "$KEA_CLIENT" ip addr show eth0 2>/dev/null >&2 || true
     exit 1
 }
 
@@ -128,8 +132,7 @@ cat > "$TMPDIR_TEST/kea/kea-dhcp4.conf" << 'KEATPL'
 {
   "Dhcp4": {
     "interfaces-config": {
-      "interfaces": ["eth0"],
-      "dhcp-socket-type": "udp"
+      "interfaces": ["eth0"]
     },
     "control-socket": {
       "socket-type": "unix",
@@ -214,6 +217,7 @@ podman run -d \
     --network "$TEST_NET:ip=$KEA_IP" \
     --cap-add NET_BIND_SERVICE \
     --cap-add NET_RAW \
+    --cap-add NET_ADMIN \
     -v "$TMPDIR_TEST/kea:/etc/kea:ro,z" \
     -v "$TMPDIR_TEST/leases:/var/lib/kea:rw,z" \
     -v "$TMPDIR_TEST/run-kea:/run/kea:rw,z" \
@@ -238,7 +242,7 @@ podman run -d \
     sh -c "udhcpc -i eth0 -n -q 2>&1 | tee /tmp/udhcpc.log; sleep 60"
 
 echo "==> Waiting for client to obtain a lease..."
-sleep 8
+sleep 15
 
 # ---------------------------------------------------------------------------
 # Step 5 & 6: Query Kea Control Agent for issued leases; assert range + count
@@ -255,6 +259,10 @@ LEASE_JSON=$(podman exec "$KEA_SERVER" \
 
 if [[ -z "$LEASE_JSON" ]]; then
     fail "no response from Kea Control Agent at http://127.0.0.1:${CTRL_PORT}"
+fi
+
+if echo "$LEASE_JSON" | grep -q '"result":3'; then
+    fail "Kea issued 0 leases — DHCP client did not reach the server. Response: $LEASE_JSON"
 fi
 
 if ! echo "$LEASE_JSON" | grep -q '"result":0'; then
