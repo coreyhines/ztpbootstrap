@@ -59,8 +59,9 @@ def get_leases(service: str = "dhcp4") -> List[Dict]:
     """
     Get current DHCP leases.
 
-    For memfile backend, reads directly from the lease file.
-    For other backends, would use Kea API (but Kea doesn't support lease-get-all).
+    First tries the Kea Control Agent (requires lease_cmds hook loaded).
+    Falls back to reading the memfile CSV for backward compatibility with
+    dev/memfile-only installs.
 
     Args:
         service: "dhcp4" or "dhcp6"
@@ -69,15 +70,18 @@ def get_leases(service: str = "dhcp4") -> List[Dict]:
         List of lease dicts
     """
     try:
-        # Kea doesn't support lease4-get-all command, so we read from the memfile directly
+        command = "lease4-get-all" if service == "dhcp4" else "lease6-get-all"
+        response = kea_request(command, service)
+        if response.get("result") == 0:
+            return response.get("arguments", {}).get("leases", [])
+    except Exception as e:
+        logger.debug(f"Control Agent lease fetch failed, falling back to memfile: {e}")
+
+    try:
         import csv
         import os
         from pathlib import Path
 
-        # Try multiple possible locations for the lease file
-        # 1. Inside DHCP container: /var/lib/kea/{service}.leases
-        # 2. Via shared volume: /opt/containerdata/ztpbootstrap/dhcp/leases/{service}.leases
-        # 3. Via host mount (if WebUI has access)
         lease_file_paths = [
             Path(f"/var/lib/kea/{service}.leases"),
             Path(f"/opt/containerdata/ztpbootstrap/dhcp/leases/{service}.leases"),
@@ -101,10 +105,8 @@ def get_leases(service: str = "dhcp4") -> List[Dict]:
         with open(lease_file, "r") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                # Skip header row if it appears as data
                 if not row.get("address") or row.get("address") == "address":
                     continue
-                # Convert CSV row to Kea API format
                 lease = {
                     "ip-address": row.get("address", ""),
                     "hw-address": row.get("hwaddr", ""),
@@ -117,7 +119,6 @@ def get_leases(service: str = "dhcp4") -> List[Dict]:
                     "state": row.get("state", "unknown"),
                     "hostname": row.get("hostname", ""),
                 }
-                # Only include leases with valid IP addresses
                 if lease["ip-address"]:
                     leases.append(lease)
 
@@ -164,7 +165,8 @@ def delete_lease(mac: str, service: str = "dhcp4") -> bool:
         True if successful
     """
     try:
-        response = kea_request("lease-del", service, {"hw-address": mac})
+        command = "lease4-del" if service == "dhcp4" else "lease6-del"
+        response = kea_request(command, service, {"hw-address": mac})
         return response.get("result") == 0
     except Exception as e:
         logger.error(f"Failed to delete lease for {mac}: {e}")
@@ -184,7 +186,7 @@ def get_statistics(service: str = "dhcp4") -> Dict:
     try:
         response = kea_request("statistic-get-all", service)
         if response.get("result") == 0:
-            return response.get("arguments", {}).get("$", {})
+            return response.get("arguments", {})
         return {}
     except Exception as e:
         logger.error(f"Failed to get statistics: {e}")
@@ -195,8 +197,13 @@ def add_reservation(reservation: Dict, service: str = "dhcp4") -> bool:
     """
     Add static reservation.
 
+    Requires the host_cmds hook and a database backend (not memfile).
+    The reservation dict MUST include "subnet-id" (int), "identifier-type"
+    (e.g. "hw-address"), and "identifier" (the MAC address), along with
+    "ip-address" and any desired options.
+
     Args:
-        reservation: Reservation dict with hw-address, ip-address, etc.
+        reservation: Full reservation dict conforming to Kea reservation-add spec.
         service: "dhcp4" or "dhcp6"
 
     Returns:
@@ -210,19 +217,24 @@ def add_reservation(reservation: Dict, service: str = "dhcp4") -> bool:
         return False
 
 
-def delete_reservation(mac: str, service: str = "dhcp4") -> bool:
+def delete_reservation(mac: str, subnet_id: int, service: str = "dhcp4") -> bool:
     """
     Delete static reservation.
 
     Args:
         mac: MAC address
+        subnet_id: Subnet ID the reservation belongs to
         service: "dhcp4" or "dhcp6"
 
     Returns:
         True if successful
     """
     try:
-        response = kea_request("reservation-del", service, {"hw-address": mac})
+        response = kea_request(
+            "reservation-del",
+            service,
+            {"identifier-type": "hw-address", "identifier": mac, "subnet-id": subnet_id},
+        )
         return response.get("result") == 0
     except Exception as e:
         logger.error(f"Failed to delete reservation for {mac}: {e}")
@@ -260,7 +272,7 @@ def get_config(service: str = "dhcp4") -> Dict:
     try:
         response = kea_request("config-get", service)
         if response.get("result") == 0:
-            return response.get("arguments", {}).get("$", {})
+            return response.get("arguments", {})
         return {}
     except Exception as e:
         logger.error(f"Failed to get config: {e}")
