@@ -52,16 +52,22 @@ RANGE_END="192.168.253.200"
 CTRL_PORT="8000"
 
 TMPDIR_TEST=""
+TCPDUMP_PID=""
+PCAP_FILE=""
 
 # ---------------------------------------------------------------------------
 # Cleanup: always runs on exit
 # ---------------------------------------------------------------------------
 cleanup() {
     echo "==> Cleanup"
+    [[ -n "$TCPDUMP_PID" ]] && kill "$TCPDUMP_PID" 2>/dev/null || true
+    [[ -n "$TCPDUMP_PID" ]] && wait "$TCPDUMP_PID" 2>/dev/null || true
     podman rm -f "$KEA_SERVER"  2>/dev/null || true
     podman rm -f "$KEA_CLIENT"  2>/dev/null || true
     podman network rm "$TEST_NET" 2>/dev/null || true
     [[ -n "$TMPDIR_TEST" ]] && rm -rf "$TMPDIR_TEST"
+    # PCAP_FILE is intentionally NOT removed — it is the test artifact
+    [[ -n "$PCAP_FILE" && -f "$PCAP_FILE" ]] && echo "    pcap artifact retained: $PCAP_FILE"
 }
 trap cleanup EXIT
 
@@ -231,6 +237,26 @@ if ! wait_for_port "$KEA_SERVER" "$CTRL_PORT" 30; then
 fi
 
 # ---------------------------------------------------------------------------
+# Step 3b: Start packet capture on the host bridge interface (optional)
+# ---------------------------------------------------------------------------
+if command -v tcpdump >/dev/null 2>&1; then
+    BRIDGE_IFACE=$(podman network inspect "$TEST_NET" \
+        --format '{{.NetworkInterface}}' 2>/dev/null || true)
+    if [[ -n "$BRIDGE_IFACE" ]] && ip link show "$BRIDGE_IFACE" >/dev/null 2>&1; then
+        PCAP_FILE="/tmp/tmp_dhcp_e2e_$(date +%Y%m%d_%H%M%S).pcap"
+        echo "==> Capturing DHCP traffic on $BRIDGE_IFACE -> $PCAP_FILE"
+        tcpdump -i "$BRIDGE_IFACE" -w "$PCAP_FILE" -n \
+            'udp port 67 or udp port 68' >/dev/null 2>&1 &
+        TCPDUMP_PID=$!
+        sleep 1  # ensure tcpdump is listening before client sends DISCOVER
+    else
+        echo "==> WARNING: bridge interface '$BRIDGE_IFACE' not found; skipping capture"
+    fi
+else
+    echo "==> WARNING: tcpdump not found; skipping packet capture"
+fi
+
+# ---------------------------------------------------------------------------
 # Step 4: Run the DHCP client (Alpine + busybox udhcpc)
 # ---------------------------------------------------------------------------
 echo "==> Starting DHCP client"
@@ -287,4 +313,24 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Step 7: Stop capture and report DHCP transaction artifact
+# ---------------------------------------------------------------------------
+if [[ -n "$TCPDUMP_PID" ]]; then
+    kill "$TCPDUMP_PID" 2>/dev/null || true
+    wait "$TCPDUMP_PID" 2>/dev/null || true
+    TCPDUMP_PID=""
+    echo ""
+    echo "==> DHCP packet capture artifact: $PCAP_FILE"
+    if [[ -f "$PCAP_FILE" ]]; then
+        PKT_COUNT=$(tcpdump -r "$PCAP_FILE" --count 2>/dev/null | grep -oE '[0-9]+ packet' | head -1 || echo "unknown")
+        echo "    packets captured: $PKT_COUNT"
+        echo "    DHCP transaction summary:"
+        tcpdump -r "$PCAP_FILE" -n -v 2>/dev/null \
+            | grep -E '^[0-9]|DHCP|DISCOVER|OFFER|REQUEST|ACK|your-ip|server-ip|client-id|subnet-mask|router' \
+            | sed 's/^/      /' || true
+        echo "    To inspect: tcpdump -r $PCAP_FILE -n -v"
+    fi
+fi
+
+echo ""
 echo "==> All DHCP integration tests passed"
