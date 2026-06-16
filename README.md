@@ -301,33 +301,36 @@ curl -k https://ztpboot.example.com/health
 
 ---
 
-## Tested Platforms
+## Deployment & Support Matrix
 
-**Tested Configurations:**
-- **Architecture:** ARM64 (aarch64) - ✅ Tested and working
-- **OS:**
-  - **Fedora 43** (ARM64) - ✅ Tested and working
-    - RedHat/RPM-based, `dnf` package manager
-    - Podman 5.6.2 (default in Fedora 43)
-  - **Ubuntu 24.04** (ARM64) - ✅ Tested and working
-    - Debian/APT-based, `apt` package manager
-    - Podman 4.9.3 (default in Ubuntu 24.04)
-- **Podman:** Tested with 4.9.3 (Ubuntu 24.04) and 5.6.2 (Fedora 43)
-- **Systemd:** Full quadlet support - ✅ Tested and working
+### Runtime requirement
 
-**Choosing Between Tested Paths:**
-- **Fedora 43**: RedHat/RPM-based, SELinux environments, Podman 5.6.2
-- **Ubuntu 24.04**: Debian/APT-based, AppArmor environments, Podman 4.9.3 (Ubuntu 24.04 is an LTS release)
+**Podman + systemd quadlets only.** This service uses `.pod` and `.container` quadlet files managed by systemd. These are a Podman + systemd feature with no Docker equivalent. The service control model (Podman socket, host `systemctl`) requires rootful Podman with systemd.
 
-**Note:** These are tested configurations. Only the specific versions listed above have been verified. Other distributions or Podman versions have not been tested.
+> **Note on `docker.io/...` image references:** References to `docker.io/nginx:...`, `docker.io/library/postgres:...`, etc. in this project are **registry paths** (Docker Hub is a public OCI registry). They do **not** require or invoke the Docker engine. Images are pulled and run exclusively with `podman`.
 
-**Notes:**
-- x86_64 not tested on ARM64 macOS (would require emulation). See [docs/ARCHITECTURE_COMPARISON.md](docs/ARCHITECTURE_COMPARISON.md) for details.
-- Ubuntu 22.04 has known SSH/cloud-init issues in VM creation workflows. Only Ubuntu 24.04 with Podman 4.9.3 has been tested. See [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) for details.
+**Docker is not supported.** There is no `docker-compose.yml`, no Docker socket dependency, and no Docker CLI usage. Running this project with Docker would require a separate, parallel deployment path that does not exist.
 
-**Network Configuration:**
-- **Macvlan network** (recommended for production) - Provides dedicated IP address, isolates containers from host network. Run `./check-macvlan.sh` to verify or create.
-- **Host networking** (simpler, good for testing) - Containers share host's network stack, uses host IP addresses directly.
+### Supported configurations
+
+| Dimension | Supported | Not supported / untested |
+|-----------|-----------|--------------------------|
+| **Container runtime** | Rootful Podman ≥ 4.9 + systemd quadlets | Docker, rootless Podman, non-systemd hosts |
+| **Architecture** | ARM64 (aarch64) ✅ tested | x86_64 (not tested), macOS/Windows |
+| **OS** | Fedora 43 (Podman 5.6.2) ✅, Ubuntu 24.04 (Podman 4.9.3) ✅ | Other distros (untested), Ubuntu 22.04 |
+| **Network** | macvlan (production), host networking (lab/testing) | Docker bridge, Kubernetes, rootless slirp4netns |
+| **Deployment** | Physical/VM Linux host with systemd | Kubernetes, container-in-container, macOS Podman Machine |
+
+### Network configuration
+
+- **Macvlan network** (recommended for production) — provides a dedicated IP on the management VLAN, isolates containers from host network. Run `./check-macvlan.sh` to verify or create.
+- **Host networking** (simpler, good for lab/testing) — containers share the host's network stack, uses host IP directly. Select with `host_network: true` in `config.yaml`. No macvlan setup required.
+
+### Known limitations
+
+- x86_64 is not tested. ARM64 macOS would require a Podman Machine (unsupported deployment path).
+- Ubuntu 22.04 has known SSH/cloud-init issues in VM creation workflows. Use Ubuntu 24.04.
+- Airgapped installs require pre-pulling images with `podman save` / `podman load` before running setup. See [docs/QUICK_START.md](docs/QUICK_START.md) for the offline install flow.
 
 ---
 
