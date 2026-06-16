@@ -67,12 +67,12 @@ def detect_gateway(
         ip_cmd = None
         for ip_path in ["/usr/sbin/ip", "/sbin/ip", "ip"]:
             try:
-                result = subprocess.run(
+                version_check = subprocess.run(
                     [ip_path, "--version"],
                     capture_output=True,
                     timeout=1,
                 )
-                if result.returncode == 0:
+                if version_check.returncode == 0:
                     ip_cmd = ip_path
                     break
             except (FileNotFoundError, subprocess.TimeoutExpired):
