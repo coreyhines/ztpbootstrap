@@ -12,6 +12,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
     <style>
         [x-cloak] { display: none !important; }
+        /* Ensure login modal is hidden by default */
+        .login-modal-hidden { display: none !important; }
         /* Custom styling for YAML in config */
         pre[class*="language-"] {
             margin: 0;
@@ -87,8 +89,27 @@
 
         <!-- Main Content -->
         <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <!-- Status Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <!-- Application Tabs -->
+            <div class="bg-white rounded-lg shadow-sm mb-4">
+                <div class="border-b border-gray-200">
+                    <nav class="flex -mb-px">
+                        <button @click="activeApplication = 'ztpbootstrap'"
+                                :class="activeApplication === 'ztpbootstrap' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            ZTP Bootstrap Service
+                        </button>
+                        <button @click="activeApplication = 'dhcp'"
+                                :class="activeApplication === 'dhcp' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            DHCP Server
+                        </button>
+                    </nav>
+                </div>
+            </div>
+
+            <!-- Application-Specific Status Cards -->
+            <!-- ZTP Bootstrap Service Status Cards -->
+            <div x-show="activeApplication === 'ztpbootstrap'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
                 <!-- Service Status -->
                 <div class="bg-white rounded-lg shadow-sm p-4 border-l-4"
                      :class="status.container_running ? 'border-green-500' : 'border-red-500'">
@@ -161,10 +182,91 @@
                         </div>
                     </div>
                 </div>
+
             </div>
 
-            <!-- Device Connections Section -->
-            <div class="bg-white rounded-lg shadow-sm p-4 mb-4">
+            <!-- DHCP Server Status Cards -->
+            <div x-show="activeApplication === 'dhcp'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+                <!-- DHCP Service Status -->
+                <div class="bg-white rounded-lg shadow-sm p-4 border-l-4 relative"
+                     :class="!dhcpStatus.enabled ? 'border-gray-300' : (dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'border-green-500' : 'border-yellow-500'">
+                    <!-- Toggle in upper right corner -->
+                    <div class="absolute top-3 right-3">
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" :checked="dhcpConfig.enabled" @change="toggleDhcp()" class="sr-only peer" :disabled="loadingStates.dhcp">
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                    </div>
+                    <!-- Main content with status icon -->
+                    <div class="flex items-center pr-16">
+                        <div class="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 mr-3"
+                             :class="!dhcpStatus.enabled ? 'bg-gray-100' : (dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'bg-green-100' : 'bg-yellow-100'">
+                            <svg x-show="dhcpStatus.enabled && dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active" class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            <svg x-show="dhcpStatus.enabled && (!dhcpStatus.container || !dhcpStatus.container.container_running || !dhcpStatus.container.service_active)" class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <svg x-show="!dhcpStatus.enabled" class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </div>
+                        <div class="flex-1">
+                            <p class="text-xs font-medium text-gray-600 mb-0.5">Service Status</p>
+                            <p class="text-2xl font-bold"
+                               :class="!dhcpStatus.enabled ? 'text-gray-500' : (dhcpStatus.container && dhcpStatus.container.service_active && dhcpStatus.container.container_running) ? 'text-green-600' : (dhcpStatus.container && dhcpStatus.container.service_active) ? 'text-yellow-600' : 'text-gray-500'">
+                                <span x-text="!dhcpStatus.enabled ? 'Stopped' : (dhcpStatus.container && dhcpStatus.container.service_active && dhcpStatus.container.container_running) ? 'Running' : (dhcpStatus.container && dhcpStatus.container.service_active) ? 'Starting...' : 'Stopped'"></span>
+                            </p>
+                            <p class="text-xs text-gray-500 mt-0.5">Kea Container</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DHCP Container File -->
+                <div class="bg-white rounded-lg shadow-sm p-4 border-l-4"
+                     :class="dhcpStatus.container && dhcpStatus.container.exists ? 'border-green-500' : 'border-gray-300'">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <p class="text-xs font-medium text-gray-600 mb-0.5">Container File</p>
+                            <p class="text-2xl font-bold" :class="dhcpStatus.container && dhcpStatus.container.exists ? 'text-green-600' : 'text-gray-500'">
+                                <span x-text="dhcpStatus.container && dhcpStatus.container.exists ? 'Exists' : 'Missing'"></span>
+                            </p>
+                            <p class="text-xs text-gray-500 mt-0.5">systemd unit</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-full flex items-center justify-center"
+                             :class="dhcpStatus.container && dhcpStatus.container.exists ? 'bg-green-100' : 'bg-gray-100'">
+                            <svg x-show="dhcpStatus.container && dhcpStatus.container.exists" class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            <svg x-show="!(dhcpStatus.container && dhcpStatus.container.exists)" class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DHCP Networking Mode -->
+                <div class="bg-white rounded-lg shadow-sm p-4 border-l-4 border-blue-500">
+                    <div class="flex items-center justify-between">
+                        <div class="flex-1">
+                            <p class="text-xs font-medium text-gray-600 mb-0.5">Networking</p>
+                            <p class="text-2xl font-bold text-blue-600">
+                                <span x-text="dhcpStatus.networking_mode === 'host' ? 'Host' : (dhcpStatus.networking_mode === 'macvlan' ? 'MacVLAN' : 'Unknown')"></span>
+                            </p>
+                            <p class="text-xs text-gray-500 mt-0.5">Network Mode</p>
+                        </div>
+                        <div class="w-12 h-12 rounded-full flex items-center justify-center bg-blue-100">
+                            <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.111 16.404a5.5 5.5 0 017.778 0M12 20h.01m-7.08-7.071c3.904-3.905 10.236-3.905 14.141 0M1.394 9.393c5.857-5.857 15.355-5.857 21.212 0"></path>
+                            </svg>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Application-Specific Content Area -->
+            <!-- ZTP Bootstrap: Device Connections -->
+            <div x-show="activeApplication === 'ztpbootstrap'" class="bg-white rounded-lg shadow-sm p-4 mb-4">
                 <div class="flex items-center justify-between mb-3">
                     <div>
                         <h2 class="text-base font-semibold text-gray-900 mb-1">Device Connections</h2>
@@ -225,8 +327,50 @@
                 </div>
             </div>
 
-            <!-- Tabs -->
-            <div class="bg-white rounded-lg shadow-sm">
+            <!-- DHCP: Active Leases (in same position as Device Connections) -->
+            <div x-show="activeApplication === 'dhcp'" class="bg-white rounded-lg shadow-sm p-4 mb-4">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <h2 class="text-base font-semibold text-gray-900 mb-1">Active Leases</h2>
+                        <p class="text-xs text-gray-500">Current DHCP leases and reservations</p>
+                    </div>
+                    <button @click="loadDhcpLeases()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Refresh</button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MAC Address</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP Address</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">State</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <template x-for="(lease, index) in dhcpLeases" :key="`${lease.mac}-${lease.ip}-${index}`">
+                                <tr>
+                                    <td class="px-4 py-3 text-sm text-gray-900" x-text="lease.mac"></td>
+                                    <td class="px-4 py-3 text-sm text-gray-900" x-text="lease.ip"></td>
+                                    <td class="px-4 py-3 text-sm text-gray-500" x-text="lease.type"></td>
+                                    <td class="px-4 py-3 text-sm text-gray-500" x-text="lease.state"></td>
+                                    <td class="px-4 py-3 text-sm">
+                                        <button @click="createReservationFromLease(lease)" class="text-blue-600 hover:text-blue-800 mr-3">Reserve</button>
+                                        <button @click="deleteDhcpLease(lease.mac)" class="text-red-600 hover:text-red-800">Delete</button>
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr x-show="dhcpLeases.length === 0">
+                                <td colspan="5" class="px-4 py-4 text-sm text-gray-500 text-center">No active leases</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Application-Specific Tabs -->
+            <!-- ZTP Bootstrap Tabs -->
+            <div x-show="activeApplication === 'ztpbootstrap'" class="bg-white rounded-lg shadow-sm">
                 <div class="border-b border-gray-200">
                     <nav class="flex -mb-px">
                         <button @click="activeTab = 'scripts'"
@@ -428,36 +572,48 @@
                             <h2 class="text-lg font-semibold text-gray-900 mb-2">Service Logs</h2>
                             <p class="text-sm text-gray-600">View logs from different sources</p>
                         </div>
-                        <div class="flex items-center space-x-2 flex-wrap">
-                            <div class="relative">
+                        <div class="flex items-center space-x-1.5 flex-wrap">
+                            <div class="relative group">
                                 <input type="text"
                                        x-model="logSearchTerm"
                                        @input="highlightLogs()"
-                                       placeholder="Search logs..."
-                                       class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-48">
+                                       placeholder="Search..."
+                                       class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-32"
+                                       title="Search logs">
                                 <button x-show="logSearchTerm"
                                         @click="logSearchTerm = ''; highlightLogs()"
-                                        class="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        class="absolute right-1 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                                     </svg>
                                 </button>
                             </div>
-                            <select x-model="logSource" @change="loadLogs()" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                                <option value="container">Container Logs</option>
-                                <option value="nginx_access">Nginx Access Log</option>
-                                <option value="nginx_error">Nginx Error Log</option>
-                            </select>
-                            <select x-model="logLines" @change="loadLogs()" class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                                <option value="50">Last 50 lines</option>
-                                <option value="100">Last 100 lines</option>
-                                <option value="200">Last 200 lines</option>
-                                <option value="500">Last 500 lines</option>
-                            </select>
-                            <button @click="markLogs()" class="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 text-sm font-medium transition-colors">
-                                Mark Logs
+                            <div class="relative group">
+                                <select x-model="logSource" @change="loadLogs()" class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 pr-6" title="Log source">
+                                    <option value="container">Container</option>
+                                    <option value="nginx_access">Nginx Access</option>
+                                    <option value="nginx_error">Nginx Error</option>
+                                    <option value="dhcp">DHCP</option>
+                                </select>
+                            </div>
+                            <div class="relative group">
+                                <select x-model="logLines" @change="loadLogs()" class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 pr-6" title="Number of lines">
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                    <option value="200">200</option>
+                                    <option value="500">500</option>
+                                </select>
+                            </div>
+                            <button @click="markLogs()" class="px-2.5 py-1.5 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs font-medium transition-colors" title="Mark current position in logs">
+                                Mark
                             </button>
-                            <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
+                            <div class="relative group">
+                                <label class="inline-flex items-center cursor-pointer" title="Auto-refresh logs">
+                                    <input type="checkbox" x-model="autoRefreshEnabled" @change="toggleAutoRefresh()" class="sr-only peer">
+                                    <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                </label>
+                            </div>
+                            <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-1.5 py-0.5 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
                                 <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                                     <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
                                 </svg>
@@ -501,14 +657,672 @@
                              x-html="highlightSearch(formatLogsWithMarks(reverseLogLines(logs)))"></pre>
                     </div>
                 </div>
+
             </div>
+
+            <!-- DHCP Server Tabs -->
+            <div x-show="activeApplication === 'dhcp'" class="bg-white rounded-lg shadow-sm">
+                <div class="border-b border-gray-200">
+                    <nav class="flex -mb-px">
+                        <button @click="activeDhcpTab = 'config'"
+                                :class="activeDhcpTab === 'config' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            Configuration
+                        </button>
+                        <button @click="activeDhcpTab = 'reservations'"
+                                :class="activeDhcpTab === 'reservations' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            Reservations
+                        </button>
+                        <button @click="activeDhcpTab = 'status'"
+                                :class="activeDhcpTab === 'status' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            Status
+                        </button>
+                        <button @click="activeDhcpTab = 'logs'"
+                                :class="activeDhcpTab === 'logs' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            Logs
+                        </button>
+                    </nav>
+                </div>
+
+                <!-- DHCP Configuration Tab -->
+                <div x-show="activeDhcpTab === 'config'" class="p-6">
+                    <!-- DHCP Status Banner -->
+                    <div x-show="dhcpStatus.networking_mode === 'host'" class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
+                        <div class="flex items-start">
+                            <svg class="w-5 h-5 text-blue-600 mt-0.5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            </svg>
+                            <div class="flex-1">
+                                <p class="text-sm font-medium text-blue-900">Host Networking Mode Detected</p>
+                                <p class="text-sm text-blue-700 mt-1">DHCP server will bind directly to host interfaces. Ensure no other DHCP server is running on ports 67/68 (IPv4) or 547/548 (IPv6).</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Port Conflict Warning -->
+                    <div x-show="dhcpStatus.port_conflicts && (dhcpStatus.port_conflicts.ipv4_conflict || dhcpStatus.port_conflicts.ipv6_conflict)" class="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                        <div class="flex items-start">
+                            <svg class="w-5 h-5 text-yellow-600 mt-0.5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                            </svg>
+                            <div class="flex-1">
+                                <p class="text-sm font-medium text-yellow-900">Port Conflicts Detected</p>
+                                <p class="text-sm text-yellow-700 mt-1">
+                                    <span x-show="dhcpStatus.port_conflicts.ipv4_conflict">Ports 67/68 (IPv4) are in use. </span>
+                                    <span x-show="dhcpStatus.port_conflicts.ipv6_conflict">Ports 547/548 (IPv6) are in use. </span>
+                                    Please stop other DHCP servers before enabling.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Configuration Tab Content -->
+                    <div class="space-y-6">
+                        <!-- DHCP Configuration Form -->
+                        <div class="space-y-6">
+                        <!-- IPv4 Configuration -->
+                        <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+                            <h3 class="text-md font-semibold text-gray-900 mb-4">IPv4 Configuration</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Subnet (CIDR)</label>
+                                    <div class="flex gap-2">
+                                        <input type="text" x-model="dhcpConfig.ipv4.subnet" placeholder="10.0.0.0/24" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                        <button @click="autoDetectSubnet('ipv4')" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Auto-detect</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Gateway</label>
+                                    <div class="flex gap-2">
+                                        <input type="text" x-model="dhcpConfig.ipv4.gateway" placeholder="10.0.0.1" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                        <button @click="autoDetectGateway('ipv4')" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Auto-detect</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Range Start</label>
+                                    <input type="text" x-model="dhcpConfig.ipv4.range_start" placeholder="10.0.0.50" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Range End</label>
+                                    <input type="text" x-model="dhcpConfig.ipv4.range_end" placeholder="10.0.0.250" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- IPv6 Configuration -->
+                        <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+                            <h3 class="text-md font-semibold text-gray-900 mb-4">IPv6 Configuration</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Subnet (CIDR)</label>
+                                    <div class="flex gap-2">
+                                        <input type="text" x-model="dhcpConfig.ipv6.subnet" placeholder="2001:db8::/64" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                        <button @click="autoDetectSubnet('ipv6')" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Auto-detect</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Gateway</label>
+                                    <div class="flex gap-2">
+                                        <input type="text" x-model="dhcpConfig.ipv6.gateway" placeholder="2001:db8::1" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                        <button @click="autoDetectGateway('ipv6')" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Auto-detect</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Range Start</label>
+                                    <input type="text" x-model="dhcpConfig.ipv6.range_start" placeholder="2001:db8::50" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Range End</label>
+                                    <input type="text" x-model="dhcpConfig.ipv6.range_end" placeholder="2001:db8::ff00" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- DNS & Domain -->
+                        <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+                            <h3 class="text-md font-semibold text-gray-900 mb-4">DNS & Domain</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">IPv4 DNS Servers (comma-separated)</label>
+                                    <input type="text" x-model="dhcpConfig.ipv4.dns_servers_str" placeholder="8.8.8.8, 8.8.4.4" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">IPv6 DNS Servers (comma-separated)</label>
+                                    <input type="text" x-model="dhcpConfig.ipv6.dns_servers_str" placeholder="2001:4860:4860::8888, 2001:4860:4860::8844" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Domain Name</label>
+                                    <input type="text" x-model="dhcpConfig.ipv4.domain" placeholder="example.com" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">IPv4 NTP Servers (comma-separated)</label>
+                                    <input type="text" x-model="dhcpConfig.ipv4.ntp_servers_str" placeholder="time.nist.gov" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- OUI Filtering Section -->
+                        <div class="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+                            <h3 class="text-md font-semibold text-gray-900 mb-4">OUI Filtering</h3>
+
+                            <!-- Arista-Only Mode Toggle -->
+                            <div class="flex items-center justify-between mb-4 p-4 bg-gray-50 rounded-md">
+                                <div>
+                                    <label class="text-sm font-medium text-gray-700">Arista-Only Mode</label>
+                                    <p class="text-xs text-gray-500">Only serve DHCP to Arista devices (recommended for ZTP)</p>
+                                </div>
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" x-model="dhcpConfig.oui_filtering.arista_only_mode" class="sr-only peer">
+                                    <div class="relative w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                </label>
+                            </div>
+
+                            <!-- Allowed OUIs (only shown if Arista-only is off) -->
+                            <div x-show="!dhcpConfig.oui_filtering.arista_only_mode" class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Allowed OUIs</label>
+                                <p class="text-xs text-gray-500 mb-2">MAC prefixes to allow (e.g., 00:1C:73 for Arista). Leave empty to allow all.</p>
+                                <div class="flex flex-wrap gap-2 mb-2">
+                                    <template x-for="(oui, index) in dhcpConfig.oui_filtering.allowed_ouis" :key="index">
+                                        <span class="inline-flex items-center px-2 py-1 bg-green-100 text-green-800 rounded-md text-sm">
+                                            <span x-text="oui"></span>
+                                            <button @click="removeAllowedOui(index)" class="ml-1 text-green-600 hover:text-green-800">&times;</button>
+                                        </span>
+                                    </template>
+                                </div>
+                                <div class="flex gap-2">
+                                    <input type="text" x-model="newAllowedOui" placeholder="00:1C:73"
+                                           class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm"
+                                           @keyup.enter="addAllowedOui()">
+                                    <button @click="addAllowedOui()" class="px-3 py-2 bg-green-600 text-white rounded-md text-sm hover:bg-green-700">Add</button>
+                                </div>
+                            </div>
+
+                            <!-- Blocked OUIs -->
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Blocked OUIs</label>
+                                <p class="text-xs text-gray-500 mb-2">MAC prefixes to block (never serve DHCP to these devices)</p>
+                                <div class="flex flex-wrap gap-2 mb-2">
+                                    <template x-for="(oui, index) in dhcpConfig.oui_filtering.blocked_ouis" :key="index">
+                                        <span class="inline-flex items-center px-2 py-1 bg-red-100 text-red-800 rounded-md text-sm">
+                                            <span x-text="oui"></span>
+                                            <button @click="removeBlockedOui(index)" class="ml-1 text-red-600 hover:text-red-800">&times;</button>
+                                        </span>
+                                    </template>
+                                </div>
+                                <div class="flex gap-2">
+                                    <input type="text" x-model="newBlockedOui" placeholder="00:00:00"
+                                           class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm"
+                                           @keyup.enter="addBlockedOui()">
+                                    <button @click="addBlockedOui()" class="px-3 py-2 bg-red-600 text-white rounded-md text-sm hover:bg-red-700">Add</button>
+                                </div>
+                            </div>
+
+                            <!-- Known Arista OUIs Reference -->
+                            <div class="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                                <p class="text-xs font-medium text-blue-900 mb-1">Known Arista OUIs:</p>
+                                <p class="text-xs text-blue-700">00:1C:73 (most common), 00:1E:0D through 00:1E:1F, 28:99:3A, 44:4C:A8</p>
+                            </div>
+                        </div>
+
+                        <!-- Save Button -->
+                        <div class="flex justify-end">
+                            <button @click="saveDhcpConfig()" :disabled="loadingStates.dhcp" class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium disabled:opacity-50">
+                                <span x-show="!loadingStates.dhcp">Save Configuration</span>
+                                <span x-show="loadingStates.dhcp">Saving...</span>
+                            </button>
+                        </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DHCP Reservations Tab -->
+                <div x-show="activeDhcpTab === 'reservations'" class="p-6">
+                    <div class="space-y-6">
+                        <!-- Reservations Table -->
+                        <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+                            <div class="p-6 border-b border-gray-200">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <h3 class="text-md font-semibold text-gray-900">DHCP Reservations</h3>
+                                        <p class="text-xs text-gray-500 mt-1">Static IP address assignments for specific MAC addresses</p>
+                                    </div>
+                                    <button @click="showReservationForm = !showReservationForm"
+                                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
+                                        <span x-show="!showReservationForm">+ Add New</span>
+                                        <span x-show="showReservationForm">Cancel</span>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Add Reservation Form -->
+                            <div x-show="showReservationForm" class="p-6 bg-gray-50 border-b border-gray-200">
+                                <h4 class="text-sm font-medium text-gray-900 mb-4">Add New Reservation</h4>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">MAC Address *</label>
+                                        <input type="text" x-model="newReservation.mac"
+                                               placeholder="00:1C:73:AA:BB:CC"
+                                               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">IP Address *</label>
+                                        <input type="text" x-model="newReservation.ip"
+                                               placeholder="10.0.0.100"
+                                               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 mb-1">Hostname (optional)</label>
+                                        <input type="text" x-model="newReservation.hostname"
+                                               placeholder="switch-1"
+                                               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                                    </div>
+                                </div>
+                                <div x-show="reservationError" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                                    <p class="text-sm text-red-800" x-text="reservationError"></p>
+                                </div>
+                                <div class="flex justify-end gap-2">
+                                    <button @click="showReservationForm = false; reservationError = ''; newReservation = {mac: '', ip: '', hostname: ''}"
+                                            class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 text-sm">
+                                        Cancel
+                                    </button>
+                                    <button @click="addDhcpReservation()"
+                                            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">
+                                        Add Reservation
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Reservations Table -->
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MAC Address</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IP Address</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hostname</th>
+                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200">
+                                        <template x-for="(reservation, index) in dhcpReservations" :key="index">
+                                            <tr>
+                                                <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900" x-text="reservation['hw-address'] || reservation.mac"></td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900" x-text="reservation['ip-address'] || reservation.ip"></td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" x-text="reservation.hostname || '-'"></td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                                    <button @click="deleteDhcpReservation(reservation['hw-address'] || reservation.mac)"
+                                                            class="text-red-600 hover:text-red-800 font-medium">
+                                                        Delete
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                        <tr x-show="dhcpReservations.length === 0">
+                                            <td colspan="4" class="px-6 py-8 text-center text-sm text-gray-500">
+                                                <svg class="mx-auto h-12 w-12 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                                                </svg>
+                                                No reservations configured. Click "Add New" to create a static IP reservation.
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <!-- IPv4 Configuration -->
+                            <div class="bg-white rounded-lg p-4 border border-blue-100 shadow-sm">
+                                <div class="flex items-center mb-3">
+                                    <div class="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
+                                    <h4 class="text-sm font-semibold text-gray-900">IPv4 Configuration</h4>
+                                </div>
+                                <div class="space-y-2 text-sm">
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Subnet:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.subnet || 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Gateway:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.gateway || 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Range:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv4.range_start && dhcpConfig.ipv4.range_end) ? (dhcpConfig.ipv4.range_start + ' - ' + dhcpConfig.ipv4.range_end) : 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">DNS Servers:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv4.dns_servers_str ? dhcpConfig.ipv4.dns_servers_str.replace(/[.,\s]+$/, '') : (dhcpConfig.ipv4.dns_servers && dhcpConfig.ipv4.dns_servers.length > 0 ? dhcpConfig.ipv4.dns_servers.map(s => s.replace(/[.,\s]+$/, '')).join(', ') : 'Not configured'))"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100" x-show="dhcpConfig.ipv4.domain">
+                                        <span class="text-gray-600 font-medium">Domain:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.domain"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1" x-show="dhcpConfig.ipv4.ntp_servers_str || (dhcpConfig.ipv4.ntp_servers && dhcpConfig.ipv4.ntp_servers.length > 0)">
+                                        <span class="text-gray-600 font-medium">NTP Servers:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv4.ntp_servers_str ? dhcpConfig.ipv4.ntp_servers_str.replace(/[.,\s]+$/, '') : (dhcpConfig.ipv4.ntp_servers && dhcpConfig.ipv4.ntp_servers.length > 0 ? dhcpConfig.ipv4.ntp_servers.map(s => s.replace(/[.,\s]+$/, '')).join(', ') : 'Not configured'))"></span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- IPv6 Configuration -->
+                            <div class="bg-white rounded-lg p-4 border border-blue-100 shadow-sm">
+                                <div class="flex items-center mb-3">
+                                    <div class="w-2 h-2 bg-indigo-500 rounded-full mr-2"></div>
+                                    <h4 class="text-sm font-semibold text-gray-900">IPv6 Configuration</h4>
+                                </div>
+                                <div class="space-y-2 text-sm">
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Subnet:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv6.subnet || 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Gateway:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv6.gateway || 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Range:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv6.range_start && dhcpConfig.ipv6.range_end) ? (dhcpConfig.ipv6.range_start + ' - ' + dhcpConfig.ipv6.range_end) : 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">DNS Servers:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv6.dns_servers_str ? dhcpConfig.ipv6.dns_servers_str.replace(/[.,\s]+$/, '') : (dhcpConfig.ipv6.dns_servers && dhcpConfig.ipv6.dns_servers.length > 0 ? dhcpConfig.ipv6.dns_servers.map(s => s.replace(/[.,\s]+$/, '')).join(', ') : 'Not configured'))"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1" x-show="dhcpConfig.ipv6.domain">
+                                        <span class="text-gray-600 font-medium">Domain:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv6.domain"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Container Status Details -->
+                        <div class="mt-4 pt-4 border-t border-blue-200">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                <div class="flex items-center">
+                                    <svg class="w-4 h-4 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                                    </svg>
+                                    <span class="text-gray-600">Service:</span>
+                                    <span class="ml-2 font-medium"
+                                          :class="dhcpStatus.container && dhcpStatus.container.service_active ? 'text-green-600' : 'text-gray-500'"
+                                          x-text="dhcpStatus.container && dhcpStatus.container.service_active ? 'Active' : 'Inactive'"></span>
+                                </div>
+                                <div class="flex items-center">
+                                    <svg class="w-4 h-4 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path>
+                                    </svg>
+                                    <span class="text-gray-600">Container File:</span>
+                                    <span class="ml-2 font-medium"
+                                          :class="dhcpStatus.container && dhcpStatus.container.exists ? 'text-green-600' : 'text-gray-500'"
+                                          x-text="dhcpStatus.container && dhcpStatus.container.exists ? 'Exists' : 'Missing'"></span>
+                                </div>
+                                <div class="flex items-center">
+                                    <svg class="w-4 h-4 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                    </svg>
+                                    <span class="text-gray-600">Status:</span>
+                                    <span class="ml-2 font-medium text-gray-900"
+                                          x-text="dhcpStatus.container && dhcpStatus.container.service_status ? dhcpStatus.container.service_status : 'Unknown'"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DHCP Logs Tab -->
+                <div x-show="activeDhcpTab === 'logs'" class="p-6">
+                        <div class="mb-4 flex items-center justify-between flex-wrap gap-4">
+                            <div>
+                                <h2 class="text-lg font-semibold text-gray-900 mb-2">DHCP Server Logs</h2>
+                                <p class="text-sm text-gray-600">View logs from Kea DHCP server</p>
+                            </div>
+                            <div class="flex items-center space-x-1.5 flex-wrap">
+                                <div class="relative group">
+                                    <input type="text"
+                                           x-model="logSearchTerm"
+                                           @input="highlightLogs()"
+                                           placeholder="Search..."
+                                           class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-32"
+                                           title="Search logs">
+                                    <button x-show="logSearchTerm"
+                                            @click="logSearchTerm = ''; highlightLogs()"
+                                            class="absolute right-1 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="relative group">
+                                    <select x-model="logLines" @change="loadLogs()" class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 pr-6" title="Number of lines">
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                        <option value="200">200</option>
+                                        <option value="500">500</option>
+                                    </select>
+                                </div>
+                                <button @click="markLogs()" class="px-2.5 py-1.5 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs font-medium transition-colors" title="Mark current position in logs">
+                                    Mark
+                                </button>
+                                <div class="relative group">
+                                    <label class="inline-flex items-center cursor-pointer" title="Auto-refresh logs">
+                                        <input type="checkbox" x-model="autoRefreshEnabled" @change="toggleAutoRefresh()" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                    </label>
+                                </div>
+                                <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-1.5 py-0.5 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
+                                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                    </svg>
+                                    <span>New entries</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto" x-ref="logsContainer">
+                            <div class="text-xs text-gray-400 mb-2 font-semibold flex items-center justify-between">
+                                <span>DHCP Logs</span>
+                                <span x-show="logNewEntriesIndicator" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-500 text-white animate-pulse">
+                                    New entries
+                                </span>
+                            </div>
+                            <pre class="text-sm font-mono overflow-x-auto whitespace-pre-wrap text-green-400"
+                                 x-html="highlightSearch(formatLogsWithMarks(reverseLogLines(logs)))"></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DHCP Status Tab -->
+                <div x-show="activeDhcpTab === 'status'" class="p-6">
+                        <!-- Current Configuration Display -->
+                        <div class="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg shadow-sm border border-blue-200 p-6">
+                        <div class="flex items-center justify-between mb-4">
+                            <div class="flex items-center">
+                                <svg class="w-5 h-5 text-blue-600 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                </svg>
+                                <h3 class="text-lg font-semibold text-gray-900">Current Configuration</h3>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <span class="px-3 py-1 text-xs font-semibold rounded-full"
+                                      :class="!dhcpStatus.enabled ? 'bg-gray-100 text-gray-800' : (dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'"
+                                      x-text="!dhcpStatus.enabled ? 'Container Stopped' : (dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'Container Running' : 'Container Stopped'"></span>
+                                <span class="px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800"
+                                      x-text="dhcpStatus.networking_mode === 'host' ? 'Host Network' : 'MacVLAN'"></span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <!-- IPv4 Configuration -->
+                            <div class="bg-white rounded-lg p-4 border border-blue-100 shadow-sm">
+                                <div class="flex items-center mb-3">
+                                    <div class="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
+                                    <h4 class="text-sm font-semibold text-gray-900">IPv4 Configuration</h4>
+                                </div>
+                                <div class="space-y-2 text-sm">
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Subnet:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.subnet || 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Gateway:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.gateway || 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Range:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv4.range_start && dhcpConfig.ipv4.range_end) ? (dhcpConfig.ipv4.range_start + ' - ' + dhcpConfig.ipv4.range_end) : 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">DNS Servers:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv4.dns_servers_str ? dhcpConfig.ipv4.dns_servers_str.replace(/[.,\s]+$/, '') : (dhcpConfig.ipv4.dns_servers && dhcpConfig.ipv4.dns_servers.length > 0 ? dhcpConfig.ipv4.dns_servers.map(s => s.replace(/[.,\s]+$/, '')).join(', ') : 'Not configured'))"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100" x-show="dhcpConfig.ipv4.domain">
+                                        <span class="text-gray-600 font-medium">Domain:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv4.domain"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1" x-show="dhcpConfig.ipv4.ntp_servers_str || (dhcpConfig.ipv4.ntp_servers && dhcpConfig.ipv4.ntp_servers.length > 0)">
+                                        <span class="text-gray-600 font-medium">NTP Servers:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv4.ntp_servers_str ? dhcpConfig.ipv4.ntp_servers_str.replace(/[.,\s]+$/, '') : (dhcpConfig.ipv4.ntp_servers && dhcpConfig.ipv4.ntp_servers.length > 0 ? dhcpConfig.ipv4.ntp_servers.map(s => s.replace(/[.,\s]+$/, '')).join(', ') : 'Not configured'))"></span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- IPv6 Configuration -->
+                            <div class="bg-white rounded-lg p-4 border border-blue-100 shadow-sm">
+                                <div class="flex items-center mb-3">
+                                    <div class="w-2 h-2 bg-indigo-500 rounded-full mr-2"></div>
+                                    <h4 class="text-sm font-semibold text-gray-900">IPv6 Configuration</h4>
+                                </div>
+                                <div class="space-y-2 text-sm">
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Subnet:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv6.subnet || 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Gateway:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv6.gateway || 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">Range:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv6.range_start && dhcpConfig.ipv6.range_end) ? (dhcpConfig.ipv6.range_start + ' - ' + dhcpConfig.ipv6.range_end) : 'Not configured'"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1 border-b border-gray-100">
+                                        <span class="text-gray-600 font-medium">DNS Servers:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="(dhcpConfig.ipv6.dns_servers_str ? dhcpConfig.ipv6.dns_servers_str.replace(/[.,\s]+$/, '') : (dhcpConfig.ipv6.dns_servers && dhcpConfig.ipv6.dns_servers.length > 0 ? dhcpConfig.ipv6.dns_servers.map(s => s.replace(/[.,\s]+$/, '')).join(', ') : 'Not configured'))"></span>
+                                    </div>
+                                    <div class="flex justify-between items-center py-1" x-show="dhcpConfig.ipv6.domain">
+                                        <span class="text-gray-600 font-medium">Domain:</span>
+                                        <span class="text-gray-900 font-mono text-xs" x-text="dhcpConfig.ipv6.domain"></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Container Status Details -->
+                        <div class="mt-4 pt-4 border-t border-blue-200">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                <div class="flex items-center">
+                                    <svg class="w-4 h-4 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                                    </svg>
+                                    <span class="text-gray-600">Service:</span>
+                                    <span class="ml-2 font-medium"
+                                          :class="dhcpStatus.container && dhcpStatus.container.service_active ? 'text-green-600' : 'text-gray-500'"
+                                          x-text="dhcpStatus.container && dhcpStatus.container.service_active ? 'Active' : 'Inactive'"></span>
+                                </div>
+                                <div class="flex items-center">
+                                    <svg class="w-4 h-4 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"></path>
+                                    </svg>
+                                    <span class="text-gray-600">Container File:</span>
+                                    <span class="ml-2 font-medium"
+                                          :class="dhcpStatus.container && dhcpStatus.container.exists ? 'text-green-600' : 'text-gray-500'"
+                                          x-text="dhcpStatus.container && dhcpStatus.container.exists ? 'Exists' : 'Missing'"></span>
+                                </div>
+                                <div class="flex items-center">
+                                    <svg class="w-4 h-4 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                                    </svg>
+                                    <span class="text-gray-600">Status:</span>
+                                    <span class="ml-2 font-medium text-gray-900"
+                                          x-text="dhcpStatus.container && dhcpStatus.container.service_status ? dhcpStatus.container.service_status : 'Unknown'"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DHCP Logs Tab -->
+                <div x-show="activeDhcpTab === 'logs'" class="p-6">
+                        <div class="mb-4 flex items-center justify-between flex-wrap gap-4">
+                            <div>
+                                <h2 class="text-lg font-semibold text-gray-900 mb-2">DHCP Server Logs</h2>
+                                <p class="text-sm text-gray-600">View logs from Kea DHCP server</p>
+                            </div>
+                            <div class="flex items-center space-x-1.5 flex-wrap">
+                                <div class="relative group">
+                                    <input type="text"
+                                           x-model="logSearchTerm"
+                                           @input="highlightLogs()"
+                                           placeholder="Search..."
+                                           class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-32"
+                                           title="Search logs">
+                                    <button x-show="logSearchTerm"
+                                            @click="logSearchTerm = ''; highlightLogs()"
+                                            class="absolute right-1 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="relative group">
+                                    <select x-model="logLines" @change="loadLogs()" class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 pr-6" title="Number of lines">
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                        <option value="200">200</option>
+                                        <option value="500">500</option>
+                                    </select>
+                                </div>
+                                <button @click="markLogs()" class="px-2.5 py-1.5 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs font-medium transition-colors" title="Mark current position in logs">
+                                    Mark
+                                </button>
+                                <div class="relative group">
+                                    <label class="inline-flex items-center cursor-pointer" title="Auto-refresh logs">
+                                        <input type="checkbox" x-model="autoRefreshEnabled" @change="toggleAutoRefresh()" class="sr-only peer">
+                                        <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                    </label>
+                                </div>
+                                <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-1.5 py-0.5 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
+                                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                                    </svg>
+                                    <span>New entries</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto" x-ref="logsContainer">
+                            <div class="text-xs text-gray-400 mb-2 font-semibold flex items-center justify-between">
+                                <span>DHCP Logs</span>
+                                <span x-show="logNewEntriesIndicator" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-500 text-white animate-pulse">
+                                    New entries
+                                </span>
+                            </div>
+                            <pre class="text-sm font-mono overflow-x-auto whitespace-pre-wrap text-green-400"
+                                 x-html="highlightSearch(formatLogsWithMarks(reverseLogLines(logs)))"></pre>
+                        </div>
+                    </div>
+                </div>
         </main>
 
         <!-- Script Viewer Modal -->
         <div x-show="showScriptModal"
+             x-cloak
              @click.away="showScriptModal = false"
-             class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
-             style="display: none;">
+             class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
             <div class="relative top-20 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
                 <div class="flex items-center justify-between mb-4">
                     <h3 class="text-lg font-semibold text-gray-900" x-text="'Script: ' + (viewingScript?.name || '')"></h3>
@@ -623,91 +1437,88 @@
         </template>
 
         <!-- Login Modal -->
-        <template x-if="showLoginModal">
-        <div x-transition:enter="transition ease-out duration-300"
+        <div x-show="showLoginModal"
+             x-transition:enter="transition ease-out duration-300"
              x-transition:enter-start="opacity-0"
              x-transition:enter-end="opacity-100"
              x-transition:leave="transition ease-in duration-200"
              x-transition:leave-start="opacity-100"
              x-transition:leave-end="opacity-0"
-             x-init="$watch('showLoginModal', value => {
-                 console.log('showLoginModal changed to:', value);
-                 if(value) {
-                     $nextTick(() => $refs.passwordInput && $refs.passwordInput.focus());
-                 }
-             })"
-             @keydown.escape.window="showLoginModal = false; loginPassword = ''; loginError = ''"
+             @keydown.escape.window="if(showLoginModal) { showLoginModal = false; loginPassword = ''; loginError = ''; }"
              class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
              @click.self="showLoginModal = false; loginPassword = ''; loginError = ''">
-        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
-             @click.stop>
-            <div class="mt-3">
-                <div class="flex items-center justify-between mb-4">
-                    <h3 class="text-lg font-medium text-gray-900">Authentication Required</h3>
-                    <button @click="showLoginModal = false; loginPassword = ''; loginError = ''"
-                            class="text-gray-400 hover:text-gray-600">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                        </svg>
-                    </button>
-                </div>
-
-                <p class="text-sm text-gray-600 mb-4">
-                    Please enter the admin password to perform this action.
-                </p>
-
-                <form @submit.prevent="login()">
-                    <div class="mb-4">
-                        <label for="loginPassword" class="block text-sm font-medium text-gray-700 mb-2">
-                            Password
-                        </label>
-                        <input
-                            type="password"
-                            id="loginPassword"
-                            x-model="loginPassword"
-                            x-ref="passwordInput"
-                            autocomplete="current-password"
-                            @keyup.escape="showLoginModal = false; loginPassword = ''; loginError = ''"
-                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                            placeholder="Enter admin password"
-                            :disabled="loginLoading"
-                            required
-                        />
-                    </div>
-
-                    <!-- Error message -->
-                    <div x-show="loginError" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
-                        <p class="text-sm text-red-800" x-text="loginError"></p>
-                    </div>
-
-                    <div class="flex items-center justify-end gap-3">
-                        <button
-                            type="button"
-                            @click="showLoginModal = false; loginPassword = ''; loginError = ''"
-                            :disabled="loginLoading"
-                            class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50">
-                            Cancel
-                        </button>
-                        <button
-                            type="submit"
-                            :disabled="loginLoading || !loginPassword"
-                            class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 flex items-center gap-2">
-                            <svg x-show="loginLoading" class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
+                 @click.stop>
+                <div class="mt-3">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-medium text-gray-900">Authentication Required</h3>
+                        <button type="button" @click="showLoginModal = false; loginPassword = ''; loginError = ''"
+                                class="text-gray-400 hover:text-gray-600">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
                             </svg>
-                            <span x-text="loginLoading ? 'Logging in...' : 'Login'"></span>
                         </button>
                     </div>
-                </form>
+
+                    <p class="text-sm text-gray-600 mb-4">
+                        Please enter the admin password to perform this action.
+                    </p>
+
+                    <form @submit.prevent="login()">
+                        <div class="mb-4">
+                            <label for="loginPassword" class="block text-sm font-medium text-gray-700 mb-2">
+                                Password
+                            </label>
+                            <input
+                                type="password"
+                                id="loginPassword"
+                                x-model="loginPassword"
+                                x-ref="passwordInput"
+                                autocomplete="current-password"
+                                @keyup.escape="showLoginModal = false; loginPassword = ''; loginError = ''"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                placeholder="Enter admin password"
+                                :disabled="loginLoading"
+                                required
+                            />
+                        </div>
+
+                        <!-- Error message - only show when there's an error -->
+                        <div x-show="loginError && loginError.length > 0"
+                             x-transition
+                             class="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                            <p class="text-sm text-red-800" x-text="loginError"></p>
+                        </div>
+
+                        <div class="flex items-center justify-end gap-3">
+                            <button
+                                type="button"
+                                @click="showLoginModal = false; loginPassword = ''; loginError = ''"
+                                :disabled="loginLoading"
+                                class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50">
+                                Cancel
+                            </button>
+                            <button
+                                type="submit"
+                                :disabled="loginLoading || !loginPassword"
+                                class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 flex items-center gap-2">
+                                <svg x-show="loginLoading" x-cloak class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                <span x-text="loginLoading ? 'Logging in...' : 'Login'"></span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
-        </template>
     </div>
 
     <script>
         function dashboard() {
             return {
+                activeApplication: localStorage.getItem('ztpbootstrap-activeApplication') || 'ztpbootstrap', // 'ztpbootstrap' or 'dhcp'
                 activeTab: 'scripts',
                 status: {
                     container_running: false,
@@ -729,6 +1540,7 @@
                 logNewEntriesIndicator: false,
                 logNewEntriesNginx: false,
                 logNewEntriesWebUI: false,
+                autoRefreshEnabled: true, // Auto-refresh toggle for logs
                 lastLogHash: '',
                 lastLogNginxHash: '',
                 lastLogWebUIHash: '',
@@ -747,6 +1559,7 @@
                 loginPassword: '',
                 loginError: '',
                 loginLoading: false,
+                // Force reset login state on init - clear any stale state
                 pendingAction: null,
                 showChangePasswordModal: false,
                 changePasswordCurrent: '',
@@ -761,10 +1574,71 @@
                     config: false,
                     logs: false,
                     deviceConnections: false,
-                    status: false
+                    status: false,
+                    dhcp: false
                 },
+                // DHCP state
+                dhcpConfig: {
+                    enabled: false,
+                    ipv4: {
+                        subnet: '',
+                        range_start: '',
+                        range_end: '',
+                        gateway: '',
+                        dns_servers: [],
+                        dns_servers_str: '',
+                        domain: '',
+                        ntp_servers: [],
+                        ntp_servers_str: ''
+                    },
+                    ipv6: {
+                        subnet: '',
+                        range_start: '',
+                        range_end: '',
+                        gateway: '',
+                        dns_servers: [],
+                        dns_servers_str: '',
+                        domain: ''
+                    },
+                    oui_filtering: {
+                        arista_only_mode: false,
+                        allowed_ouis: [],
+                        blocked_ouis: []
+                    }
+                },
+                dhcpStatus: {
+                    enabled: false,
+                    networking_mode: 'unknown',
+                    port_conflicts: {ipv4_conflict: false, ipv6_conflict: false},
+                    container: {exists: false, service_active: false, container_running: false}
+                },
+                dhcpLeases: [],
+                dhcpReservations: [],
+                activeDhcpTab: localStorage.getItem('ztpbootstrap-activeDhcpTab') || 'config', // 'config', 'reservations', 'status', or 'logs'
+                // Reservation form state
+                showReservationForm: false,
+                newReservation: {
+                    mac: '',
+                    ip: '',
+                    hostname: ''
+                },
+                reservationError: '',
+                // OUI filtering form state
+                newAllowedOui: '',
+                newBlockedOui: '',
 
                 async init() {
+                    // Initialize modal states - ensure all modals start hidden
+                    this.showLoginModal = false;
+                    this.showScriptModal = false;
+                    this.showChangePasswordModal = false;
+                    this.showRestoreDialog = false;
+                    this.loginLoading = false;
+                    this.loginError = '';
+                    this.loginPassword = '';
+                    this.pendingAction = null;
+                    this.viewingScript = null;
+
                     // Cleanup auto-refresh on page unload
                     window.addEventListener('beforeunload', () => {
                         if (this.logRefreshInterval) {
@@ -772,14 +1646,79 @@
                         }
                     });
 
+                    // Watch for application changes
+                    this.$watch('activeApplication', (newApp) => {
+                        // Save to localStorage for persistence across refreshes
+                        localStorage.setItem('ztpbootstrap-activeApplication', newApp);
+                        if (newApp === 'dhcp') {
+                            // Load DHCP data when switching to DHCP application (read-only, no auth required)
+                            // These functions will silently handle 401s without showing modal
+                            this.loadDhcpStatus();
+                            this.loadDhcpConfig();
+                            this.loadDhcpLeases();
+                        }
+                        // Ensure modal stays hidden when switching applications
+                        this.showLoginModal = false;
+                    });
+
                     // Watch for tab changes to start/stop auto-refresh
                     this.$watch('activeTab', (newTab) => {
-                        if (newTab === 'logs') {
-                            // Start auto-refresh when entering logs tab
+                        if (newTab === 'logs' && this.autoRefreshEnabled) {
+                            // Start auto-refresh when entering logs tab (only if enabled)
                             this.startAutoRefresh();
                         } else {
                             // Stop auto-refresh when leaving logs tab
                             this.stopAutoRefresh();
+                        }
+                    });
+
+                    // Watch for DHCP tab changes
+                    this.$watch('activeDhcpTab', (newTab) => {
+                        // Save to localStorage for persistence across refreshes
+                        localStorage.setItem('ztpbootstrap-activeDhcpTab', newTab);
+                        if (newTab === 'logs') {
+                            // Set log source to DHCP and start auto-refresh when entering DHCP logs tab (only if enabled)
+                            this.logSource = 'dhcp';
+                            this.loadLogs();
+                            if (this.autoRefreshEnabled) {
+                                this.startAutoRefresh();
+                            }
+                        } else {
+                            // Stop auto-refresh when leaving DHCP logs tab
+                            this.stopAutoRefresh();
+                        }
+                        if (newTab === 'status') {
+                            // Load leases when entering status tab
+                            this.loadDhcpLeases();
+                        }
+                        if (newTab === 'reservations') {
+                            // Load reservations when entering reservations tab
+                            this.loadDhcpReservations();
+                        }
+                    });
+
+                    // Watch for DHCP tab changes
+                    this.$watch('activeDhcpTab', (newTab) => {
+                        // Save to localStorage for persistence across refreshes
+                        localStorage.setItem('ztpbootstrap-activeDhcpTab', newTab);
+                        if (newTab === 'logs') {
+                            // Set log source to DHCP and start auto-refresh when entering DHCP logs tab (only if enabled)
+                            this.logSource = 'dhcp';
+                            this.loadLogs();
+                            if (this.autoRefreshEnabled) {
+                                this.startAutoRefresh();
+                            }
+                        } else {
+                            // Stop auto-refresh when leaving DHCP logs tab
+                            this.stopAutoRefresh();
+                        }
+                        if (newTab === 'status') {
+                            // Load leases when entering status tab
+                            this.loadDhcpLeases();
+                        }
+                        if (newTab === 'reservations') {
+                            // Load reservations when entering reservations tab
+                            this.loadDhcpReservations();
                         }
                     });
                     // Ensure modal is hidden on initial load
@@ -805,11 +1744,32 @@
                     await this.loadBackups();
                     // Don't load config on init - require auth first
                     // Config will be loaded when user clicks Configuration tab
-                    await this.loadLogs();
-                    await this.loadDeviceConnections();
 
-                    // Start auto-refresh if we're on the logs tab
-                    if (this.activeTab === 'logs') {
+                    // Load DHCP status if authenticated
+                    if (this.authenticated) {
+                        await this.loadDhcpStatus();
+                        // Start auto-refresh for DHCP status (every 5 seconds)
+                        setInterval(() => {
+                            if (this.authenticated) {
+                                this.loadDhcpStatus();
+                            }
+                        }, 5000);
+                    }
+                    // Load application-specific data
+                    if (this.activeApplication === 'ztpbootstrap') {
+                        await this.loadScripts();
+                        await this.loadDeviceConnections();
+                    } else if (this.activeApplication === 'dhcp') {
+                        // Load DHCP data (read-only, no auth required)
+                        // These functions will silently handle 401s without showing modal
+                        await this.loadDhcpStatus();
+                        await this.loadDhcpConfig();
+                        await this.loadDhcpLeases();
+                    }
+                    await this.loadLogs();
+
+                    // Start auto-refresh if we're on the logs tab (only if enabled)
+                    if (this.autoRefreshEnabled && (this.activeTab === 'logs' || (this.activeApplication === 'dhcp' && this.activeDhcpTab === 'logs'))) {
                         this.startAutoRefresh();
                     }
 
@@ -822,8 +1782,16 @@
                     // Auto-refresh every 5 seconds
                     setInterval(() => {
                         this.loadStatus();
-                        this.loadDeviceConnections();
-                        if (this.activeTab === 'logs') {
+                        if (this.activeApplication === 'ztpbootstrap') {
+                            this.loadDeviceConnections();
+                        } else if (this.activeApplication === 'dhcp') {
+                            this.loadDhcpStatus();
+                            if (this.activeDhcpTab === 'status') {
+                                this.loadDhcpLeases();
+                            }
+                        }
+                        // Only refresh logs if currently on a logs tab AND auto-refresh is enabled
+                        if (this.autoRefreshEnabled && (this.activeTab === 'logs' || (this.activeApplication === 'dhcp' && this.activeDhcpTab === 'logs'))) {
                             this.loadLogs();
                         }
                     }, 5000);
@@ -837,35 +1805,96 @@
                 // Authentication methods
                 async checkAuthStatus() {
                     try {
+                        // Check if cookies are available
+                        console.log('Checking cookies:', document.cookie);
+
                         const response = await fetch('/api/auth/status', {
                             credentials: 'same-origin'
                         });
+                        console.log('checkAuthStatus response:', response.status, response.statusText);
+                        console.log('checkAuthStatus request headers sent:', 'Cookie: ' + (document.cookie || 'none'));
+                        if (response.status === 401 || !response.ok) {
+                            this.authenticated = false;
+                            this.authExpiresAt = null;
+                            this.csrfToken = null;
+                            console.log('checkAuthStatus: Not authenticated (401 or !ok)');
+                            return;
+                        }
                         const data = await response.json();
                         this.authenticated = data.authenticated || false;
                         this.authExpiresAt = data.expires_at || null;
                         this.csrfToken = data.csrf_token || null;
+                        console.log('checkAuthStatus: authenticated =', this.authenticated);
                     } catch (error) {
                         console.error('Failed to check auth status:', error);
                         this.authenticated = false;
+                        this.authExpiresAt = null;
                         this.csrfToken = null;
                     }
                 },
 
                 async login() {
+                    console.log('=== LOGIN FUNCTION CALLED ===');
+                    console.log('loginLoading before:', this.loginLoading);
+                    console.log('loginPassword length:', this.loginPassword ? this.loginPassword.length : 0);
+
                     this.loginLoading = true;
                     this.loginError = '';
 
+                    console.log('Login attempt started, password length:', this.loginPassword.length);
+                    console.log('Login password value:', this.loginPassword ? '***' : 'empty');
+                    console.log('loginLoading after setting to true:', this.loginLoading);
+
                     try {
-                        const response = await fetch('/api/auth/login', {
+                        const loginUrl = '/api/auth/login';
+                        const loginPayload = { password: this.loginPassword };
+                        console.log('Sending login request to:', loginUrl);
+                        console.log('Request payload keys:', Object.keys(loginPayload));
+
+                        const response = await fetch(loginUrl, {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
                             },
-                            body: JSON.stringify({ password: this.loginPassword }),
+                            body: JSON.stringify(loginPayload),
                             credentials: 'same-origin'
+                        }).catch(fetchError => {
+                            console.error('Fetch error:', fetchError);
+                            throw fetchError;
                         });
 
-                        const data = await response.json();
+                        console.log('Login response received, status:', response.status, response.statusText);
+                        console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
+                        // Check for Set-Cookie header
+                        const setCookieHeader = response.headers.get('Set-Cookie');
+                        if (setCookieHeader) {
+                            console.log('Set-Cookie header received:', setCookieHeader);
+                        } else {
+                            console.warn('WARNING: No Set-Cookie header in login response!');
+                        }
+
+                        let data;
+                        try {
+                            const responseText = await response.text();
+                            console.log('Response text length:', responseText.length);
+                            console.log('Response text preview:', responseText.substring(0, 200));
+
+                            if (!responseText) {
+                                throw new Error('Empty response from server');
+                            }
+
+                            data = JSON.parse(responseText);
+                            console.log('Login response data:', data);
+                        } catch (jsonError) {
+                            console.error('Failed to parse JSON response:', jsonError);
+                            console.error('Response status:', response.status);
+                            const text = await response.text().catch(() => 'Could not read response');
+                            console.error('Response text:', text);
+                            this.loginError = 'Invalid response from server. Please try again.';
+                            this.loginLoading = false;
+                            return;
+                        }
 
                         if (response.ok && data.success) {
                             // Update authentication state first
@@ -895,6 +1924,21 @@
 
                             console.log('Modal should be hidden now, showLoginModal:', this.showLoginModal);
 
+                            // Small delay to ensure browser processes the session cookie
+                            await new Promise(resolve => setTimeout(resolve, 200));
+
+                            // Verify authentication status after login to confirm cookie was set
+                            console.log('Verifying authentication after login...');
+                            await this.checkAuthStatus();
+                            console.log('After login verification, authenticated:', this.authenticated);
+
+                            if (!this.authenticated) {
+                                console.error('WARNING: Authentication failed after login! Cookie may not have been set.');
+                                this.loginError = 'Login succeeded but session not established. Please try again.';
+                                this.loginLoading = false;
+                                return;
+                            }
+
                             // Execute pending action if any (now that we're authenticated)
                             if (pendingAction) {
                                 try {
@@ -908,13 +1952,22 @@
                                 }
                             }
                         } else {
-                            this.loginError = data.error || 'Login failed';
+                            // Handle specific error codes
+                            if (data.code === 'RATE_LIMITED') {
+                                const remaining = data.remaining_time || 0;
+                                const minutes = Math.ceil(remaining / 60);
+                                this.loginError = data.error || `Too many login attempts. Please try again in ${minutes} minute(s).`;
+                            } else {
+                                this.loginError = data.error || 'Login failed. Please check your password.';
+                            }
                             this.loginPassword = '';
+                            // Don't close modal on error - let user try again or cancel
                         }
                     } catch (error) {
                         console.error('Login error:', error);
-                        this.loginError = 'Login failed. Please try again.';
+                        this.loginError = 'Login failed. Please try again. Error: ' + (error.message || 'Unknown error');
                         this.loginPassword = '';
+                        // Don't close modal on error - let user try again or cancel
                     } finally {
                         this.loginLoading = false;
                     }
@@ -1006,25 +2059,30 @@
 
                 async requireAuth(action) {
                     console.log('requireAuth called, current authenticated state:', this.authenticated);
-                    // Always check auth status first to ensure it's current
-                    await this.checkAuthStatus();
-                    console.log('After checkAuthStatus, authenticated:', this.authenticated);
+                    // Only check auth status if we're not already authenticated
+                    // This prevents unnecessary API calls and race conditions after login
+                    if (!this.authenticated) {
+                        await this.checkAuthStatus();
+                        console.log('After checkAuthStatus, authenticated:', this.authenticated);
+                    }
 
                     // Double-check authentication status
                     if (!this.authenticated) {
                         console.log('User not authenticated, showing login modal');
-                        // Only show modal if not already showing
-                        if (!this.showLoginModal) {
-                            this.pendingAction = action;
-                            // Set showLoginModal to true and force Alpine.js reactivity
-                            this.showLoginModal = true;
-                            // Use $dispatch to ensure Alpine.js processes the change
-                            this.$dispatch('login-modal-show');
-                            await this.$nextTick();
-                            console.log('Login modal should be visible:', this.showLoginModal);
-                        } else {
-                            // Modal already showing, just store the action
-                            this.pendingAction = action;
+                        this.pendingAction = action;
+                        // Reset modal state before showing
+                        this.loginPassword = '';
+                        this.loginError = '';
+                        this.loginLoading = false;
+                        // Show the modal
+                        this.showLoginModal = true;
+                        console.log('Set showLoginModal to true');
+                        // Focus the password input after modal is shown
+                        await this.$nextTick();
+                        const input = document.getElementById('loginPassword');
+                        if (input) {
+                            input.focus();
+                            console.log('Focused password input');
                         }
                         // Return early to prevent action from executing
                         console.log('requireAuth returning early (not authenticated)');
@@ -1038,7 +2096,9 @@
                 async loadStatus() {
                     this.loadingStates.status = true;
                     try {
-                        const response = await fetch('/api/status');
+                        const response = await fetch('/api/status', {
+                            credentials: 'same-origin'
+                        });
                         if (!response.ok) {
                             console.error('Status API returned:', response.status, response.statusText);
                             return;
@@ -1061,7 +2121,9 @@
                 async loadScripts() {
                     this.loadingStates.scripts = true;
                     try {
-                        const response = await fetch('/api/bootstrap-scripts');
+                        const response = await fetch('/api/bootstrap-scripts', {
+                            credentials: 'same-origin'
+                        });
                         if (!response.ok) {
                             console.error('Scripts API returned:', response.status, response.statusText);
                             this.scripts = [];
@@ -1083,7 +2145,9 @@
                 async loadBackups() {
                     this.loadingStates.backups = true;
                     try {
-                        const response = await fetch('/api/bootstrap-scripts/backups');
+                        const response = await fetch('/api/bootstrap-scripts/backups', {
+                            credentials: 'same-origin'
+                        });
                         if (!response.ok) {
                             console.error('Backups API returned:', response.status, response.statusText);
                             this.backups = [];
@@ -1373,9 +2437,13 @@
                 },
 
                 async triggerConfigTab() {
+                    console.log('triggerConfigTab called');
                     // Require authentication BEFORE showing configuration tab
                     await this.requireAuth(async () => {
+                        console.log('requireAuth callback executed - user is authenticated');
                         this.activeTab = 'config';
+                        // Small delay to ensure UI updates before loading config
+                        await this.$nextTick();
                         // Load config after switching to tab
                         await this.loadConfig();
                     });
@@ -1391,13 +2459,16 @@
                 async loadConfig() {
                     this.loadingStates.config = true;
                     // User should already be authenticated (tab only opens after auth)
-                    // But double-check to be safe
-                    await this.checkAuthStatus();
+                    // Only check auth status if we don't already know we're authenticated
+                    // This prevents unnecessary API calls right after login
                     if (!this.authenticated) {
-                        this.activeTab = 'scripts'; // Switch away from config tab
-                        this.showLoginModal = true;
-                        this.loadingStates.config = false;
-                        return;
+                        await this.checkAuthStatus();
+                        if (!this.authenticated) {
+                            this.activeTab = 'scripts'; // Switch away from config tab
+                            this.showLoginModal = true;
+                            this.loadingStates.config = false;
+                            return;
+                        }
                     }
 
                     try {
@@ -1561,7 +2632,9 @@
                 async loadLogs() {
                     this.loadingStates.logs = true;
                     try {
-                        const response = await fetch(`/api/logs?source=${this.logSource}&lines=${this.logLines}`);
+                        const response = await fetch(`/api/logs?source=${this.logSource}&lines=${this.logLines}`, {
+                            credentials: 'same-origin'
+                        });
                         const data = await response.json();
 
                         if (this.logSource === 'container' && this.showMultiColumn) {
@@ -1628,12 +2701,14 @@
                             this.lastLogHash = logHash;
 
                             this.logs = newLogs;
-                            // Auto-scroll to top (newest first)
-                            this.$nextTick(() => {
-                                if (this.$refs.logsContainer) {
-                                    this.$refs.logsContainer.scrollTop = 0;
-                                }
-                            });
+                            // Auto-scroll to top (newest first) only if auto-refresh is enabled
+                            if (this.autoRefreshEnabled) {
+                                this.$nextTick(() => {
+                                    if (this.$refs.logsContainer) {
+                                        this.$refs.logsContainer.scrollTop = 0;
+                                    }
+                                });
+                            }
                         }
                     } catch (error) {
                         console.error('Failed to load logs:', error);
@@ -1644,14 +2719,21 @@
                 },
 
                 startAutoRefresh() {
+                    // Only start if auto-refresh is enabled
+                    if (!this.autoRefreshEnabled) {
+                        return;
+                    }
                     // Clear any existing interval first
                     if (this.logRefreshInterval) {
                         clearInterval(this.logRefreshInterval);
                     }
                     // Start auto-refresh every 2 seconds
                     this.logRefreshInterval = setInterval(() => {
-                        if (this.activeTab === 'logs') {
+                        if (this.autoRefreshEnabled && (this.activeTab === 'logs' || (this.activeApplication === 'dhcp' && this.activeDhcpTab === 'logs'))) {
                             this.loadLogs();
+                        } else {
+                            // Stop if auto-refresh was disabled
+                            this.stopAutoRefresh();
                         }
                     }, 2000);
                 },
@@ -1660,6 +2742,18 @@
                     if (this.logRefreshInterval) {
                         clearInterval(this.logRefreshInterval);
                         this.logRefreshInterval = null;
+                    }
+                },
+
+                toggleAutoRefresh() {
+                    if (this.autoRefreshEnabled) {
+                        // Auto-refresh enabled - start it if we're on a logs tab
+                        if (this.activeTab === 'logs' || (this.activeApplication === 'dhcp' && this.activeDhcpTab === 'logs')) {
+                            this.startAutoRefresh();
+                        }
+                    } else {
+                        // Auto-refresh disabled - stop it
+                        this.stopAutoRefresh();
                     }
                 },
 
@@ -1720,7 +2814,9 @@
 
                 async viewScript(filename) {
                     try {
-                        const response = await fetch(`/api/bootstrap-script/${filename}`);
+                        const response = await fetch(`/api/bootstrap-script/${filename}`, {
+                            credentials: 'same-origin'
+                        });
                         const data = await response.json();
                         this.viewingScript = data;
                         this.showScriptModal = true;
@@ -1975,6 +3071,529 @@
                         console.error('Error marking logs:', error);
                         alert('Failed to mark logs: ' + error.message);
                     }
+                },
+
+                // DHCP Functions
+                async loadDhcpConfig() {
+                    this.loadingStates.dhcp = true;
+                    try {
+                        const response = await fetch('/api/dhcp/config', {
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            // Read-only operation - just update auth status, don't show modal
+                            this.authenticated = false;
+                            return;
+                        }
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (data.dhcp) {
+                                this.dhcpConfig = data.dhcp;
+                                // Convert arrays to strings for display
+                                if (this.dhcpConfig.ipv4 && this.dhcpConfig.ipv4.dns_servers) {
+                                    // Clean trailing periods/commas and join
+                                    this.dhcpConfig.ipv4.dns_servers_str = this.dhcpConfig.ipv4.dns_servers
+                                        .map(s => String(s).replace(/[.,\s]+$/, '').trim())
+                                        .filter(s => s)
+                                        .join(', ');
+                                }
+                                if (this.dhcpConfig.ipv4 && this.dhcpConfig.ipv4.ntp_servers) {
+                                    // Clean trailing periods/commas and join
+                                    this.dhcpConfig.ipv4.ntp_servers_str = this.dhcpConfig.ipv4.ntp_servers
+                                        .map(s => String(s).replace(/[.,\s]+$/, '').trim())
+                                        .filter(s => s)
+                                        .join(', ');
+                                }
+                                // Ensure OUI filtering structure exists
+                                if (!this.dhcpConfig.oui_filtering) {
+                                    this.dhcpConfig.oui_filtering = {
+                                        arista_only_mode: false,
+                                        allowed_ouis: [],
+                                        blocked_ouis: []
+                                    };
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Failed to load DHCP config:', error);
+                    } finally {
+                        this.loadingStates.dhcp = false;
+                    }
+                },
+
+                async loadDhcpStatus() {
+                    try {
+                        const response = await fetch('/api/dhcp/status', {
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            // Read-only operation - just update auth status, don't show modal
+                            this.authenticated = false;
+                            return;
+                        }
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.dhcpStatus = data;
+                            // Sync dhcpConfig.enabled with config value only (not container state)
+                            // Container state is separate - a container can be running but disabled
+                            this.dhcpConfig.enabled = data.enabled;
+                            // Alpine.js is automatically reactive, no need for force update
+                        }
+                    } catch (error) {
+                        console.error('Failed to load DHCP status:', error);
+                    }
+                },
+
+                async toggleDhcp() {
+                    // Check authentication first
+                    await this.checkAuthStatus();
+                    if (!this.authenticated) {
+                        console.log('Not authenticated for toggleDhcp, showing login modal');
+                        this.pendingAction = () => this.toggleDhcp();
+                        this.showLoginModal = true;
+                        await this.$nextTick();
+                        // Revert the toggle since we didn't actually change it
+                        this.dhcpConfig.enabled = !this.dhcpConfig.enabled;
+                        this.loadingStates.dhcp = false;
+                        return;
+                    }
+
+                    this.loadingStates.dhcp = true;
+                    // Capture the current state before toggling
+                    const wasEnabled = this.dhcpConfig.enabled;
+                    // Toggle the state immediately for UI responsiveness
+                    this.dhcpConfig.enabled = !this.dhcpConfig.enabled;
+                    // Immediately update dhcpStatus.enabled to match the toggle
+                    this.dhcpStatus.enabled = this.dhcpConfig.enabled;
+                    // Alpine.js is automatically reactive, no need for force update
+                    try {
+                        // Use the OLD state to determine which endpoint to call
+                        const endpoint = wasEnabled ? '/api/dhcp/disable' : '/api/dhcp/enable';
+                        const headers = {'Content-Type': 'application/json'};
+                        if (this.csrfToken) {
+                            headers['X-CSRF-Token'] = this.csrfToken;
+                        }
+                        const response = await fetch(endpoint, {
+                            method: 'POST',
+                            headers: headers,
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            console.log('Received 401 in toggleDhcp, showing login modal');
+                            this.authenticated = false;
+                            await this.checkAuthStatus();
+                            this.pendingAction = () => this.toggleDhcp();
+                            this.showLoginModal = true;
+                            await this.$nextTick();
+                            // Revert the toggle since we didn't actually change it
+                            this.dhcpConfig.enabled = !this.dhcpConfig.enabled;
+                            this.dhcpStatus.enabled = this.dhcpConfig.enabled;
+                            // Alpine.js is automatically reactive, no need for force update
+                            return;
+                        }
+                        if (response.ok) {
+                            // Immediately update the status to reflect the toggle change
+                            this.dhcpStatus.enabled = this.dhcpConfig.enabled;
+                            // Alpine.js is automatically reactive, no need for force update
+                            await this.loadDhcpStatus();
+                            // Refresh status again after delays to catch container state changes
+                            setTimeout(() => this.loadDhcpStatus(), 2000);
+                            setTimeout(() => this.loadDhcpStatus(), 5000);
+                            if (this.dhcpConfig.enabled) {
+                                await this.loadDhcpConfig();
+                            }
+                        } else {
+                            // Try to parse JSON error response, but handle non-JSON responses gracefully
+                            let errorMessage = 'Unknown error';
+                            try {
+                                const contentType = response.headers.get('content-type');
+                                if (contentType && contentType.includes('application/json')) {
+                                    const data = await response.json();
+                                    errorMessage = data.error || `HTTP ${response.status}: ${response.statusText}`;
+                                } else {
+                                    const text = await response.text();
+                                    errorMessage = text || `HTTP ${response.status}: ${response.statusText}`;
+                                }
+                            } catch (parseError) {
+                                errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+                            }
+                            alert('Failed to ' + (this.dhcpConfig.enabled ? 'enable' : 'disable') + ' DHCP: ' + errorMessage);
+                            this.dhcpConfig.enabled = !this.dhcpConfig.enabled; // Revert toggle
+                        }
+                    } catch (error) {
+                        console.error('Failed to toggle DHCP:', error);
+                        alert('Failed to toggle DHCP: ' + error.message);
+                        this.dhcpConfig.enabled = !this.dhcpConfig.enabled; // Revert toggle
+                    } finally {
+                        this.loadingStates.dhcp = false;
+                    }
+                },
+
+                async saveDhcpConfig() {
+                    // Check authentication first
+                    await this.checkAuthStatus();
+                    console.log('saveDhcpConfig: authenticated =', this.authenticated, 'showLoginModal =', this.showLoginModal);
+                    if (!this.authenticated) {
+                        console.log('Not authenticated, showing login modal');
+                        this.pendingAction = () => this.saveDhcpConfig();
+                        this.showLoginModal = true;
+                        console.log('Set showLoginModal to true, current value:', this.showLoginModal);
+                        await this.$nextTick();
+                        console.log('After $nextTick, showLoginModal:', this.showLoginModal);
+                        // Force a re-render by toggling
+                        this.showLoginModal = false;
+                        await this.$nextTick();
+                        this.showLoginModal = true;
+                        await this.$nextTick();
+                        console.log('Login modal should be visible now, showLoginModal:', this.showLoginModal);
+                        return;
+                    }
+
+                    this.loadingStates.dhcp = true;
+                    try {
+                        // Convert strings back to arrays
+                        const config = JSON.parse(JSON.stringify(this.dhcpConfig));
+
+                        // Ensure ipv4 and ipv6 objects exist
+                        if (!config.ipv4) {
+                            config.ipv4 = {};
+                        }
+                        if (!config.ipv6) {
+                            config.ipv6 = {};
+                        }
+
+                        // Convert IPv4 string fields to arrays
+                        if (config.ipv4.dns_servers_str) {
+                            config.ipv4.dns_servers = config.ipv4.dns_servers_str.split(',').map(s => s.trim()).filter(s => s);
+                            delete config.ipv4.dns_servers_str;
+                        }
+                        if (config.ipv4.ntp_servers_str) {
+                            config.ipv4.ntp_servers = config.ipv4.ntp_servers_str.split(',').map(s => s.trim()).filter(s => s);
+                            delete config.ipv4.ntp_servers_str;
+                        }
+
+                        // Convert IPv6 string fields to arrays
+                        if (config.ipv6.dns_servers_str) {
+                            config.ipv6.dns_servers = config.ipv6.dns_servers_str.split(',').map(s => s.trim()).filter(s => s);
+                            delete config.ipv6.dns_servers_str;
+                        }
+
+                        const headers = {'Content-Type': 'application/json'};
+                        if (this.csrfToken) {
+                            headers['X-CSRF-Token'] = this.csrfToken;
+                        }
+                        const response = await fetch('/api/dhcp/config', {
+                            method: 'PUT',
+                            headers: headers,
+                            body: JSON.stringify({dhcp: config}),
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            console.log('Received 401, showing login modal');
+                            this.authenticated = false;
+                            await this.checkAuthStatus();
+                            this.pendingAction = () => this.saveDhcpConfig();
+                            this.showLoginModal = true;
+                            await this.$nextTick();
+                            console.log('Login modal should be visible after 401, showLoginModal:', this.showLoginModal);
+                            return;
+                        }
+                        if (response.ok) {
+                            const data = await response.json();
+                            alert('DHCP configuration saved successfully');
+                            await this.loadDhcpStatus();
+                            // Refresh status again after a short delay to catch container startup
+                            setTimeout(() => this.loadDhcpStatus(), 2000);
+                        } else {
+                            const errorData = await response.json().catch(() => ({error: 'Unknown error'}));
+                            alert('Failed to save DHCP config: ' + (errorData.error || 'Unknown error'));
+                        }
+                    } catch (error) {
+                        console.error('Failed to save DHCP config:', error);
+                        alert('Failed to save DHCP config: ' + error.message);
+                    } finally {
+                        this.loadingStates.dhcp = false;
+                    }
+                },
+
+                async autoDetectSubnet(version) {
+                    try {
+                        const requestBody = version === 'ipv4'
+                            ? {ipv4_address: this.dhcpConfig.ipv4.subnet || '10.0.0.10'}
+                            : {ipv6_address: this.dhcpConfig.ipv6.subnet || '2001:db8::10'};
+                        const response = await fetch('/api/dhcp/config/auto-detect', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify(requestBody),
+                            credentials: 'same-origin'
+                        });
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (version === 'ipv4') {
+                                if (data.ipv4_subnet) {
+                                    this.dhcpConfig.ipv4.subnet = data.ipv4_subnet;
+                                }
+                                if (data.ipv4_range) {
+                                    this.dhcpConfig.ipv4.range_start = data.ipv4_range.start;
+                                    this.dhcpConfig.ipv4.range_end = data.ipv4_range.end;
+                                }
+                            } else {
+                                if (data.ipv6_subnet) {
+                                    this.dhcpConfig.ipv6.subnet = data.ipv6_subnet;
+                                }
+                                if (data.ipv6_range) {
+                                    this.dhcpConfig.ipv6.range_start = data.ipv6_range.start;
+                                    this.dhcpConfig.ipv6.range_end = data.ipv6_range.end;
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Failed to auto-detect subnet:', error);
+                    }
+                },
+
+                async autoDetectGateway(version) {
+                    try {
+                        const response = await fetch('/api/dhcp/config/auto-detect', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({}),
+                            credentials: 'same-origin'
+                        });
+                        if (response.ok) {
+                            const data = await response.json();
+                            if (version === 'ipv4' && data.gateway && data.gateway.ipv4_gateway) {
+                                this.dhcpConfig.ipv4.gateway = data.gateway.ipv4_gateway;
+                            } else if (version === 'ipv6' && data.gateway && data.gateway.ipv6_gateway) {
+                                this.dhcpConfig.ipv6.gateway = data.gateway.ipv6_gateway;
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Failed to auto-detect gateway:', error);
+                    }
+                },
+
+                async loadDhcpLeases() {
+                    try {
+                        const response = await fetch('/api/dhcp/leases', {
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            // Read-only operation - just update auth status, don't show modal
+                            this.authenticated = false;
+                            this.dhcpLeases = []; // Clear leases on auth failure
+                            return;
+                        }
+                        if (response.ok) {
+                            const data = await response.json();
+                            console.log('DHCP leases response:', data);
+                            this.dhcpLeases = data.leases || [];
+                            console.log('Loaded leases:', this.dhcpLeases.length);
+                        } else {
+                            const errorText = await response.text();
+                            console.error('Failed to load DHCP leases:', response.status, errorText);
+                        }
+                    } catch (error) {
+                        console.error('Failed to load DHCP leases:', error);
+                    }
+                },
+
+                async deleteDhcpLease(mac) {
+                    if (!confirm('Are you sure you want to delete this lease?')) {
+                        return;
+                    }
+                    try {
+                        const headers = {};
+                        if (this.csrfToken) {
+                            headers['X-CSRF-Token'] = this.csrfToken;
+                        }
+                        const response = await fetch(`/api/dhcp/leases/${mac}`, {
+                            method: 'DELETE',
+                            headers: headers,
+                            credentials: 'same-origin'
+                        });
+                        if (response.ok) {
+                            await this.loadDhcpLeases();
+                        } else {
+                            alert('Failed to delete lease');
+                        }
+                    } catch (error) {
+                        console.error('Failed to delete lease:', error);
+                        alert('Failed to delete lease: ' + error.message);
+                    }
+                },
+
+                // DHCP Reservations Management
+                async loadDhcpReservations() {
+                    try {
+                        const response = await fetch('/api/dhcp/reservations', {
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.dhcpReservations = [];
+                            return;
+                        }
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.dhcpReservations = data.reservations || [];
+                        }
+                    } catch (error) {
+                        console.error('Failed to load DHCP reservations:', error);
+                    }
+                },
+
+                async addDhcpReservation() {
+                    // Check authentication first
+                    await this.checkAuthStatus();
+                    if (!this.authenticated) {
+                        this.pendingAction = () => this.addDhcpReservation();
+                        this.showLoginModal = true;
+                        return;
+                    }
+
+                    // Validate inputs
+                    this.reservationError = '';
+                    if (!this.newReservation.mac || !this.newReservation.ip) {
+                        this.reservationError = 'MAC address and IP address are required';
+                        return;
+                    }
+
+                    // Validate MAC format
+                    if (!this.validateMacAddress(this.newReservation.mac)) {
+                        this.reservationError = 'Invalid MAC address format. Use XX:XX:XX:XX:XX:XX';
+                        return;
+                    }
+
+                    try {
+                        const headers = {'Content-Type': 'application/json'};
+                        if (this.csrfToken) {
+                            headers['X-CSRF-Token'] = this.csrfToken;
+                        }
+                        const response = await fetch('/api/dhcp/reservations', {
+                            method: 'POST',
+                            headers: headers,
+                            body: JSON.stringify(this.newReservation),
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.pendingAction = () => this.addDhcpReservation();
+                            this.showLoginModal = true;
+                            return;
+                        }
+                        if (response.ok) {
+                            alert('Reservation added successfully');
+                            this.newReservation = {mac: '', ip: '', hostname: ''};
+                            this.showReservationForm = false;
+                            await this.loadDhcpReservations();
+                        } else {
+                            const data = await response.json();
+                            this.reservationError = data.error || 'Failed to add reservation';
+                        }
+                    } catch (error) {
+                        console.error('Failed to add reservation:', error);
+                        this.reservationError = 'Failed to add reservation: ' + error.message;
+                    }
+                },
+
+                async deleteDhcpReservation(mac) {
+                    if (!confirm('Are you sure you want to delete this reservation?')) {
+                        return;
+                    }
+
+                    // Check authentication first
+                    await this.checkAuthStatus();
+                    if (!this.authenticated) {
+                        this.pendingAction = () => this.deleteDhcpReservation(mac);
+                        this.showLoginModal = true;
+                        return;
+                    }
+
+                    try {
+                        const headers = {};
+                        if (this.csrfToken) {
+                            headers['X-CSRF-Token'] = this.csrfToken;
+                        }
+                        const response = await fetch(`/api/dhcp/reservations/${encodeURIComponent(mac)}`, {
+                            method: 'DELETE',
+                            headers: headers,
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.pendingAction = () => this.deleteDhcpReservation(mac);
+                            this.showLoginModal = true;
+                            return;
+                        }
+                        if (response.ok) {
+                            alert('Reservation deleted successfully');
+                            await this.loadDhcpReservations();
+                        } else {
+                            alert('Failed to delete reservation');
+                        }
+                    } catch (error) {
+                        console.error('Failed to delete reservation:', error);
+                        alert('Failed to delete reservation: ' + error.message);
+                    }
+                },
+
+                createReservationFromLease(lease) {
+                    // Pre-fill the reservation form with lease data
+                    this.newReservation.mac = lease.mac;
+                    this.newReservation.ip = lease.ip;
+                    this.newReservation.hostname = '';
+                    this.showReservationForm = true;
+                    this.reservationError = '';
+                    // Switch to reservations tab
+                    this.activeDhcpTab = 'reservations';
+                },
+
+                validateMacAddress(mac) {
+                    // Validate MAC format XX:XX:XX:XX:XX:XX
+                    return /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(mac);
+                },
+
+                // OUI Filtering Management
+                addAllowedOui() {
+                    const oui = this.normalizeOui(this.newAllowedOui);
+                    if (oui && !this.dhcpConfig.oui_filtering.allowed_ouis.includes(oui)) {
+                        this.dhcpConfig.oui_filtering.allowed_ouis.push(oui);
+                        this.newAllowedOui = '';
+                    } else if (oui) {
+                        alert('This OUI is already in the allowed list');
+                    } else {
+                        alert('Invalid OUI format. Use XX:XX:XX (e.g., 00:1C:73)');
+                    }
+                },
+
+                removeAllowedOui(index) {
+                    this.dhcpConfig.oui_filtering.allowed_ouis.splice(index, 1);
+                },
+
+                addBlockedOui() {
+                    const oui = this.normalizeOui(this.newBlockedOui);
+                    if (oui && !this.dhcpConfig.oui_filtering.blocked_ouis.includes(oui)) {
+                        this.dhcpConfig.oui_filtering.blocked_ouis.push(oui);
+                        this.newBlockedOui = '';
+                    } else if (oui) {
+                        alert('This OUI is already in the blocked list');
+                    } else {
+                        alert('Invalid OUI format. Use XX:XX:XX (e.g., 00:00:00)');
+                    }
+                },
+
+                removeBlockedOui(index) {
+                    this.dhcpConfig.oui_filtering.blocked_ouis.splice(index, 1);
+                },
+
+                normalizeOui(oui) {
+                    // Normalize OUI to XX:XX:XX format
+                    // OUI (Organizationally Unique Identifier) is 24 bits = 6 hex characters
+                    if (!oui) return null;
+                    const cleaned = oui.replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+                    if (cleaned.length !== 6) return null; // Must be exactly 6 hex characters (24 bits)
+                    return `${cleaned.slice(0,2)}:${cleaned.slice(2,4)}:${cleaned.slice(4,6)}`;
                 }
             }
         }
