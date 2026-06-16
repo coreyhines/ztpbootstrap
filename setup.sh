@@ -658,6 +658,16 @@ setup_pod() {
         warn "Service will run without Web UI"
     fi
 
+    # Copy DHCP container file if it exists (optional, created on-the-fly via Web UI)
+    # This is a fallback for manual setup - normally created dynamically when DHCP is enabled
+    if [[ -f "${repo_dir}/systemd/ztpbootstrap-dhcp.container" ]]; then
+        cp "${repo_dir}/systemd/ztpbootstrap-dhcp.container" "$systemd_dir/"
+        log "DHCP container configuration installed (optional)"
+    else
+        # Don't fail - DHCP container is created on-the-fly when enabled via Web UI
+        log "DHCP container file not found (will be created on-the-fly when DHCP is enabled)"
+    fi
+
     return 0
 }
 
