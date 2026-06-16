@@ -153,6 +153,9 @@ cat > "$TMPDIR_TEST/kea/kea-dhcp4.conf" << 'KEATPL'
         ]
       }
     ],
+    "hooks-libraries": [
+      { "library": "/usr/lib64/kea/hooks/libdhcp_lease_cmds.so" }
+    ],
     "loggers": [
       {
         "name": "kea-dhcp4",
