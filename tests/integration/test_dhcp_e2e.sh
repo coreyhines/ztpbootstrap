@@ -270,8 +270,8 @@ if ! echo "$LEASE_JSON" | grep -qE '"result": *0'; then
     fail "lease4-get-all returned non-zero result. Response: $LEASE_JSON"
 fi
 
-# Extract first ip-address value from the lease list
-LEASED_IP=$(echo "$LEASE_JSON" | grep -o '"ip-address":"[^"]*"' | head -1 | cut -d'"' -f4)
+# Extract first ip-address value from the lease list (Kea uses "key": "value" with spaces)
+LEASED_IP=$(echo "$LEASE_JSON" | grep -oE '"ip-address": *"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 
 if [[ -z "$LEASED_IP" ]]; then
     fail "no leases found in Kea response — DHCP client did not receive an address. Response: $LEASE_JSON"
