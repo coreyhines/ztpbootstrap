@@ -138,7 +138,7 @@ cat > "$TMPDIR_TEST/kea/kea-dhcp4.conf" << 'KEATPL'
     "lease-database": {
       "type": "memfile",
       "lfc-interval": 0,
-      "name": "/leases/dhcp4.leases"
+      "name": "/var/lib/kea/dhcp4.leases"
     },
     "subnet4": [
       {
@@ -212,7 +212,7 @@ podman run -d \
     --cap-add NET_BIND_SERVICE \
     --cap-add NET_RAW \
     -v "$TMPDIR_TEST/kea:/etc/kea:ro,z" \
-    -v "$TMPDIR_TEST/leases:/leases:rw,z" \
+    -v "$TMPDIR_TEST/leases:/var/lib/kea:rw,z" \
     -v "$TMPDIR_TEST/run-kea:/run/kea:rw,z" \
     --entrypoint "/etc/kea/start.sh" \
     "$KEA_IMAGE"
