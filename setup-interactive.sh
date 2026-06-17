@@ -40,17 +40,17 @@ EXISTING_NETWORK=""
 EXISTING_HTTP_ONLY=""
 EXISTING_HTTPS_PORT=""
 
-# Logging functions
+# Logging functions (stderr — stdout is reserved for data returned via $())
 log() {
-    echo -e "${GREEN}[INFO]${NC} $1"
+    echo -e "${GREEN}[INFO]${NC} $1" >&2
 }
 
 warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
+    echo -e "${YELLOW}[WARN]${NC} $1" >&2
 }
 
 error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
 # Safe directory removal with validation (Issue #18)
@@ -92,7 +92,7 @@ safe_remove_directory() {
 }
 
 info() {
-    echo -e "${CYAN}[?]${NC} $1"
+    echo -e "${CYAN}[?]${NC} $1" >&2
 }
 
 # Validate password complexity (12 chars min, 2+ character types per best practices)
@@ -1522,6 +1522,16 @@ load_existing_installation_values() {
         fi
     fi
 
+    # Recover network name from pre-upgrade backup (before IP subnet probing).
+    if [[ -z "$EXISTING_NETWORK" ]]; then
+        local backup_network=""
+        backup_network=$(_read_network_from_backups 2>/dev/null || echo "")
+        if [[ -n "$backup_network" ]]; then
+            EXISTING_NETWORK="$backup_network"
+            log "  Restored network from upgrade backup: $backup_network"
+        fi
+    fi
+
     # If we have an IPv4 address but no network (or network is not "host"), try to find which network it belongs to
     if [[ -n "$EXISTING_IPV4" ]] && [[ -z "$EXISTING_NETWORK" ]]; then
         log "IPv4 address found ($EXISTING_IPV4) but no network specified, attempting to detect network..."
@@ -1875,10 +1885,11 @@ build_webui_image() {
     log "This will install Python, podman, and systemd in the image for faster container startup."
     log "Image tag: $image_tag"
 
-    # Build the image - always use sudo since systemd services run as root
-    local build_cmd="podman build -t $image_tag -f $containerfile $repo_dir"
+    # Build the image - context must be webui/ (Containerfile COPY requirements.txt)
+    local build_context="${repo_dir}/webui"
+    local build_cmd="podman build -t $image_tag -f $containerfile $build_context"
     if [[ $EUID -ne 0 ]]; then
-        build_cmd="sudo podman build -t $image_tag -f $containerfile $repo_dir"
+        build_cmd="sudo podman build -t $image_tag -f $containerfile $build_context"
     fi
 
     if $build_cmd 2>&1; then
@@ -2904,10 +2915,10 @@ load_existing_config() {
 
 # Main interactive configuration
 interactive_config() {
-    # In non-interactive mode, ensure ENROLL_CHARS is read from environment if set
-    # Otherwise ensure ENROLL_CHARS is always set for testing (default to "arista")
-    # Use ${ENROLL_CHARS:-} to avoid unbound variable error with set -u
-    if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
+    # Upgrade mode: always preserve CVaaS token from the installed config.
+    if [[ "${UPGRADE_MODE:-false}" == "true" ]] && [[ -n "${EXISTING_ENROLL_CHARS:-}" ]]; then
+        export ENROLL_CHARS="${EXISTING_ENROLL_CHARS}"
+    elif [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
         # In non-interactive mode, use environment variable if set, otherwise use existing or default
         if [[ -z "${ENROLL_CHARS:-}" ]]; then
             if [[ -n "${EXISTING_ENROLL_CHARS:-}" ]]; then
