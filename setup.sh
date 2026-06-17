@@ -77,6 +77,31 @@ check_root() {
     fi
 }
 
+# Resolve config.yaml: installed copy first, then repo checkout.
+resolve_config_file() {
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    if [[ -f "${SCRIPT_DIR}/config.yaml" ]]; then
+        echo "${SCRIPT_DIR}/config.yaml"
+    elif [[ -f "${repo_dir}/config.yaml" ]]; then
+        echo "${repo_dir}/config.yaml"
+    elif [[ -f "./config.yaml" ]]; then
+        echo "./config.yaml"
+    fi
+}
+
+# Read a YAML value with yq (empty string if unavailable).
+yaml_value() {
+    local config_file="$1"
+    local query="$2"
+    if [[ -z "$config_file" ]] || [[ ! -f "$config_file" ]] || ! command -v yq >/dev/null 2>&1; then
+        echo ""
+        return 0
+    fi
+    yq eval "$query // \"\"" "$config_file" 2>/dev/null | sed '/^null$/d'
+}
+
 # Check if environment file exists
 check_env_file() {
     if [[ ! -f "$ENV_FILE" ]]; then
@@ -88,24 +113,45 @@ setup.sh is for re-applying configuration on an existing install that already ha
     log "Found environment file: $ENV_FILE"
 }
 
-# Source environment variables
+# Source environment variables (config.yaml fills gaps for older installs)
 load_env() {
     log "Loading environment variables..."
     # shellcheck source=/dev/null
     source "$ENV_FILE"
 
+    local config_file
+    config_file="$(resolve_config_file)"
+    if [[ -n "$config_file" ]]; then
+        log "Using config.yaml for missing values: $config_file"
+        if [[ -z "${CV_ADDR:-}" ]] || [[ "${CV_ADDR}" == "null" ]]; then
+            CV_ADDR="$(yaml_value "$config_file" '.cvaas.address')"
+        fi
+        if [[ -z "${ENROLL_CHARS:-}" ]] || [[ "${ENROLL_CHARS}" == "null" ]]; then
+            ENROLL_CHARS="$(yaml_value "$config_file" '.cvaas.enroll_chars')"
+        fi
+        if [[ -z "${NTP_SERVER:-}" ]] || [[ "${NTP_SERVER}" == "null" ]]; then
+            NTP_SERVER="$(yaml_value "$config_file" '.cvaas.ntp_server')"
+        fi
+        local config_domain
+        config_domain="$(yaml_value "$config_file" '.network.domain')"
+        if [[ -n "$config_domain" ]] && [[ "$config_domain" != "null" ]]; then
+            DOMAIN="$config_domain"
+        fi
+    fi
+
     # Validate required variables
-    if [[ -z "${CV_ADDR:-}" ]]; then
-        error "CV_ADDR is not set in environment file"
+    if [[ -z "${CV_ADDR:-}" ]] || [[ "${CV_ADDR}" == "null" ]]; then
+        error "CV_ADDR is not set in $ENV_FILE or config.yaml (cvaas.address)"
     fi
 
     # ENROLL_CHARS: CVaaS enrollment value; bootstrap.py (Apache 2.0, Arista) uses it as enrollChars.
-    if [[ -z "${ENROLL_CHARS:-}" ]]; then
-        error "ENROLL_CHARS is not set in environment file"
+    if [[ -z "${ENROLL_CHARS:-}" ]] || [[ "${ENROLL_CHARS}" == "null" ]]; then
+        error "ENROLL_CHARS is not set in $ENV_FILE or config.yaml (cvaas.enroll_chars)"
     fi
 
     log "Environment variables loaded successfully"
     log "CVaaS Address: $CV_ADDR"
+    log "Domain: $DOMAIN"
     log "Enrollment Chars: ${ENROLL_CHARS:0:20}..."
 }
 
@@ -491,15 +537,9 @@ setup_pod() {
     local systemd_dir="/etc/containers/systemd/ztpbootstrap"
     mkdir -p "$systemd_dir"
 
-    # Resolve config.yaml
-    local config_file=""
-    if [[ -f "${repo_dir}/config.yaml" ]]; then
-        config_file="${repo_dir}/config.yaml"
-    elif [[ -f "./config.yaml" ]]; then
-        config_file="./config.yaml"
-    elif [[ -f "config.yaml" ]]; then
-        config_file="config.yaml"
-    fi
+    # Resolve config.yaml (installed copy preferred)
+    local config_file
+    config_file="$(resolve_config_file)"
 
     # Read network config from config.yaml (requires yq)
     local host_network="" ipv4="" ipv6=""
@@ -511,7 +551,7 @@ setup_pod() {
         log "Network config: host_network=$host_network, IPv4=$ipv4, IPv6=$ipv6"
     else
         if [[ -z "$config_file" ]]; then
-            warn "config.yaml not found; defaulting to macvlan network without static IPs"
+            warn "config.yaml not found in ${SCRIPT_DIR} or repo; defaulting to macvlan network without static IPs"
         else
             warn "yq not found; cannot read config.yaml — defaulting to macvlan network"
         fi
