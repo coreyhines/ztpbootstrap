@@ -693,21 +693,26 @@ read_ztpbootstrap_env() {
 # Podman 5.x exposes subnets under .Subnets[].subnet (lowercase) — grep Subnet often fails.
 _get_podman_network_subnet() {
     local network_name="$1"
+    local podman_cmd="${2:-}"
     local subnet=""
 
-    subnet=$(podman network inspect "$network_name" --format '{{range .Subnets}}{{.Subnet}} {{end}}' 2>/dev/null | awk '{print $1; exit}')
+    if [[ -z "$podman_cmd" ]]; then
+        podman_cmd=$(_podman_for_network "$network_name")
+    fi
+
+    subnet=$($podman_cmd network inspect "$network_name" --format '{{range .Subnets}}{{.Subnet}} {{end}}' 2>/dev/null | awk '{print $1; exit}')
     if [[ -n "$subnet" ]] && [[ "$subnet" != "<no value>" ]]; then
         echo "$subnet"
         return 0
     fi
 
-    subnet=$(podman network inspect "$network_name" --format '{{.Subnet}}' 2>/dev/null || echo "")
+    subnet=$($podman_cmd network inspect "$network_name" --format '{{.Subnet}}' 2>/dev/null || echo "")
     if [[ -n "$subnet" ]] && [[ "$subnet" != "<no value>" ]]; then
         echo "$subnet"
         return 0
     fi
 
-    subnet=$(podman network inspect "$network_name" 2>/dev/null | grep -ioE '"subnet"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"([^"]+)"/\1/')
+    subnet=$($podman_cmd network inspect "$network_name" 2>/dev/null | grep -ioE '"subnet"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"([^"]+)"/\1/')
     if [[ -n "$subnet" ]]; then
         echo "$subnet"
         return 0
@@ -731,10 +736,74 @@ raise SystemExit(0 if ipaddress.ip_address("${ip}") in ipaddress.ip_network("${s
 PY
 }
 
+# Macvlan networks are often created as root; try user podman then sudo podman.
 _podman_network_exists() {
     local network_name="$1"
-    [[ -n "$network_name" ]] && [[ "$network_name" != "host" ]] && [[ "$network_name" != "null" ]] && \
-        podman network exists "$network_name" 2>/dev/null
+
+    [[ -n "$network_name" ]] || return 1
+    [[ "$network_name" == "host" ]] && return 0
+    [[ "$network_name" == "null" ]] && return 1
+
+    if podman network exists "$network_name" 2>/dev/null; then
+        return 0
+    fi
+    if command -v sudo >/dev/null 2>&1 && sudo podman network exists "$network_name" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+_podman_network_list() {
+    local networks=""
+
+    networks=$(podman network ls --format "{{.Name}}" 2>/dev/null || echo "")
+    if [[ -n "$networks" ]]; then
+        printf '%s\n' "$networks"
+        return 0
+    fi
+
+    if command -v sudo >/dev/null 2>&1; then
+        networks=$(sudo podman network ls --format "{{.Name}}" 2>/dev/null || echo "")
+        if [[ -n "$networks" ]]; then
+            printf '%s\n' "$networks"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Pick podman invocation that can see the named network (root vs user storage).
+_podman_for_network() {
+    local network_name="$1"
+
+    if [[ -z "$network_name" ]] || [[ "$network_name" == "host" ]]; then
+        if [[ $EUID -eq 0 ]]; then
+            echo "podman"
+        elif command -v sudo >/dev/null 2>&1; then
+            echo "sudo podman"
+        else
+            echo "podman"
+        fi
+        return 0
+    fi
+
+    if podman network exists "$network_name" 2>/dev/null; then
+        echo "podman"
+        return 0
+    fi
+    if command -v sudo >/dev/null 2>&1 && sudo podman network exists "$network_name" 2>/dev/null; then
+        echo "sudo podman"
+        return 0
+    fi
+
+    if [[ $EUID -eq 0 ]]; then
+        echo "podman"
+    elif command -v sudo >/dev/null 2>&1; then
+        echo "sudo podman"
+    else
+        echo "podman"
+    fi
 }
 
 # Find which podman network contains a given IP address
@@ -750,7 +819,7 @@ find_network_for_ip() {
         return 1
     fi
 
-    networks=$(podman network ls --format "{{.Name}}" 2>/dev/null || echo "")
+    networks=$(_podman_network_list 2>/dev/null || echo "")
     if [[ -z "$networks" ]]; then
         return 1
     fi
@@ -761,8 +830,9 @@ find_network_for_ip() {
             continue
         fi
 
-        local subnet
-        subnet=$(_get_podman_network_subnet "$network_name" || echo "")
+        local podman_cmd subnet
+        podman_cmd=$(_podman_for_network "$network_name")
+        subnet=$(_get_podman_network_subnet "$network_name" "$podman_cmd" || echo "")
         if [[ -z "$subnet" ]]; then
             continue
         fi
@@ -875,7 +945,8 @@ resolve_pod_network() {
         return 0
     fi
 
-    echo "ztpbootstrap-net"
+    warn "Could not resolve Podman macvlan network for pod IP ${ipv4:-unknown}" >&2
+    echo ""
 }
 
 # Read container/pod file
@@ -1947,6 +2018,20 @@ create_pod_files_from_config() {
             ipv4=$(yq eval '.network.ipv4' "$config_file" 2>/dev/null || echo "")
             ipv6=$(yq eval '.network.ipv6' "$config_file" 2>/dev/null || echo "")
             network=$(resolve_pod_network "$config_file")
+            if [[ -z "$network" ]] || ! _podman_network_exists "$network"; then
+                local redetected=""
+                redetected=$(find_network_for_ip "$ipv4" 2>/dev/null || echo "")
+                if [[ -n "$redetected" ]]; then
+                    network="$redetected"
+                    log "Re-detected Podman network '$network' from pod IP $ipv4"
+                fi
+            fi
+            if [[ -z "$network" ]] || ! _podman_network_exists "$network"; then
+                error "Cannot configure pod: no valid Podman macvlan network found for IP ${ipv4:-unknown}."
+                error "Check: sudo podman network ls"
+                error "Set network.network in config.yaml (e.g. net-10) or restore from .ztpbootstrap-backups/"
+                return 1
+            fi
             log "Using Podman network: $network"
 
             log "Reading network config: host_network=$host_network, IPv4=$ipv4, IPv6=$ipv6, network=$network"
@@ -1969,19 +2054,10 @@ create_pod_files_from_config() {
                 # Note: Networks created with sudo are stored in /etc/containers/networks (root)
                 # while user networks are in ~/.local/share/containers/storage/networks
                 local network_exists=false
-                local podman_cmd="podman"
-                if [[ $EUID -ne 0 ]]; then
-                    # Try with sudo first (for root-created networks), then without
-                    if sudo -n podman network exists "$network" 2>/dev/null; then
-                        network_exists=true
-                        podman_cmd="sudo podman"
-                    elif podman network exists "$network" 2>/dev/null; then
-                        network_exists=true
-                    fi
-                else
-                    if podman network exists "$network" 2>/dev/null; then
-                        network_exists=true
-                    fi
+                local podman_cmd
+                podman_cmd=$(_podman_for_network "$network")
+                if $podman_cmd network exists "$network" 2>/dev/null; then
+                    network_exists=true
                 fi
                 if [[ "$network_exists" != "true" ]]; then
                     warn "Network '$network' does not exist. Static IP addresses cannot be assigned."
@@ -2004,7 +2080,7 @@ create_pod_files_from_config() {
                 else
                     # Network exists - validate IP addresses are in the network's subnet
                     local network_subnet
-                    network_subnet=$($podman_cmd network inspect "$network" 2>/dev/null | grep -i "\"Subnet\"" | head -1 | sed -n 's/.*"Subnet": *"\([^"]*\)".*/\1/p' || echo "")
+                    network_subnet=$(_get_podman_network_subnet "$network" "$podman_cmd" || echo "")
 
                     if [[ -n "$network_subnet" ]]; then
                         log "Network '$network' exists with subnet: $network_subnet"
@@ -2402,6 +2478,51 @@ auto_create_macvlan_network() {
     fi
 }
 
+_cleanup_stale_pod() {
+    local podman_cmd="podman"
+    if [[ $EUID -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
+        podman_cmd="sudo podman"
+    fi
+    if $podman_cmd pod exists ztpbootstrap 2>/dev/null; then
+        log "Removing stale pod 'ztpbootstrap' before start..."
+        $podman_cmd pod rm -f ztpbootstrap 2>/dev/null || true
+    fi
+}
+
+_diagnose_pod_service_failure() {
+    local pod_file="/etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod"
+    local podman_cmd="podman"
+    if [[ $EUID -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
+        podman_cmd="sudo podman"
+    fi
+
+    warn "=== Pod Service Startup Diagnostics ==="
+    if [[ -f "$pod_file" ]] || ([[ $EUID -ne 0 ]] && sudo test -f "$pod_file" 2>/dev/null); then
+        warn "Pod quadlet ($pod_file):"
+        if [[ $EUID -eq 0 ]]; then
+            sed 's/^/    /' "$pod_file" >&2 || true
+        else
+            sudo sed 's/^/    /' "$pod_file" >&2 || true
+        fi
+    else
+        warn "  Pod file not found: $pod_file"
+    fi
+
+    warn "Podman networks:"
+    $podman_cmd network ls 2>&1 | sed 's/^/    /' >&2 || true
+
+    warn "Existing pods:"
+    $podman_cmd pod ps -a 2>&1 | sed 's/^/    /' >&2 || true
+
+    warn "journalctl -u ztpbootstrap-pod.service (last 30 lines):"
+    if [[ $EUID -eq 0 ]]; then
+        journalctl -u ztpbootstrap-pod.service --no-pager -n 30 2>&1 | sed 's/^/    /' >&2 || true
+    else
+        sudo journalctl -u ztpbootstrap-pod.service --no-pager -n 30 2>&1 | sed 's/^/    /' >&2 || true
+    fi
+    warn "=== End Pod Diagnostics ==="
+}
+
 start_services_after_install() {
     log "Starting new services..."
 
@@ -2420,21 +2541,9 @@ start_services_after_install() {
 
         # Check if we need to validate the network
         if [[ "$host_network" != "true" ]] && [[ -n "$network" ]]; then
-            # Use sudo for podman if not root (networks created with sudo may not be visible to non-root)
-            # Note: Networks created with sudo are stored in /etc/containers/networks (root)
-            # while user networks are in ~/.local/share/containers/storage/networks
             local network_exists=false
-            if [[ $EUID -ne 0 ]]; then
-                # Try with sudo first (for root-created networks), then without
-                if sudo -n podman network exists "$network" 2>/dev/null; then
-                    network_exists=true
-                elif podman network exists "$network" 2>/dev/null; then
-                    network_exists=true
-                fi
-            else
-                if podman network exists "$network" 2>/dev/null; then
-                    network_exists=true
-                fi
+            if _podman_network_exists "$network"; then
+                network_exists=true
             fi
             if [[ "$network_exists" != "true" ]]; then
                 # Check if DHCP is enabled (macvlan needed for DHCP client testing)
@@ -2596,17 +2705,17 @@ start_services_after_install() {
 
     # Start pod service (quadlet generates ztpbootstrap-pod.service from ztpbootstrap.pod)
     local pod_service_name="ztpbootstrap-pod.service"
+    _cleanup_stale_pod
     if [[ $EUID -eq 0 ]]; then
         if systemctl start "$pod_service_name" 2>&1; then
             log "✓ Started $pod_service_name"
             sleep 2
         else
             local pod_error
-            pod_error=$(systemctl status "$pod_service_name" --no-pager -l 2>&1 | tail -20 || echo "Could not get status")
+            pod_error=$(systemctl status "$pod_service_name" --no-pager -l 2>&1 | tail -30 || echo "Could not get status")
             warn "Failed to start $pod_service_name"
-            warn "Error details: ${pod_error:0:500}"
-
-            # Check if error is related to static IP assignment
+            warn "Error details: ${pod_error:0:800}"
+            _diagnose_pod_service_failure
             if echo "$pod_error" | grep -qi "static ip\|requested.*ip\|network.*not found"; then
                 # Get network name from config for error message
                 local error_network="ztpbootstrap-net"
@@ -2803,9 +2912,10 @@ start_services_after_install() {
             sleep 2
         else
             local pod_error
-            pod_error=$(sudo systemctl status "$pod_service_name" --no-pager -l 2>&1 | tail -20 || echo "Could not get status")
+            pod_error=$(sudo systemctl status "$pod_service_name" --no-pager -l 2>&1 | tail -30 || echo "Could not get status")
             warn "Failed to start $pod_service_name"
-            warn "Error details: ${pod_error:0:500}"
+            warn "Error details: ${pod_error:0:800}"
+            _diagnose_pod_service_failure
 
             # Check if error is related to static IP assignment
             if echo "$pod_error" | grep -qi "static ip\|requested.*ip\|network.*not found"; then
