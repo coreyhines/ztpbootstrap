@@ -148,3 +148,72 @@ auth:
   # Auto-generated if not set, but should be set explicitly for production
   # Use a long random string (e.g., generated with: python3 -c "import secrets; print(secrets.token_hex(32))")
   session_secret: ""
+
+# ============================================================================
+# DHCP Server Configuration
+# ============================================================================
+dhcp:
+  # Enable DHCP server (configured via Web UI)
+  enabled: false
+
+  # DHCP server type (kea or dnsmasq)
+  server: "kea"
+
+  # IPv4 Configuration
+  ipv4:
+    subnet: ""
+    range_start: ""
+    range_end: ""
+    gateway: ""
+    dns_servers: []
+    domain: ""
+    ntp_servers: []
+
+  # IPv6 Configuration
+  ipv6:
+    subnet: ""
+    range_start: ""
+    range_end: ""
+    gateway: ""
+    dns_servers: []
+    domain: ""
+
+  # OUI Filtering
+  oui_filtering:
+    arista_only_mode: false
+    allowed_ouis: []
+    blocked_ouis: []
+
+  # DHCP Options
+  options:
+    standard:
+      dns_servers: []
+      ntp_servers: []
+      domain: ""
+    custom: []
+
+  # PXE Configuration (hidden until enabled)
+  pxe:
+    enabled: false
+    boot_file_source: "local"  # "local" or "external"
+    boot_server_url: ""
+    boot_file_name: ""
+
+  # Relay/Proxy Support
+  relay:
+    enabled: false  # Set to true if serving via relay agents
+    subnets: []  # List of subnets served via relays
+      # - subnet: "10.0.1.0/24"
+      #   relay_agent: "10.0.1.1"  # giaddr from relay
+      #   range_start: "10.0.1.100"
+      #   range_end: "10.0.1.200"
+
+  # Backend Configuration
+  backend:
+    type: "memfile"  # "memfile" or "postgresql"
+    postgresql:
+      host: ""
+      port: 5432
+      database: ""
+      user: ""
+      password: ""

@@ -4,32 +4,16 @@
 
 set -euo pipefail
 
-# Install system packages needed (Python, podman, journalctl)
-# These are installed in the container rather than mounted from host for better compatibility
-# Note: If using a pre-built image (see webui/Containerfile), packages will already be installed
-# and this step will be skipped, resulting in much faster startup times.
-if ! command -v python3 >/dev/null 2>&1 || ! command -v podman >/dev/null 2>&1 || ! command -v journalctl >/dev/null 2>&1; then
-    echo "Installing Python, podman, systemd, and dependencies..."
-    echo "Note: This is a one-time installation. Consider building a local image (see webui/README-IMAGE-BUILD.md) for faster startups."
-    if ! dnf install -y -q python3 python3-pip podman systemd 2>&1; then
-        echo "Error: Failed to install required packages. Cannot continue."
-        exit 1
-    fi
-fi
-
-# Install Python dependencies from requirements.txt if needed
-# Note: Using Fedora-based image for native compatibility with host binaries
-if [ -f /app/requirements.txt ]; then
-    pip3 install --no-cache-dir -r /app/requirements.txt || {
-        echo "Error: Failed to install dependencies from requirements.txt. Cannot continue."
-        exit 1
-    }
-elif ! python3 -c "import flask" 2>/dev/null; then
-    # Fallback: install flask and werkzeug if requirements.txt doesn't exist
-    pip3 install --no-cache-dir flask werkzeug || {
-        echo "Error: Failed to install flask or werkzeug. Cannot continue."
-        exit 1
-    }
+# Always fix DNS first (common issue in containers with pod networking)
+# If using host networking, preserve the host's DNS, otherwise use 8.8.8.8
+echo "Configuring DNS..."
+if grep -q "127.0.0.53" /etc/resolv.conf 2>/dev/null; then
+    echo "Using host DNS (systemd-resolved)"
+elif ! getent hosts pypi.org >/dev/null 2>&1; then
+    echo "DNS not working, configuring fallback..."
+    echo "nameserver 8.8.8.8" > /etc/resolv.conf
+    echo "nameserver 1.1.1.1" >> /etc/resolv.conf
+    echo "DNS configured: $(cat /etc/resolv.conf)"
 fi
 
 # Change to app directory (mounted at /app)

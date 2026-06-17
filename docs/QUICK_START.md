@@ -2,16 +2,59 @@
 
 Get your Arista ZTP Bootstrap Service up and running quickly.
 
+## Lab Quickstart (5 minutes, no macvlan required)
+
+The simplest way to try the service — uses the host's network stack and HTTP, so there is no need for a macvlan interface, a dedicated IP, or SSL certificates.
+
+```bash
+# 1. Install Podman
+sudo dnf install podman          # Fedora
+# sudo apt-get install podman    # Ubuntu 24.04
+
+# 2. Clone and enter the repo
+git clone https://github.com/coreyhines/ztpbootstrap.git
+cd ztpbootstrap
+
+# 3. Run setup — choose "host networking" and "HTTP-only" when prompted
+./setup-interactive.sh
+```
+
+When the interactive setup asks:
+- **Network mode**: choose **host** (no macvlan needed)
+- **Protocol**: choose **HTTP-only** (no certs needed)
+- **Domain / IP**: use your server's existing IP (e.g. `192.168.1.10`)
+
+After setup, the bootstrap endpoint is available at `http://<host-ip>/bootstrap.py`.
+
+> **Not for production.** HTTP exposes the bootstrap script without TLS encryption. Use the production path below for real deployments.
+
+---
+
 ## Prerequisites
 
-- **Podman** installed (tested with 4.9.3 on Ubuntu 24.04, 5.6.2 on Fedora 43)
+- **Podman ≥ 4.9** installed (tested with 4.9.3 on Ubuntu 24.04, 5.6.2 on Fedora 43)
 - **Root/sudo access** for setup
 - **Enrollment token** from CVaaS Device Registration page
-- **SSL certificates** (or use HTTP-only mode for testing)
+- **SSL certificates** — or choose HTTP-only mode for lab/testing
 
-**Tested Distributions:**
-- **Fedora 43** (ARM64) - RedHat/RPM-based, Podman 5.6.2
-- **Ubuntu 24.04** (ARM64) - Debian/APT-based, Podman 4.9.3
+**Tested distributions:**
+- **Fedora 43** (ARM64) — Podman 5.6.2
+- **Ubuntu 24.04** (ARM64) — Podman 4.9.3
+
+**Preflight check** — run these before setup to catch common blockers:
+
+```bash
+# Podman installed and working?
+podman --version
+
+# systemd available (required for quadlet service management)?
+systemctl --version
+
+# For macvlan (production): network must exist before setup runs
+podman network exists ztpbootstrap-net && echo "OK" || echo "Create it first: ./check-macvlan.sh"
+
+# For host networking (lab): no macvlan check needed
+```
 
 ## Installation
 
@@ -145,6 +188,51 @@ sudo cp your-key.pem /opt/containerdata/certs/wild/privkey.pem
 ```dhcp
 option bootfile-name "https://ztpboot.example.com/bootstrap.py";
 ```
+
+### Airgapped / Offline Install
+
+For environments with no internet access on the target host, pre-pull images on an internet-connected machine and copy them over.
+
+**On the internet-connected machine:**
+
+```bash
+# Pull all required images (versions from versions.env)
+source versions.env
+podman pull "$NGINX_IMAGE"
+podman pull "$POSTGRES_IMAGE"
+podman pull "$WEBUI_IMAGE"
+podman pull "$KEA_IMAGE"
+
+# Save to a single tarball
+podman save \
+    "$NGINX_IMAGE" \
+    "$POSTGRES_IMAGE" \
+    "$WEBUI_IMAGE" \
+    "$KEA_IMAGE" \
+    | gzip > ztpbootstrap-images.tar.gz
+
+# Copy tarball + repo to the target host
+scp ztpbootstrap-images.tar.gz user@target-host:/tmp/
+rsync -a . user@target-host:/opt/ztpbootstrap-repo/
+```
+
+**On the target (airgapped) host:**
+
+```bash
+# Load all images
+podman load < /tmp/ztpbootstrap-images.tar.gz
+
+# Verify images are present
+podman images | grep -E "nginx|postgres|fedora|kea"
+
+# Run setup normally — it will use the local images
+cd /opt/ztpbootstrap-repo
+./setup-interactive.sh
+```
+
+The installer reads image tags from `versions.env` and Podman uses locally cached images when they match the expected tag. No registry access is needed after `podman load`.
+
+> **Verify versions.env is committed** before copying the repo to the airgapped host so the image tags match what was saved.
 
 ## DHCP Configuration
 

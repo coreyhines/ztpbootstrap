@@ -1,0 +1,22 @@
+# Containerfile for ISC Kea DHCP server (Fedora-based)
+#
+# Build: podman build -t ztpbootstrap-kea:3.0 -f kea/Containerfile .
+# Update KEA_IMAGE in versions.env after building and pushing to your registry.
+#
+# Kea binaries: /usr/sbin/kea-dhcp4, /usr/sbin/kea-dhcp6, /usr/sbin/kea-ctrl-agent
+# Hook libs:    /usr/lib64/kea/hooks/
+
+FROM registry.fedoraproject.org/fedora:41
+
+RUN dnf install -y -q \
+        kea \
+        kea-hooks \
+        nmap-ncat \
+        curl \
+    && dnf clean all
+
+# kea-admin is used for DB schema init/upgrade
+# kea-ctrl-agent exposes the REST control socket
+
+ENTRYPOINT ["/usr/sbin/kea-dhcp4"]
+CMD ["-c", "/etc/kea/kea-dhcp4.conf"]

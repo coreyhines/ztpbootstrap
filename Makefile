@@ -1,7 +1,7 @@
 # Makefile for ZTP Bootstrap Service
 # Provides common development tasks
 
-.PHONY: help test test-quick test-unit test-integration test-all lint format check install-deps clean test-ci test-integration-dev security-check
+.PHONY: help test test-quick test-unit test-integration test-dhcp-e2e-podman test-all lint format check install-deps clean test-ci test-integration-dev security-check
 
 help: ## Show this help message
 	@echo "Available targets:"
@@ -49,11 +49,17 @@ format: ## Format code
 test: test-quick ## Run quick tests (suitable for pre-commit)
 
 test-quick: ## Run quick tests (syntax, unit tests - no running services required)
-	@echo "Running unit tests..."
+	@echo "Running BATS unit tests..."
 	@if command -v bats >/dev/null 2>&1; then \
 		bats tests/unit/*.bats || echo "Some unit tests failed or bats not installed"; \
 	else \
 		echo "bats not installed, skipping unit tests"; \
+	fi
+	@echo "Running Python unit tests..."
+	@if command -v python3 >/dev/null 2>&1; then \
+		cd tests/unit && python3 -m unittest discover -s . -p "test_*.py" 2>/dev/null || echo "Python unit tests failed or modules not available"; \
+	else \
+		echo "python3 not installed, skipping Python unit tests"; \
 	fi
 
 test-unit: ## Run unit tests only
@@ -68,6 +74,26 @@ test-integration: ## Run integration tests only (BATS - requires running service
 		bats tests/integration/*.bats; \
 	else \
 		echo "bats not installed"; exit 1; \
+	fi
+
+test-dhcp-e2e: ## Run DHCP end-to-end test (requires VM)
+	@if [ -f dev/tests/test-dhcp-e2e.sh ]; then \
+		./dev/tests/test-dhcp-e2e.sh; \
+	else \
+		echo "test-dhcp-e2e.sh not found"; exit 1; \
+	fi
+
+test-dhcp-e2e-podman: ## Run DHCP e2e test via isolated Podman bridge (requires root + Podman)
+	@bash tests/integration/test_dhcp_e2e.sh; \
+	  rc=$$?; \
+	  [ $$rc -eq 77 ] && echo "SKIPPED (prerequisites not met)" && exit 0; \
+	  exit $$rc
+
+test-dhcp-automated: ## Run fully automated DHCP tests (creates VM, installs, tests)
+	@if [ -f dev/tests/test-dhcp-automated.sh ]; then \
+		./dev/tests/test-dhcp-automated.sh; \
+	else \
+		echo "test-dhcp-automated.sh not found"; exit 1; \
 	fi
 
 test-all: test-quick test-integration ## Run all tests (quick + integration)

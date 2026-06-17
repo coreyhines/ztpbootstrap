@@ -1,0 +1,22 @@
+[Unit]
+Description=ZTP Bootstrap PostgreSQL Database for Kea
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=docker.io/library/postgres:17.2-alpine
+ContainerName=ztpbootstrap-postgresql
+Pod=ztpbootstrap.pod
+Exec=/usr/local/bin/docker-entrypoint.sh postgres
+Volume=/opt/containerdata/ztpbootstrap/postgresql:/var/lib/postgresql/data:rw
+Environment=POSTGRES_DB=kea
+Environment=POSTGRES_USER=kea
+Environment=TZ=UTC
+Environment=PGDATA=/var/lib/postgresql/data/pgdata
+EnvironmentFile=-/opt/containerdata/ztpbootstrap/.env
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=ztpbootstrap-pod.service

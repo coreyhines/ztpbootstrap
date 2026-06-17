@@ -395,21 +395,85 @@ check_setup_prerequisites() {
     fi
     log "✓ Podman found: $(podman --version)"
 
-    # Check macvlan network
-    if ! podman network exists ztpbootstrap-net 2>/dev/null; then
-        error "Macvlan network 'ztpbootstrap-net' not found"
-        echo ""
-        warn "The macvlan network must exist before starting the pod."
-        warn "Run './check-macvlan.sh' to check network status and get instructions."
-        echo ""
-        info "The network must be created manually. See check-macvlan.sh for instructions."
-        echo ""
-        return 1
+    return 0
+}
+
+# Write the pod quadlet file based on current network configuration.
+# Uses direct printf instead of sed patching to avoid in-place mutations.
+_write_pod_file() {
+    local pod_file="$1"
+    local host_network="$2"
+    local ipv4="$3"
+    local ipv6="$4"
+
+    local pod_network
+    local ip_line=""
+    local ip6_line=""
+
+    if [[ "$host_network" == "true" ]]; then
+        pod_network="host"
+    elif [[ "$HTTP_ONLY" == "true" ]]; then
+        pod_network="ztpbootstrap-net"
+        # No static IPs in HTTP-only mode; Podman uses DHCP
     else
-        log "✓ Macvlan network 'ztpbootstrap-net' found"
+        pod_network="ztpbootstrap-net"
+        if [[ -n "$ipv4" && "$ipv4" != "null" ]]; then
+            ip_line="IP=$ipv4"
+        fi
+        if [[ -n "$ipv6" && "$ipv6" != "null" ]]; then
+            ip6_line="IP6=$ipv6"
+        fi
     fi
 
-    return 0
+    {
+        printf '[Unit]\n'
+        printf 'Description=ZTP Bootstrap Service Pod\n'
+        printf '\n'
+        printf '[Pod]\n'
+        printf 'PodName=ztpbootstrap\n'
+        printf 'Network=%s\n' "$pod_network"
+        [[ -n "$ip_line" ]] && printf '%s\n' "$ip_line"
+        [[ -n "$ip6_line" ]] && printf '%s\n' "$ip6_line"
+        printf '\n'
+        printf '[Service]\n'
+        printf 'Restart=always\n'
+        printf '\n'
+        printf '[Install]\n'
+        printf 'WantedBy=multi-user.target default.target\n'
+    } > "$pod_file"
+}
+
+# Write the nginx quadlet file; omits the SSL cert volume in HTTP-only mode.
+_write_nginx_container_file() {
+    local dest="$1"
+    local ssl_volume_line="Volume=/opt/containerdata/certs/wild:/etc/nginx/ssl:ro"
+    [[ "$HTTP_ONLY" == "true" ]] && ssl_volume_line=""
+
+    {
+        printf '[Unit]\n'
+        printf 'Description=ZTP Bootstrap Nginx Container\n'
+        printf '\n'
+        printf '[Container]\n'
+        printf 'Image=docker.io/nginx:1.27.3\n'
+        printf 'ContainerName=ztpbootstrap-nginx\n'
+        printf 'Pod=ztpbootstrap.pod\n'
+        printf 'Volume=/opt/containerdata/ztpbootstrap:/usr/share/nginx/html:ro\n'
+        printf 'Volume=/opt/containerdata/ztpbootstrap/nginx.conf:/etc/nginx/conf.d/default.conf:ro\n'
+        [[ -n "$ssl_volume_line" ]] && printf '%s\n' "$ssl_volume_line"
+        printf 'Volume=/opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw\n'
+        printf 'Environment=TZ=UTC\n'
+        printf 'HealthCmd=["sh", "-c", "pgrep nginx > /dev/null || exit 1"]\n'
+        printf 'HealthInterval=30s\n'
+        printf 'HealthTimeout=10s\n'
+        printf 'HealthRetries=3\n'
+        printf 'HealthStartPeriod=60s\n'
+        printf '\n'
+        printf '[Service]\n'
+        printf 'Restart=always\n'
+        printf '\n'
+        printf '[Install]\n'
+        printf 'WantedBy=multi-user.target default.target\n'
+    } > "$dest"
 }
 
 # Setup Podman pod with containers
@@ -423,209 +487,65 @@ setup_pod() {
     local systemd_dir="/etc/containers/systemd/ztpbootstrap"
     mkdir -p "$systemd_dir"
 
-    # Copy pod and container files from repository
-    if [[ -f "${repo_dir}/systemd/ztpbootstrap.pod" ]]; then
-        cp "${repo_dir}/systemd/ztpbootstrap.pod" "$systemd_dir/"
-        log "Pod configuration installed"
-
-        # Update pod file with IP addresses from config.yaml if it exists
-        local pod_file="${systemd_dir}/ztpbootstrap.pod"
-        # Check for config.yaml in repo directory or current directory
-        local config_file=""
-        if [[ -f "${repo_dir}/config.yaml" ]]; then
-            config_file="${repo_dir}/config.yaml"
-        elif [[ -f "./config.yaml" ]]; then
-            config_file="./config.yaml"
-        elif [[ -f "config.yaml" ]]; then
-            config_file="config.yaml"
-        fi
-
-        if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
-            log "Found config.yaml at: $config_file"
-            local host_network
-            local ipv4
-            local ipv6
-            host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
-            ipv4=$(yq eval '.network.ipv4' "$config_file" 2>/dev/null || echo "")
-            ipv6=$(yq eval '.network.ipv6' "$config_file" 2>/dev/null || echo "")
-
-            log "Reading network config: host_network=$host_network, IPv4=$ipv4, IPv6=$ipv6"
-
-            # Check if host network mode is enabled
-            if [[ "$host_network" == "true" ]]; then
-                # Set Network=host and remove IP addresses
-                if sed -i.tmp "s|^Network=.*|Network=host|" "$pod_file" 2>/dev/null; then
-                    rm -f "${pod_file}.tmp" 2>/dev/null || true
-                    log "Set Network=host in pod file"
-                else
-                    warn "Failed to set Network=host in pod file"
-                fi
-
-                # Remove IP and IP6 lines when using host network
-                if sed -i.tmp "/^IP=/d" "$pod_file" 2>/dev/null; then
-                    rm -f "${pod_file}.tmp" 2>/dev/null || true
-                    log "Removed IP address from pod file (host network mode)"
-                fi
-                if sed -i.tmp "/^IP6=/d" "$pod_file" 2>/dev/null; then
-                    rm -f "${pod_file}.tmp" 2>/dev/null || true
-                    log "Removed IP6 address from pod file (host network mode)"
-                fi
-            else
-                # Not using host network - set Network to macvlan network
-                if sed -i.tmp "s|^Network=.*|Network=ztpbootstrap-net|" "$pod_file" 2>/dev/null; then
-                    rm -f "${pod_file}.tmp" 2>/dev/null || true
-                    log "Set Network=ztpbootstrap-net in pod file"
-                else
-                    warn "Failed to set Network in pod file"
-                fi
-
-                # For HTTP-only mode (testing), use DHCP instead of static IPs
-                if [[ "$HTTP_ONLY" == "true" ]]; then
-                    # Remove static IPs to use DHCP
-                    if sed -i.tmp "/^IP=/d" "$pod_file" 2>/dev/null; then
-                        rm -f "${pod_file}.tmp" 2>/dev/null || true
-                        log "Removed IPv4 address from pod file (using DHCP for testing)"
-                    fi
-                    if sed -i.tmp "/^IP6=/d" "$pod_file" 2>/dev/null; then
-                        rm -f "${pod_file}.tmp" 2>/dev/null || true
-                        log "Removed IPv6 address from pod file (using DHCP for testing)"
-                    fi
-                # Update or remove IPv4 address
-                elif [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]] && [[ "$ipv4" != "" ]]; then
-                    if grep -q "^IP=" "$pod_file" 2>/dev/null; then
-                        if sed -i.tmp "s|^IP=.*|IP=$ipv4|" "$pod_file" 2>/dev/null; then
-                            rm -f "${pod_file}.tmp" 2>/dev/null || true
-                            log "Updated pod IPv4 address to: $ipv4"
-                            # Verify the update
-                            local current_ip
-                            current_ip=$(grep "^IP=" "$pod_file" 2>/dev/null | cut -d= -f2 || echo "")
-                            if [[ "$current_ip" == "$ipv4" ]]; then
-                                log "Verified: Pod file now has IP=$current_ip"
-                            else
-                                warn "Warning: Pod file IP verification failed. Expected: $ipv4, Found: $current_ip"
-                            fi
-                        else
-                            warn "Failed to update IPv4 address in pod file"
-                        fi
-                    else
-                        # Add IP= line after Network= line
-                        if sed -i.tmp "/^Network=/a IP=$ipv4" "$pod_file" 2>/dev/null; then
-                            rm -f "${pod_file}.tmp" 2>/dev/null || true
-                            log "Added IPv4 address: $ipv4"
-                        else
-                            warn "Failed to add IPv4 address to pod file"
-                        fi
-                    fi
-                else
-                    # Remove IP= line if IPv4 is empty
-                    if sed -i.tmp "/^IP=/d" "$pod_file" 2>/dev/null; then
-                        rm -f "${pod_file}.tmp" 2>/dev/null || true
-                        log "Removed IPv4 address from pod file"
-                    fi
-                fi
-
-                # Update or remove IPv6 address (skip if HTTP_ONLY already handled above)
-                if [[ "$HTTP_ONLY" != "true" ]] && [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]] && [[ "$ipv6" != "" ]]; then
-                    if grep -q "^IP6=" "$pod_file" 2>/dev/null; then
-                        if sed -i.tmp "s|^IP6=.*|IP6=$ipv6|" "$pod_file" 2>/dev/null; then
-                            rm -f "${pod_file}.tmp" 2>/dev/null || true
-                            log "Updated pod IPv6 address to: $ipv6"
-                        else
-                            warn "Failed to update IPv6 address in pod file"
-                        fi
-                    else
-                        # Add IP6= line after IP= line (or after Network= if no IP=)
-                        if grep -q "^IP=" "$pod_file" 2>/dev/null; then
-                            if sed -i.tmp "/^IP=/a IP6=$ipv6" "$pod_file" 2>/dev/null; then
-                                rm -f "${pod_file}.tmp" 2>/dev/null || true
-                                log "Added IPv6 address: $ipv6"
-                            else
-                                warn "Failed to add IPv6 address to pod file"
-                            fi
-                        else
-                            if sed -i.tmp "/^Network=/a IP6=$ipv6" "$pod_file" 2>/dev/null; then
-                                rm -f "${pod_file}.tmp" 2>/dev/null || true
-                                log "Added IPv6 address: $ipv6"
-                            else
-                                warn "Failed to add IPv6 address to pod file"
-                            fi
-                        fi
-                    fi
-                elif [[ "$HTTP_ONLY" != "true" ]]; then
-                    # Remove IP6= line if IPv6 is empty (disabled) - but not if HTTP_ONLY already handled it
-                    if sed -i.tmp "/^IP6=/d" "$pod_file" 2>/dev/null; then
-                        rm -f "${pod_file}.tmp" 2>/dev/null || true
-                        log "Removed IPv6 address from pod file (IPv6 disabled or will use DHCP)"
-                    fi
-                fi
-            fi
-        else
-            if [[ -z "$config_file" ]]; then
-                warn "config.yaml not found in repo directory or current directory"
-            elif ! command -v yq >/dev/null 2>&1; then
-                warn "yq not found - cannot read IP addresses from config.yaml"
-            fi
-        fi
-    else
-        error "Pod configuration file not found: ${repo_dir}/systemd/ztpbootstrap.pod"
-        return 1
+    # Resolve config.yaml
+    local config_file=""
+    if [[ -f "${repo_dir}/config.yaml" ]]; then
+        config_file="${repo_dir}/config.yaml"
+    elif [[ -f "./config.yaml" ]]; then
+        config_file="./config.yaml"
+    elif [[ -f "config.yaml" ]]; then
+        config_file="config.yaml"
     fi
 
-    if [[ -f "${repo_dir}/systemd/ztpbootstrap-nginx.container" ]]; then
-        cp "${repo_dir}/systemd/ztpbootstrap-nginx.container" "$systemd_dir/"
-        log "Nginx container configuration installed"
-
-        local nginx_container_file="${systemd_dir}/ztpbootstrap-nginx.container"
-
-        # Remove certs volume mount if using HTTP-only mode
-        if [[ "$HTTP_ONLY" == "true" ]]; then
-            if sed -i.tmp "/certs\/wild.*\/etc\/nginx\/ssl/d" "$nginx_container_file" 2>/dev/null; then
-                rm -f "${nginx_container_file}.tmp" 2>/dev/null || true
-                log "Removed SSL certificate volume mount from nginx container (HTTP-only mode)"
-            fi
-        fi
-
-        # Remove PublishPort lines if using host networking
-        if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
-            local host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
-            if [[ "$host_network" == "true" ]]; then
-                if sed -i.tmp "/^PublishPort=/d" "$nginx_container_file" 2>/dev/null; then
-                    rm -f "${nginx_container_file}.tmp" 2>/dev/null || true
-                    log "Removed PublishPort directives from nginx container (host network mode)"
-                fi
-            fi
-        fi
+    # Read network config from config.yaml (requires yq)
+    local host_network="" ipv4="" ipv6=""
+    if [[ -n "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+        log "Found config.yaml at: $config_file"
+        host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
+        ipv4=$(yq eval '.network.ipv4' "$config_file" 2>/dev/null || echo "")
+        ipv6=$(yq eval '.network.ipv6' "$config_file" 2>/dev/null || echo "")
+        log "Network config: host_network=$host_network, IPv4=$ipv4, IPv6=$ipv6"
     else
-        error "Nginx container configuration not found: ${repo_dir}/systemd/ztpbootstrap-nginx.container"
+        if [[ -z "$config_file" ]]; then
+            warn "config.yaml not found; defaulting to macvlan network without static IPs"
+        else
+            warn "yq not found; cannot read config.yaml — defaulting to macvlan network"
+        fi
+    fi
+
+    # Macvlan is required unless host networking is enabled
+    if [[ "$host_network" != "true" ]]; then
+        if ! podman network exists ztpbootstrap-net 2>/dev/null; then
+            error "Macvlan network 'ztpbootstrap-net' not found"
+            echo ""
+            warn "The macvlan network must exist before starting the pod."
+            warn "Run './check-macvlan.sh' to check network status and get instructions."
+            echo ""
+            return 1
+        fi
+        log "✓ Macvlan network 'ztpbootstrap-net' found"
+    else
+        log "Host network mode enabled — skipping macvlan check"
+    fi
+
+    # Write pod file
+    local pod_file="${systemd_dir}/ztpbootstrap.pod"
+    _write_pod_file "$pod_file" "$host_network" "$ipv4" "$ipv6"
+    log "Pod configuration written"
+
+    # Write nginx container file
+    if [[ -f "${repo_dir}/systemd/ztpbootstrap-nginx.container" ]]; then
+        _write_nginx_container_file "${systemd_dir}/ztpbootstrap-nginx.container"
+        log "Nginx container configuration written"
+    else
+        error "Nginx container template not found: ${repo_dir}/systemd/ztpbootstrap-nginx.container"
         return 1
     fi
 
     # Copy Web UI container and directory if webui exists
     if [[ -d "${repo_dir}/webui" ]] && [[ -f "${repo_dir}/systemd/ztpbootstrap-webui.container" ]]; then
-        cp "${repo_dir}/systemd/ztpbootstrap-webui.container" "$systemd_dir/"
+        cp "${repo_dir}/systemd/ztpbootstrap-webui.container" "${systemd_dir}/"
         log "Web UI container configuration installed"
-
-        # Remove PublishPort lines if using host networking
-        local webui_container_file="${systemd_dir}/ztpbootstrap-webui.container"
-        if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
-            local host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
-            if [[ "$host_network" == "true" ]]; then
-                if sed -i.tmp "/^PublishPort=/d" "$webui_container_file" 2>/dev/null; then
-                    rm -f "${webui_container_file}.tmp" 2>/dev/null || true
-                    log "Removed PublishPort directives from webui container (host network mode)"
-                fi
-
-                # Update nginx.conf to use localhost instead of container name for host networking
-                if [[ -f "$NGINX_CONF" ]]; then
-                    if sed -i.tmp "s|ztpbootstrap-webui:5000|127.0.0.1:5000|g" "$NGINX_CONF" 2>/dev/null; then
-                        # Remove resolver lines (not needed with host networking)
-                        sed -i.tmp "/resolver 127.0.0.11/d" "$NGINX_CONF" 2>/dev/null || true
-                        rm -f "${NGINX_CONF}.tmp" 2>/dev/null || true
-                        log "Updated nginx.conf for host networking (using localhost:5000 for webui)"
-                    fi
-                fi
-            fi
-        fi
 
         # Copy webui directory to script directory
         local webui_dest="${SCRIPT_DIR}/webui"
@@ -658,6 +578,16 @@ setup_pod() {
         warn "Service will run without Web UI"
     fi
 
+    # Copy DHCP container file if it exists (optional, created on-the-fly via Web UI)
+    # This is a fallback for manual setup - normally created dynamically when DHCP is enabled
+    if [[ -f "${repo_dir}/systemd/ztpbootstrap-dhcp.container" ]]; then
+        cp "${repo_dir}/systemd/ztpbootstrap-dhcp.container" "$systemd_dir/"
+        log "DHCP container configuration installed (optional)"
+    else
+        # Don't fail - DHCP container is created on-the-fly when enabled via Web UI
+        log "DHCP container file not found (will be created on-the-fly when DHCP is enabled)"
+    fi
+
     return 0
 }
 
@@ -665,7 +595,7 @@ setup_pod() {
 start_service() {
     # Setup pod configuration first (copy files)
     if ! setup_pod; then
-        error "Pod setup failed. Please create the macvlan network first."
+        error "Pod setup failed. Check messages above and resolve any issues before retrying."
         exit 1
     fi
 
@@ -682,7 +612,7 @@ start_service() {
 
 
     log "Starting ztpbootstrap pod..."
-    if systemctl start ztpbootstrap; then
+    if systemctl enable --now ztpbootstrap; then
         log "Pod started successfully"
         # Wait a moment for pod to be ready
         sleep 2
@@ -693,7 +623,7 @@ start_service() {
 
     # Start nginx container
     log "Starting nginx container..."
-    if systemctl start ztpbootstrap-nginx; then
+    if systemctl enable --now ztpbootstrap-nginx; then
         log "Nginx container started successfully"
         sleep 2
     else
@@ -771,7 +701,7 @@ start_service() {
     # Check both unit-files and if the service is available
     if systemctl list-unit-files | grep -q ztpbootstrap-webui.service || systemctl list-units --all | grep -q ztpbootstrap-webui.service; then
         log "Starting webui container..."
-        if systemctl start ztpbootstrap-webui.service 2>&1; then
+        if systemctl enable --now ztpbootstrap-webui.service 2>&1; then
             # Wait a moment for container to start
             sleep 3
 
@@ -791,7 +721,7 @@ start_service() {
                 # Try once more after showing diagnostics
                 log "Retrying webui container start..."
                 sleep 2
-                if systemctl start ztpbootstrap-webui.service 2>&1; then
+                if systemctl enable --now ztpbootstrap-webui.service 2>&1; then
                     sleep 3
                     if systemctl is-active --quiet ztpbootstrap-webui.service && podman ps --filter name=ztpbootstrap-webui --format "{{.Names}}" | grep -q ztpbootstrap-webui; then
                         log "✓ Webui container started successfully on retry"
@@ -825,7 +755,7 @@ start_service() {
             -e ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap \
             -e FLASK_APP=app.py \
             -e FLASK_ENV=production \
-            registry.fedoraproject.org/fedora:latest \
+            registry.fedoraproject.org/fedora:41 \
             /app/start-webui.sh 2>&1; then
             sleep 2
             if podman ps --filter name=ztpbootstrap-webui --format "{{.Names}}" | grep -q ztpbootstrap-webui; then

@@ -658,14 +658,18 @@ main() {
     # Show diff
     show_diff
 
-    # Ask for confirmation
-    echo -n -e "${YELLOW}Do you want to apply these changes? [y/N]: ${NC}"
-    read -r response
-    if [[ ! "$response" =~ ^[Yy]$ ]]; then
-        log "Update cancelled by user"
-        exit 0
+    # Ask for confirmation (skip in non-interactive mode)
+    if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
+        log "Non-interactive mode: Auto-applying changes..."
+    else
+        echo -n -e "${YELLOW}Do you want to apply these changes? [y/N]: ${NC}"
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            log "Update cancelled by user"
+            exit 0
+        fi
+        echo ""
     fi
-    echo ""
 
     # Update all files
     update_bootstrap_py

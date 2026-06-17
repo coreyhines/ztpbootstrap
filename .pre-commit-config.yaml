@@ -1,8 +1,12 @@
-# Pre-commit hooks configuration
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        args: [--config, .gitleaks.toml, --redact, --log-opts, main]
 # Install with: pip3 install pre-commit && python3 -m pre_commit install
 # Or if binary is in PATH: pip3 install pre-commit && pre-commit install
 
-repos:
   # Shell script linting
   # Note: If pre-commit has environment issues, use `make check` instead
   # This hook will gracefully skip if shellcheck isn't available
