@@ -12,6 +12,11 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 CONFIG_FILE="${1:-config.yaml}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/read-config-value.sh
+source "${SCRIPT_DIR}/scripts/read-config-value.sh"
+# shellcheck source=scripts/network-ipv6.sh
+source "${SCRIPT_DIR}/scripts/network-ipv6.sh"
 
 # Logging functions
 log() {
@@ -497,6 +502,29 @@ update_pod_file() {
     ipv4=$(get_yaml_value '.network.ipv4')
     ipv6=$(get_yaml_value '.network.ipv6')
 
+    local pod_network
+    pod_network=$(grep -E '^Network=' "$pod_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]' || echo "")
+    if [[ -z "$pod_network" ]] || [[ "$pod_network" == "null" ]]; then
+        pod_network=$(get_yaml_value '.network.network')
+    fi
+
+    if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]] && [[ -n "$pod_network" ]] && [[ "$pod_network" != "host" ]]; then
+        local resolved_ipv6 podman_cmd="podman"
+        if ! podman network exists "$pod_network" 2>/dev/null && command -v sudo >/dev/null 2>&1; then
+            podman_cmd="sudo podman"
+        fi
+        resolved_ipv6=$(resolve_ipv6_for_podman_network "$ipv6" "$pod_network" "$podman_cmd" 2>/dev/null || echo "")
+        if [[ -n "$resolved_ipv6" ]]; then
+            if [[ "$resolved_ipv6" != "$ipv6" ]]; then
+                log "IPv6 prefix changed on '$pod_network': $ipv6 -> $resolved_ipv6 (host suffix preserved)"
+                ipv6="$resolved_ipv6"
+            fi
+        else
+            warn "IPv6 $ipv6 cannot be mapped onto '$pod_network'; removing from pod file"
+            ipv6=""
+        fi
+    fi
+
     # Check if host network mode is enabled
     if [[ "$host_network" == "true" ]]; then
         # Set Network=host and remove IP addresses
@@ -680,6 +708,7 @@ main() {
     fi
 
     # Update all files
+    normalize_config_ipv6_for_network "$CONFIG_FILE"
     update_bootstrap_py
     update_nginx_conf
     update_env_file

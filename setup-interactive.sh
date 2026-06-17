@@ -26,6 +26,8 @@ source "${REPO_DIR}/scripts/load-versions.sh"
 load_versions_env "$REPO_DIR"
 # shellcheck source=scripts/read-config-value.sh
 source "${REPO_DIR}/scripts/read-config-value.sh"
+# shellcheck source=scripts/network-ipv6.sh
+source "${REPO_DIR}/scripts/network-ipv6.sh"
 
 # Initialize existing installation value variables (will be populated if previous install detected)
 EXISTING_SCRIPT_DIR=""
@@ -2202,17 +2204,20 @@ create_pod_files_from_config() {
                             fi
                         fi
 
-                        # Validate IPv6 is in subnet (if IPv6 subnet exists)
+                        # Validate/remap IPv6 onto the network's current prefix
                         if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]] && [[ "$ipv6" != "" ]]; then
-                            # For IPv6, we'll just check if the network supports IPv6
-                            local has_ipv6_subnet
-                            has_ipv6_subnet=$($podman_cmd network inspect "$network" 2>/dev/null | grep -i "ipv6" || echo "")
-                            if [[ -z "$has_ipv6_subnet" ]]; then
-                                warn "Network '$network' does not appear to support IPv6"
-                                warn "Removing IPv6 address from pod file"
-                                ipv6=""
+                            local resolved_ipv6 old_ipv6="$ipv6"
+                            resolved_ipv6=$(resolve_ipv6_for_podman_network "$ipv6" "$network" "$podman_cmd" 2>/dev/null || echo "")
+                            if [[ -n "$resolved_ipv6" ]]; then
+                                if [[ "$resolved_ipv6" != "$old_ipv6" ]]; then
+                                    log "IPv6 prefix changed on '$network': $old_ipv6 -> $resolved_ipv6 (host suffix preserved)"
+                                else
+                                    log "✓ IPv6 address $ipv6 is valid for network '$network'"
+                                fi
+                                ipv6="$resolved_ipv6"
                             else
-                                log "✓ IPv6 address $ipv6 configured for network '$network'"
+                                warn "Could not map IPv6 $ipv6 onto network '$network'; removing IP6 from pod file"
+                                ipv6=""
                             fi
                         fi
                     else
@@ -3558,6 +3563,22 @@ PYTHON_SCRIPT
             log "Non-interactive: Podman macvlan network = $NETWORK"
         elif [[ -n "${EXISTING_NETWORK:-}" ]] && [[ "${EXISTING_NETWORK}" != "host" ]]; then
             prompt_with_default "Podman macvlan network name" "$EXISTING_NETWORK" NETWORK
+        fi
+
+        if [[ "$HOST_NETWORK" != "true" ]] && [[ -n "${IPV6:-}" ]] && [[ -n "${NETWORK:-}" ]] \
+            && _podman_network_exists "$NETWORK"; then
+            local podman_cmd_ipv6 resolved_ipv6 old_ipv6="${IPV6}"
+            podman_cmd_ipv6=$(_podman_for_network "$NETWORK")
+            resolved_ipv6=$(resolve_ipv6_for_podman_network "$IPV6" "$NETWORK" "$podman_cmd_ipv6" 2>/dev/null || echo "")
+            if [[ -n "$resolved_ipv6" ]]; then
+                if [[ "$resolved_ipv6" != "$old_ipv6" ]]; then
+                    log "IPv6 prefix changed on '$NETWORK': $old_ipv6 -> $resolved_ipv6 (host suffix preserved)"
+                fi
+                IPV6="$resolved_ipv6"
+            else
+                warn "IPv6 $IPV6 cannot be mapped onto '$NETWORK'; disabling pod IPv6"
+                IPV6=""
+            fi
         fi
     fi
     # HTTPS and HTTP ports - only prompt in extended mode
