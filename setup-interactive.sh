@@ -24,6 +24,8 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/load-versions.sh
 source "${REPO_DIR}/scripts/load-versions.sh"
 load_versions_env "$REPO_DIR"
+# shellcheck source=scripts/read-config-value.sh
+source "${REPO_DIR}/scripts/read-config-value.sh"
 
 # Initialize existing installation value variables (will be populated if previous install detected)
 EXISTING_SCRIPT_DIR=""
@@ -896,8 +898,8 @@ resolve_pod_network() {
     local network=""
     local ipv4=""
 
-    if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
-        ipv4=$(yq eval '.network.ipv4 // ""' "$config_file" 2>/dev/null || echo "")
+    if [[ -n "$config_file" ]] && [[ -f "$config_file" ]]; then
+        ipv4=$(get_config_yaml_value "$config_file" "network.ipv4" "")
     fi
     ipv4="${ipv4:-${IPV4:-${EXISTING_IPV4:-}}}"
 
@@ -911,8 +913,8 @@ resolve_pod_network() {
         fi
     fi
 
-    if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
-        network=$(yq eval '.network.network // ""' "$config_file" 2>/dev/null || echo "")
+    if [[ -n "$config_file" ]] && [[ -f "$config_file" ]]; then
+        network=$(get_config_yaml_value "$config_file" "network.network" "")
         if _podman_network_exists "$network"; then
             echo "$network"
             return 0
@@ -1227,40 +1229,35 @@ read_config_yaml() {
         return 1
     fi
 
-    if ! command -v yq >/dev/null 2>&1; then
-        log "yq not found, cannot read config.yaml"
-        return 1
-    fi
-
     local values=()
 
     # Read network settings
     local domain
-    domain=$(yq eval '.network.domain // ""' "$full_path" 2>/dev/null || echo "")
+    domain=$(get_config_yaml_value "$full_path" "network.domain" "")
     if [[ -n "$domain" ]] && [[ "$domain" != "null" ]]; then
         values+=("DOMAIN=$domain")
     fi
 
     local ipv4
-    ipv4=$(yq eval '.network.ipv4 // ""' "$full_path" 2>/dev/null || echo "")
+    ipv4=$(get_config_yaml_value "$full_path" "network.ipv4" "")
     if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]]; then
         values+=("IPV4=$ipv4")
     fi
 
     local ipv6
-    ipv6=$(yq eval '.network.ipv6 // ""' "$full_path" 2>/dev/null || echo "")
+    ipv6=$(get_config_yaml_value "$full_path" "network.ipv6" "")
     if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]]; then
         values+=("IPV6=$ipv6")
     fi
 
     local network
-    network=$(yq eval '.network.network // ""' "$full_path" 2>/dev/null || echo "")
+    network=$(get_config_yaml_value "$full_path" "network.network" "")
     if [[ -n "$network" ]] && [[ "$network" != "null" ]]; then
         values+=("NETWORK=$network")
     fi
 
     local http_only
-    http_only=$(yq eval '.network.http_only // false' "$full_path" 2>/dev/null || echo "false")
+    http_only=$(get_config_yaml_value "$full_path" "network.http_only" "false")
     if [[ "$http_only" == "true" ]]; then
         values+=("HTTP_ONLY=true")
     else
@@ -1268,75 +1265,79 @@ read_config_yaml() {
     fi
 
     local https_port
-    https_port=$(yq eval '.network.https_port // 443' "$full_path" 2>/dev/null || echo "443")
+    https_port=$(get_config_yaml_value "$full_path" "network.https_port" "443")
     values+=("HTTPS_PORT=$https_port")
 
     # Read CVaaS settings
     local cv_addr
-    cv_addr=$(yq eval '.cvaas.address // ""' "$full_path" 2>/dev/null || echo "")
+    cv_addr=$(get_config_yaml_value "$full_path" "cvaas.address" "")
     if [[ -n "$cv_addr" ]] && [[ "$cv_addr" != "null" ]]; then
         values+=("CV_ADDR=$cv_addr")
     fi
 
     local enroll_chars
-    enroll_chars=$(yq eval '.cvaas.enroll_chars // ""' "$full_path" 2>/dev/null || echo "")
+    enroll_chars=$(get_config_yaml_value "$full_path" "cvaas.enroll_chars" "")
     if [[ -n "$enroll_chars" ]] && [[ "$enroll_chars" != "null" ]]; then
         values+=("ENROLL_CHARS=$enroll_chars")
     fi
 
     local cv_proxy
-    cv_proxy=$(yq eval '.cvaas.proxy // ""' "$full_path" 2>/dev/null || echo "")
+    cv_proxy=$(grep -E '^[[:space:]]+proxy:' "$full_path" 2>/dev/null | head -1 \
+        | sed -E 's/^[[:space:]]+proxy:[[:space:]]*"?([^"#]+)"?.*/\1/' | tr -d ' ' || echo "")
     if [[ -n "$cv_proxy" ]] && [[ "$cv_proxy" != "null" ]]; then
         values+=("CV_PROXY=$cv_proxy")
     fi
 
     local eos_url
-    eos_url=$(yq eval '.cvaas.eos_url // ""' "$full_path" 2>/dev/null || echo "")
+    eos_url=$(grep -E '^[[:space:]]+eos_url:' "$full_path" 2>/dev/null | head -1 \
+        | sed -E 's/^[[:space:]]+eos_url:[[:space:]]*"?([^"#]+)"?.*/\1/' | tr -d ' ' || echo "")
     if [[ -n "$eos_url" ]] && [[ "$eos_url" != "null" ]]; then
         values+=("EOS_URL=$eos_url")
     fi
 
     local ntp_server
-    ntp_server=$(yq eval '.cvaas.ntp_server // ""' "$full_path" 2>/dev/null || echo "")
+    ntp_server=$(grep -E '^[[:space:]]+ntp_server:' "$full_path" 2>/dev/null | head -1 \
+        | sed -E 's/^[[:space:]]+ntp_server:[[:space:]]*"?([^"#]+)"?.*/\1/' | tr -d ' ' || echo "")
     if [[ -n "$ntp_server" ]] && [[ "$ntp_server" != "null" ]]; then
         values+=("NTP_SERVER=$ntp_server")
     fi
 
     # Read container settings
     local timezone
-    timezone=$(yq eval '.container.timezone // ""' "$full_path" 2>/dev/null || echo "")
+    timezone=$(grep -E '^[[:space:]]+timezone:' "$full_path" 2>/dev/null | head -1 \
+        | sed -E 's/^[[:space:]]+timezone:[[:space:]]*"?([^"#]+)"?.*/\1/' | tr -d ' ' || echo "")
     if [[ -n "$timezone" ]] && [[ "$timezone" != "null" ]]; then
         values+=("TIMEZONE=$timezone")
     fi
 
     local host_network
-    host_network=$(yq eval '.container.host_network // false' "$full_path" 2>/dev/null || echo "false")
+    host_network=$(get_config_yaml_value "$full_path" "container.host_network" "false")
     if [[ "$host_network" == "true" ]]; then
         values+=("HOST_NETWORK=true")
     fi
 
     # Read DNS servers (array)
-    local dns1
-    dns1=$(yq eval '.container.dns[0] // ""' "$full_path" 2>/dev/null || echo "")
+    local dns1 dns2
+    dns1=$(awk '/^[[:space:]]+dns:/{found=1; next} found && /^[[:space:]]+-[[:space:]]+/{gsub(/["'\'']/, "", $2); print $2; exit}' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$dns1" ]] && [[ "$dns1" != "null" ]]; then
         values+=("DNS1=$dns1")
     fi
 
-    local dns2
-    dns2=$(yq eval '.container.dns[1] // ""' "$full_path" 2>/dev/null || echo "")
+    dns2=$(awk '/^[[:space:]]+dns:/{found=1; next} found && /^[[:space:]]+-[[:space:]]+/{gsub(/["'\'']/, "", $2); print $2; count++; if (count==2) exit}' "$full_path" 2>/dev/null || echo "")
     if [[ -n "$dns2" ]] && [[ "$dns2" != "null" ]]; then
         values+=("DNS2=$dns2")
     fi
 
     # Read auth settings
     local admin_password_hash
-    admin_password_hash=$(yq eval '.auth.admin_password_hash // ""' "$full_path" 2>/dev/null || echo "")
+    admin_password_hash=$(get_config_yaml_value "$full_path" "auth.admin_password_hash" "")
     if [[ -n "$admin_password_hash" ]] && [[ "$admin_password_hash" != "null" ]] && [[ "$admin_password_hash" != "" ]]; then
         values+=("ADMIN_PASSWORD_HASH=$admin_password_hash")
     fi
 
     local session_timeout
-    session_timeout=$(yq eval '.auth.session_timeout // ""' "$full_path" 2>/dev/null || echo "")
+    session_timeout=$(grep -E '^[[:space:]]+session_timeout:' "$full_path" 2>/dev/null | head -1 \
+        | sed -E 's/^[[:space:]]+session_timeout:[[:space:]]*([0-9]+).*/\1/' || echo "")
     if [[ -n "$session_timeout" ]] && [[ "$session_timeout" != "null" ]]; then
         values+=("SESSION_TIMEOUT=$session_timeout")
     fi
@@ -1428,16 +1429,13 @@ load_existing_installation_values() {
     fi
 
     # Prefer installation directory config, but use repo config if installation doesn't exist (initial setup)
-    if [[ -f "$install_config_file" ]] && command -v yq >/dev/null 2>&1; then
+    if [[ -f "$install_config_file" ]]; then
         config_file="$install_config_file"
         log "Reading from config.yaml in installation directory (highest priority): $install_config_file"
-    elif [[ -n "$repo_config_file" ]] && [[ -f "$repo_config_file" ]] && command -v yq >/dev/null 2>&1; then
+    elif [[ -n "$repo_config_file" ]] && [[ -f "$repo_config_file" ]]; then
         config_file="$repo_config_file"
         log "Reading from config.yaml in repo directory (for initial setup): $repo_config_file"
-        log "  File exists: $([ -f "$repo_config_file" ] && echo 'yes' || echo 'no')"
-        log "  yq available: $(command -v yq 2>/dev/null || echo 'no')"
-    # Fallback: Check current working directory (useful when script is run with explicit cd)
-    elif [[ -f "./config.yaml" ]] && command -v yq >/dev/null 2>&1; then
+    elif [[ -f "./config.yaml" ]]; then
         config_file="${current_pwd}/config.yaml"
         log "Reading from config.yaml in current working directory (fallback): $config_file"
     else
@@ -1445,7 +1443,6 @@ load_existing_installation_values() {
         log "  Install config: $install_config_file (exists: $([ -f "$install_config_file" ] && echo 'yes' || echo 'no'))"
         log "  Repo config: $repo_config_file (exists: $([ -f "$repo_config_file" ] && echo 'yes' || echo 'no'))"
         log "  Current dir config: ./config.yaml (exists: $([ -f "./config.yaml" ] && echo 'yes' || echo 'no'))"
-        log "  yq: $(command -v yq 2>/dev/null || echo 'not found')"
     fi
 
     if [[ -n "$config_file" ]] && [[ -f "$config_file" ]]; then
@@ -1479,8 +1476,52 @@ load_existing_installation_values() {
             esac
         done < <(read_config_yaml "config.yaml" "$config_base_dir")
         log "  Loaded values from config.yaml (enroll_chars: ${EXISTING_ENROLL_CHARS:+set})"
-    elif [[ -f "$install_config_file" ]]; then
-        log "config.yaml found in installation directory but yq is not installed, skipping config.yaml read"
+    fi
+
+    # Recover pod IPs from nginx.conf when config still has template defaults.
+    local nginx_file="${script_dir}/nginx.conf"
+    if [[ -f "$nginx_file" ]]; then
+        local nginx_ips nginx_ipv4 nginx_ipv6
+        nginx_ips=$(read_nginx_server_ips "$nginx_file" 2>/dev/null || echo "")
+        nginx_ipv4=$(grep '^IPV4=' <<< "$nginx_ips" | cut -d= -f2- || echo "")
+        nginx_ipv6=$(grep '^IPV6=' <<< "$nginx_ips" | cut -d= -f2- || echo "")
+        if [[ -n "$nginx_ipv4" ]]; then
+            if [[ -z "$EXISTING_IPV4" ]] || [[ "$EXISTING_IPV4" == "10.0.0.10" ]]; then
+                EXISTING_IPV4="$nginx_ipv4"
+                log "  Using IPv4 from nginx.conf server_name: $EXISTING_IPV4"
+            fi
+        fi
+        if [[ -n "$nginx_ipv6" ]]; then
+            if [[ -z "$EXISTING_IPV6" ]] || [[ "$EXISTING_IPV6" == "2001:db8::10" ]]; then
+                EXISTING_IPV6="$nginx_ipv6"
+                log "  Using IPv6 from nginx.conf server_name: $EXISTING_IPV6"
+            fi
+        fi
+    fi
+
+    # Recover from latest upgrade backup when install config was overwritten.
+    local backup_config=""
+    backup_config=$(find "${REPO_DIR}/${BACKUP_BASE_DIR}" -name 'config.yaml' -type f 2>/dev/null | sort -r | head -1 || echo "")
+    if [[ -n "$backup_config" ]] && [[ -f "$backup_config" ]]; then
+        local backup_ipv4 backup_ipv6 backup_network
+        backup_ipv4=$(get_config_yaml_value "$backup_config" "network.ipv4" "")
+        backup_ipv6=$(get_config_yaml_value "$backup_config" "network.ipv6" "")
+        backup_network=$(get_config_yaml_value "$backup_config" "network.network" "")
+        if [[ -n "$backup_ipv4" ]] && [[ "$backup_ipv4" != "10.0.0.10" ]] \
+            && { [[ -z "$EXISTING_IPV4" ]] || [[ "$EXISTING_IPV4" == "10.0.0.10" ]]; }; then
+            EXISTING_IPV4="$backup_ipv4"
+            log "  Restored IPv4 from backup config: $EXISTING_IPV4"
+        fi
+        if [[ -n "$backup_ipv6" ]] && [[ "$backup_ipv6" != "2001:db8::10" ]] \
+            && { [[ -z "$EXISTING_IPV6" ]] || [[ "$EXISTING_IPV6" == "2001:db8::10" ]]; }; then
+            EXISTING_IPV6="$backup_ipv6"
+            log "  Restored IPv6 from backup config: $EXISTING_IPV6"
+        fi
+        if [[ -n "$backup_network" ]] && _podman_network_exists "$backup_network" \
+            && { [[ -z "$EXISTING_NETWORK" ]] || ! _podman_network_exists "$EXISTING_NETWORK"; }; then
+            EXISTING_NETWORK="$backup_network"
+            log "  Restored network from backup config: $EXISTING_NETWORK"
+        fi
     fi
 
     # Read ztpbootstrap.env (only fill in values not already set from config.yaml)
@@ -2009,14 +2050,14 @@ create_pod_files_from_config() {
         local config_file
         config_file="$(resolve_config_file)"
 
-        if [[ -n "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+        if [[ -n "$config_file" ]] && [[ -f "$config_file" ]]; then
             local host_network
             local ipv4
             local ipv6
             local network
-            host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
-            ipv4=$(yq eval '.network.ipv4' "$config_file" 2>/dev/null || echo "")
-            ipv6=$(yq eval '.network.ipv6' "$config_file" 2>/dev/null || echo "")
+            host_network=$(get_config_yaml_value "$config_file" "container.host_network" "false")
+            ipv4=$(get_config_yaml_value "$config_file" "network.ipv4" "")
+            ipv6=$(get_config_yaml_value "$config_file" "network.ipv6" "")
             network=$(resolve_pod_network "$config_file")
             if [[ -z "$network" ]] || ! _podman_network_exists "$network"; then
                 local redetected=""
@@ -2035,6 +2076,30 @@ create_pod_files_from_config() {
             log "Using Podman network: $network"
 
             log "Reading network config: host_network=$host_network, IPv4=$ipv4, IPv6=$ipv6, network=$network"
+
+            # Reject template/wrong IPs that are outside the macvlan subnet.
+            if [[ "$host_network" != "true" ]]; then
+                local podman_cmd_for_net network_subnet_early candidate nginx_ip nginx_file
+                podman_cmd_for_net=$(_podman_for_network "$network")
+                network_subnet_early=$(_get_podman_network_subnet "$network" "$podman_cmd_for_net" 2>/dev/null || echo "")
+                if [[ -n "$network_subnet_early" ]] && [[ -n "$ipv4" ]] && ! _ip_in_subnet "$ipv4" "$network_subnet_early"; then
+                    warn "IPv4 $ipv4 from config is not in network '$network' subnet ($network_subnet_early)"
+                    nginx_file="${EXISTING_SCRIPT_DIR:-/opt/containerdata/ztpbootstrap}/nginx.conf"
+                    nginx_ip=$(read_nginx_server_ips "$nginx_file" 2>/dev/null | grep '^IPV4=' | cut -d= -f2- || echo "")
+                    for candidate in "${EXISTING_IPV4:-}" "$nginx_ip"; do
+                        [[ -z "$candidate" ]] && continue
+                        if _ip_in_subnet "$candidate" "$network_subnet_early"; then
+                            log "Using pod IPv4 $candidate instead of invalid config value $ipv4"
+                            ipv4="$candidate"
+                            break
+                        fi
+                    done
+                    if [[ -n "$ipv4" ]] && ! _ip_in_subnet "$ipv4" "$network_subnet_early"; then
+                        warn "Removing invalid IPv4 from pod file; static assignment would fail"
+                        ipv4=""
+                    fi
+                fi
+            fi
 
             # Use sudo for sed if not root
             local sed_cmd="sed"
@@ -2138,7 +2203,12 @@ create_pod_files_from_config() {
                         fi
                     else
                         warn "Could not determine subnet for network '$network'"
-                        warn "Static IP validation skipped. Pod may fail to start if IP is invalid."
+                        if [[ -n "$ipv4" ]] && ! find_network_for_ip "$ipv4" >/dev/null 2>&1; then
+                            warn "IPv4 $ipv4 does not match any Podman network; removing from pod file"
+                            ipv4=""
+                        else
+                            warn "Static IP validation skipped. Pod may fail to start if IP is invalid."
+                        fi
                     fi
                 fi
 
@@ -2533,7 +2603,7 @@ start_services_after_install() {
     local config_file
     config_file="$(resolve_config_file)"
 
-    if [[ -n "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+    if [[ -n "$config_file" ]] && [[ -f "$config_file" ]]; then
         local host_network
         local network
         host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
@@ -2548,7 +2618,7 @@ start_services_after_install() {
             if [[ "$network_exists" != "true" ]]; then
                 # Check if DHCP is enabled (macvlan needed for DHCP client testing)
                 local dhcp_enabled=false
-                if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+                if [[ -f "$config_file" ]]; then
                     dhcp_enabled=$(yq eval '.dhcp.enabled // false' "$config_file" 2>/dev/null || echo "false")
                 fi
 
@@ -2719,7 +2789,7 @@ start_services_after_install() {
             if echo "$pod_error" | grep -qi "static ip\|requested.*ip\|network.*not found"; then
                 # Get network name from config for error message
                 local error_network="ztpbootstrap-net"
-                if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+                if [[ -f "$config_file" ]]; then
                     local config_network
                     config_network=$(yq eval '.network.network' "$config_file" 2>/dev/null || echo "")
                     if [[ -n "$config_network" ]] && [[ "$config_network" != "null" ]]; then
@@ -2921,7 +2991,7 @@ start_services_after_install() {
             if echo "$pod_error" | grep -qi "static ip\|requested.*ip\|network.*not found"; then
                 # Get network name from config for error message
                 local error_network="ztpbootstrap-net"
-                if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+                if [[ -f "$config_file" ]]; then
                     local config_network
                     config_network=$(yq eval '.network.network' "$config_file" 2>/dev/null || echo "")
                     if [[ -n "$config_network" ]] && [[ "$config_network" != "null" ]]; then
@@ -5101,7 +5171,12 @@ check_and_install_dependencies() {
 
     # Final check: verify all critical dependencies are available
     local critical_missing=()
-    [[ -z "$(command -v yq 2>/dev/null)" ]] && critical_missing+=("yq")
+    # yq is optional — config.yaml is read via scripts/read-config-value.sh
+    if [[ -z "$(command -v yq 2>/dev/null)" ]]; then
+        warn "yq not found; using grep/python fallbacks for config.yaml"
+    elif ! yq --version 2>&1 | grep -qiE 'mikefarah|github.com/mikefarah/yq'; then
+        warn "Wrong yq detected ($(command -v yq)); using grep/python fallbacks for config.yaml"
+    fi
     [[ -z "$(command -v podman 2>/dev/null)" ]] && critical_missing+=("podman")
     [[ -z "$(command -v openssl 2>/dev/null)" ]] && critical_missing+=("openssl")
 
@@ -5482,9 +5557,9 @@ main() {
             if [[ -n "${ADMIN_PASSWORD_HASH:-}" ]]; then
                 echo ""
                 log "Password was reset. Verifying hash in config file..."
-                if command -v yq >/dev/null 2>&1 && [[ -f "$CONFIG_FILE" ]]; then
+                if [[ -f "$CONFIG_FILE" ]]; then
                     local written_hash
-                    written_hash=$(yq eval '.auth.admin_password_hash // ""' "$CONFIG_FILE" 2>/dev/null || echo "")
+                    written_hash=$(get_config_yaml_value "$CONFIG_FILE" "auth.admin_password_hash" "")
                     if [[ -n "$written_hash" ]]; then
                         log "✓ Password hash found in config.yaml (length: ${#written_hash})"
                         if [[ "$written_hash" == "$ADMIN_PASSWORD_HASH" ]]; then
