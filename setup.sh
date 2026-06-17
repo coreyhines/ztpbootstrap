@@ -18,6 +18,7 @@ BOOTSTRAP_SCRIPT="${SCRIPT_DIR}/bootstrap.py"
 NGINX_CONF="${SCRIPT_DIR}/nginx.conf"
 CERT_DIR="/opt/containerdata/certs/wild"
 DOMAIN="ztpboot.example.com"
+HTTP_ONLY=false
 
 # Logging function
 log() {
@@ -48,7 +49,7 @@ Examples:
     $0 --http-only        # HTTP-only setup (insecure, not recommended)
 
 EOF
-    exit 1
+    exit 0
 }
 
 # Parse command line arguments
@@ -79,7 +80,10 @@ check_root() {
 # Check if environment file exists
 check_env_file() {
     if [[ ! -f "$ENV_FILE" ]]; then
-        error "Environment file not found: $ENV_FILE"
+        error "Environment file not found: $ENV_FILE
+
+For a first-time install, run ./setup-interactive.sh from the repo (no sudo required).
+setup.sh is for re-applying configuration on an existing install that already has $ENV_FILE."
     fi
     log "Found environment file: $ENV_FILE"
 }
@@ -387,7 +391,7 @@ check_setup_prerequisites() {
     if ! command -v podman >/dev/null 2>&1; then
         error "Podman is not installed. Please install Podman first."
         echo ""
-        info "Install Podman:"
+        log "Install Podman:"
         echo "  Fedora/RHEL: sudo dnf install podman"
         echo "  Ubuntu/Debian: sudo apt-get install podman"
         echo "  See: https://podman.io/getting-started/installation"
@@ -786,10 +790,10 @@ check_service_status() {
 
 # Main function
 main() {
-    log "Starting Arista ZTP Bootstrap Service setup..."
-
     parse_args "$@"
     check_root
+
+    log "Starting Arista ZTP Bootstrap Service setup..."
 
     if [[ "$HTTP_ONLY" == "true" ]]; then
         warn "⚠️  WARNING: HTTP-only mode is enabled!"
