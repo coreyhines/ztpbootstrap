@@ -20,6 +20,11 @@ CERT_DIR="/opt/containerdata/certs/wild"
 DOMAIN="ztpboot.example.com"
 HTTP_ONLY=false
 
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/load-versions.sh
+source "${REPO_DIR}/scripts/load-versions.sh"
+load_versions_env "$REPO_DIR"
+
 # Logging function
 log() {
     echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
@@ -504,7 +509,7 @@ _write_nginx_container_file() {
         printf 'Description=ZTP Bootstrap Nginx Container\n'
         printf '\n'
         printf '[Container]\n'
-        printf 'Image=docker.io/nginx:1.27.3\n'
+        printf 'Image=%s\n' "$NGINX_IMAGE"
         printf 'ContainerName=ztpbootstrap-nginx\n'
         printf 'Pod=ztpbootstrap.pod\n'
         printf 'Volume=/opt/containerdata/ztpbootstrap:/usr/share/nginx/html:ro\n'
@@ -799,7 +804,7 @@ start_service() {
             -e ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap \
             -e FLASK_APP=app.py \
             -e FLASK_ENV=production \
-            registry.fedoraproject.org/fedora:41 \
+            "$WEBUI_IMAGE" \
             /app/start-webui.sh 2>&1; then
             sleep 2
             if podman ps --filter name=ztpbootstrap-webui --format "{{.Names}}" | grep -q ztpbootstrap-webui; then

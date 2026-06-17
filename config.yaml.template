@@ -103,7 +103,7 @@ container:
   name: "ztpbootstrap"
 
   # Container image
-  image: "docker.io/nginx:alpine"
+  image: "docker.io/nginx:1.30.2"
 
   # Timezone
   timezone: "UTC"

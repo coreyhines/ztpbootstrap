@@ -1,12 +1,12 @@
 # Containerfile for ISC Kea DHCP server (Fedora-based)
 #
-# Build: podman build -t ztpbootstrap-kea:3.0 -f kea/Containerfile .
+# Build: podman build -t ztpbootstrap-kea:3.0.3 -f kea/Containerfile .
 # Update KEA_IMAGE in versions.env after building and pushing to your registry.
 #
 # Kea binaries: /usr/sbin/kea-dhcp4, /usr/sbin/kea-dhcp6, /usr/sbin/kea-ctrl-agent
 # Hook libs:    /usr/lib64/kea/hooks/
 
-FROM registry.fedoraproject.org/fedora:41
+FROM registry.fedoraproject.org/fedora:44
 
 RUN dnf install -y -q \
         kea \

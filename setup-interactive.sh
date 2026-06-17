@@ -20,6 +20,11 @@ CONFIG_TEMPLATE="config.yaml.template"
 # Backup directory (relative to repo root)
 BACKUP_BASE_DIR=".ztpbootstrap-backups"
 
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/load-versions.sh
+source "${REPO_DIR}/scripts/load-versions.sh"
+load_versions_env "$REPO_DIR"
+
 # Initialize existing installation value variables (will be populated if previous install detected)
 EXISTING_SCRIPT_DIR=""
 EXISTING_DOMAIN=""
@@ -3464,9 +3469,8 @@ PYTHON_SCRIPT
     echo ""
 
     prompt_with_default "Container name" "ztpbootstrap" CONTAINER_NAME
-    # Container image is not prompted - nginx uses alpine, webui uses fedora (or built image)
-    # Set default value for config generation
-    CONTAINER_IMAGE="${CONTAINER_IMAGE:-docker.io/nginx:alpine}"
+    # Container image is not prompted - pinned in versions.env (see NGINX_IMAGE)
+    CONTAINER_IMAGE="${CONTAINER_IMAGE:-$NGINX_IMAGE}"
     # Timezone - only prompt in extended mode
     if [[ "${EXTENDED_MODE:-false}" == "true" ]]; then
         prompt_with_default "Timezone" "${EXISTING_TIMEZONE:-UTC}" TIMEZONE
@@ -4000,7 +4004,7 @@ generate_yaml_config() {
     HTTP_ONLY="${HTTP_ONLY:-false}"
     HOST_NETWORK="${HOST_NETWORK:-false}"
     CONTAINER_NAME="${CONTAINER_NAME:-ztpbootstrap}"
-    CONTAINER_IMAGE="${CONTAINER_IMAGE:-docker.io/nginx:alpine}"
+    CONTAINER_IMAGE="${CONTAINER_IMAGE:-$NGINX_IMAGE}"
     TIMEZONE="${TIMEZONE:-UTC}"
     DNS1="${DNS1:-}"
     DNS2="${DNS2:-}"
@@ -4482,7 +4486,7 @@ Delegate=yes
 Type=notify
 NotifyAccess=all
 SyslogIdentifier=%N
-ExecStart=/usr/bin/podman run --name ztpbootstrap-nginx --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes}${env_vars} docker.io/nginx:alpine
+ExecStart=/usr/bin/podman run --name ztpbootstrap-nginx --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes}${env_vars} ${NGINX_IMAGE}
 EOFNGINX
                             else
                                 # Create file using sudo - write to temp file first, then move
@@ -4506,7 +4510,7 @@ Delegate=yes
 Type=notify
 NotifyAccess=all
 SyslogIdentifier=%N
-ExecStart=/usr/bin/podman run --name ztpbootstrap-nginx --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes}${env_vars} docker.io/nginx:alpine
+ExecStart=/usr/bin/podman run --name ztpbootstrap-nginx --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes}${env_vars} ${NGINX_IMAGE}
 EOFNGINX
                                 # Create in /etc/systemd/system/ for permanence
                                 if sudo mv "$temp_file" "${systemd_system_dir}/ztpbootstrap-nginx.service" 2>&1; then
@@ -4574,7 +4578,7 @@ Delegate=yes
 Type=notify
 NotifyAccess=all
 SyslogIdentifier=%N
-ExecStart=/usr/bin/podman run --name ztpbootstrap-nginx --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes_tee}${env_vars_tee} docker.io/nginx:alpine
+ExecStart=/usr/bin/podman run --name ztpbootstrap-nginx --replace --rm --cgroups=split --sdnotify=conmon -d --pod ${pod_name}${volumes_tee}${env_vars_tee} ${NGINX_IMAGE}
 EOFNGINX2
                                     then
                                         log "Nginx service file created using sudo tee"

@@ -18,6 +18,25 @@ SYSTEMD_DIR = Path("/etc/containers/systemd/ztpbootstrap")
 DHCP_CONTAINER_FILE = SYSTEMD_DIR / "ztpbootstrap-dhcp.container"
 DHCP_SERVICE_NAME = "ztpbootstrap-dhcp.service"
 DHCP_CONTAINER_NAME = "ztpbootstrap-dhcp"
+DEFAULT_KEA_IMAGE = "ztpbootstrap-kea:3.0.3"
+
+
+def get_kea_image() -> str:
+    """Return Kea image tag from KEA_IMAGE env or repo versions.env."""
+    env_image = os.environ.get("KEA_IMAGE", "").strip()
+    if env_image:
+        return env_image
+
+    versions_file = Path(__file__).resolve().parent.parent / "versions.env"
+    if versions_file.is_file():
+        for line in versions_file.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("KEA_IMAGE="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+
+    return DEFAULT_KEA_IMAGE
 
 # Cache for socket permission warnings (to avoid spam)
 _socket_warning_logged = False
@@ -177,14 +196,14 @@ def create_dhcp_container() -> bool:
                 "Could not read container file from any location, generating from template..."
             )
             # Generate container file content programmatically
-            container_content = """[Unit]
+            container_content = f"""[Unit]
 Description=ZTP Bootstrap DHCP Server (Kea)
 After=ztpbootstrap-pod.service ztpbootstrap-postgresql.service
 Requires=ztpbootstrap-pod.service
 Wants=ztpbootstrap-postgresql.service
 
 [Container]
-Image=ztpbootstrap-kea:3.0
+Image={get_kea_image()}
 ContainerName=ztpbootstrap-dhcp
 Pod=ztpbootstrap.pod
 Exec=/bin/sh /app/start-kea.sh
@@ -405,7 +424,7 @@ def start_dhcp_container() -> bool:
                     "NET_RAW",
                     "--cap-add",
                     "NET_BIND_SERVICE",
-                    "ztpbootstrap-kea:3.0",
+                    get_kea_image(),
                     "/bin/sh",
                     "/app/start-kea.sh",
                 ]

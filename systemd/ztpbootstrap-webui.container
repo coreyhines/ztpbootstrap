@@ -2,7 +2,7 @@
 Description=ZTP Bootstrap Web UI Container
 
 [Container]
-Image=registry.fedoraproject.org/fedora:41
+Image=registry.fedoraproject.org/fedora:44
 ContainerName=ztpbootstrap-webui
 Pod=ztpbootstrap.pod
 Exec=/app/start-webui.sh

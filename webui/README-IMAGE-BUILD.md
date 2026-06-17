@@ -1,6 +1,6 @@
 # Building the WebUI Container Image
 
-The WebUI image (`registry.fedoraproject.org/fedora:41`) is built from `webui/Containerfile`
+The WebUI image (`registry.fedoraproject.org/fedora:44`) is built from `webui/Containerfile`
 and has all dependencies baked in — no packages are installed at container start.
 
 ## Build

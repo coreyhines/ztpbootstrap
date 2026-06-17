@@ -5,14 +5,14 @@
 The WebUI container uses a **pinned Fedora-based image** with all dependencies baked in at build time:
 
 ```
-registry.fedoraproject.org/fedora:41
+registry.fedoraproject.org/fedora:44
 ```
 
 The base image and all pinned versions are tracked in `versions.env` at the repo root.
 
 ## What's in the Image
 
-The `webui/Containerfile` builds from `fedora:41` and installs at build time:
+The `webui/Containerfile` builds from `fedora:44` and installs at build time:
 - Python 3 + pip
 - Podman (for container management from inside the webui)
 - systemd tools (for journalctl log access)
@@ -33,7 +33,7 @@ binary compatibility.
 The webui base image tag is defined in `versions.env`:
 
 ```bash
-WEBUI_IMAGE=registry.fedoraproject.org/fedora:41
+WEBUI_IMAGE=registry.fedoraproject.org/fedora:44
 ```
 
 To update:
