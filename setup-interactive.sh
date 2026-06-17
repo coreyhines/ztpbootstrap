@@ -685,123 +685,86 @@ read_ztpbootstrap_env() {
     return 0
 }
 
+# Podman 5.x exposes subnets under .Subnets[].subnet (lowercase) — grep Subnet often fails.
+_get_podman_network_subnet() {
+    local network_name="$1"
+    local subnet=""
+
+    subnet=$(podman network inspect "$network_name" --format '{{range .Subnets}}{{.Subnet}} {{end}}' 2>/dev/null | awk '{print $1; exit}')
+    if [[ -n "$subnet" ]] && [[ "$subnet" != "<no value>" ]]; then
+        echo "$subnet"
+        return 0
+    fi
+
+    subnet=$(podman network inspect "$network_name" --format '{{.Subnet}}' 2>/dev/null || echo "")
+    if [[ -n "$subnet" ]] && [[ "$subnet" != "<no value>" ]]; then
+        echo "$subnet"
+        return 0
+    fi
+
+    subnet=$(podman network inspect "$network_name" 2>/dev/null | grep -ioE '"subnet"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"([^"]+)"/\1/')
+    if [[ -n "$subnet" ]]; then
+        echo "$subnet"
+        return 0
+    fi
+
+    return 1
+}
+
+_ip_in_subnet() {
+    local ip="$1"
+    local subnet="$2"
+
+    if command -v ipcalc >/dev/null 2>&1; then
+        ipcalc -c "$ip" "$subnet" >/dev/null 2>&1
+        return $?
+    fi
+
+    python3 - <<PY 2>/dev/null
+import ipaddress
+raise SystemExit(0 if ipaddress.ip_address("${ip}") in ipaddress.ip_network("${subnet}", strict=False) else 1)
+PY
+}
+
+_podman_network_exists() {
+    local network_name="$1"
+    [[ -n "$network_name" ]] && [[ "$network_name" != "host" ]] && [[ "$network_name" != "null" ]] && \
+        podman network exists "$network_name" 2>/dev/null
+}
+
 # Find which podman network contains a given IP address
 find_network_for_ip() {
     local target_ip="$1"
     local networks
 
-    # Check if podman is available
+    if [[ -z "$target_ip" ]] || [[ "$target_ip" == "null" ]]; then
+        return 1
+    fi
+
     if ! command -v podman >/dev/null 2>&1; then
         return 1
     fi
 
-    # Get list of all podman networks (skip header line)
     networks=$(podman network ls --format "{{.Name}}" 2>/dev/null || echo "")
-
     if [[ -z "$networks" ]]; then
         return 1
     fi
 
-    # Check each network to see if the IP falls within its subnet
     while IFS= read -r network_name; do
         [[ -z "$network_name" ]] && continue
-
-        # Skip default networks that don't support static IPs
         if [[ "$network_name" == "podman" ]] || [[ "$network_name" == "default" ]]; then
             continue
         fi
 
-        # Get network subnet from inspect
-        local subnet_info
-        subnet_info=$(podman network inspect "$network_name" 2>/dev/null | grep -i "subnet" | head -1 || echo "")
-
-        if [[ -z "$subnet_info" ]]; then
-            continue
-        fi
-
-        # Extract subnet (format: "Subnet": "10.0.0.0/24" or similar)
-        local subnet=""
-        if [[ "$subnet_info" =~ \"Subnet\":[[:space:]]*\"([^\"]+)\" ]]; then
-            subnet="${BASH_REMATCH[1]}"
-        elif [[ "$subnet_info" =~ subnet[[:space:]]*[:=][[:space:]]*([0-9.]+/[0-9]+) ]]; then
-            subnet="${BASH_REMATCH[1]}"
-        fi
-
+        local subnet
+        subnet=$(_get_podman_network_subnet "$network_name" || echo "")
         if [[ -z "$subnet" ]]; then
             continue
         fi
 
-        # Check if IP is in subnet
-        # Try using ipcalc if available (most accurate)
-        if command -v ipcalc >/dev/null 2>&1; then
-            # ipcalc -c checks if IP is in subnet (returns 0 if true)
-            if ipcalc -c "$target_ip" "$subnet" >/dev/null 2>&1; then
-                echo "$network_name"
-                return 0
-            fi
-        # Fallback: use ip command to check if IP is in subnet
-        elif command -v ip >/dev/null 2>&1; then
-            # Use ip route get to see if IP would route through this network
-            # This is a heuristic but should work for most cases
-            if ip route get "$target_ip" >/dev/null 2>&1; then
-                # Check if the subnet matches by comparing network portion
-                local network_addr="${subnet%%/*}"
-                local prefix="${subnet##*/}"
-                local ip_octets=($(echo "$target_ip" | tr '.' ' '))
-                local net_octets=($(echo "$network_addr" | tr '.' ' '))
-
-                if [[ ${#ip_octets[@]} -eq 4 ]] && [[ ${#net_octets[@]} -eq 4 ]]; then
-                    # Calculate how many octets to check based on prefix
-                    local octets_to_check=$((prefix / 8))
-                    local bits_in_partial=$((prefix % 8))
-                    local match=true
-
-                    # Check full octets
-                    for ((i=0; i<octets_to_check && i<4; i++)); do
-                        if [[ "${ip_octets[$i]}" != "${net_octets[$i]}" ]]; then
-                            match=false
-                            break
-                        fi
-                    done
-
-                    # If all full octets match and we have a partial octet, check it
-                    if [[ "$match" == "true" ]] && [[ $bits_in_partial -gt 0 ]] && [[ $octets_to_check -lt 4 ]]; then
-                        local ip_octet="${ip_octets[$octets_to_check]}"
-                        local net_octet="${net_octets[$octets_to_check]}"
-                        local mask=$((0xFF << (8 - bits_in_partial) & 0xFF))
-                        if [[ $((ip_octet & mask)) != $((net_octet & mask)) ]]; then
-                            match=false
-                        fi
-                    fi
-
-                    if [[ "$match" == "true" ]]; then
-                        echo "$network_name"
-                        return 0
-                    fi
-                fi
-            fi
-        else
-            # Last resort: simple prefix matching for common cases
-            local network_addr="${subnet%%/*}"
-            local prefix="${subnet##*/}"
-            local ip_octets=($(echo "$target_ip" | tr '.' ' '))
-            local net_octets=($(echo "$network_addr" | tr '.' ' '))
-
-            if [[ ${#ip_octets[@]} -eq 4 ]] && [[ ${#net_octets[@]} -eq 4 ]]; then
-                # Check common prefix lengths
-                if [[ "$prefix" == "24" ]] && [[ "${ip_octets[0]}" == "${net_octets[0]}" ]] && \
-                   [[ "${ip_octets[1]}" == "${net_octets[1]}" ]] && [[ "${ip_octets[2]}" == "${net_octets[2]}" ]]; then
-                    echo "$network_name"
-                    return 0
-                elif [[ "$prefix" == "16" ]] && [[ "${ip_octets[0]}" == "${net_octets[0]}" ]] && \
-                     [[ "${ip_octets[1]}" == "${net_octets[1]}" ]]; then
-                    echo "$network_name"
-                    return 0
-                elif [[ "$prefix" == "8" ]] && [[ "${ip_octets[0]}" == "${net_octets[0]}" ]]; then
-                    echo "$network_name"
-                    return 0
-                fi
-            fi
+        if _ip_in_subnet "$target_ip" "$subnet"; then
+            echo "$network_name"
+            return 0
         fi
     done <<< "$networks"
 
@@ -824,45 +787,90 @@ resolve_config_file() {
 }
 
 # Resolve Podman network for macvlan installs (custom names like net-10 are common).
+_read_network_from_quadlet_file() {
+    local pod_file="$1"
+    local network=""
+
+    [[ -f "$pod_file" ]] || return 1
+    network=$(grep -E '^Network=' "$pod_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]' || echo "")
+    if _podman_network_exists "$network"; then
+        echo "$network"
+        return 0
+    fi
+    return 1
+}
+
+_read_network_from_backups() {
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local backup_root="${repo_dir}/${BACKUP_BASE_DIR}"
+    local backup_pod=""
+
+    [[ -d "$backup_root" ]] || return 1
+
+    backup_pod=$(find "$backup_root" -name 'ztpbootstrap.pod' -type f 2>/dev/null | sort -r | head -1 || echo "")
+    if [[ -n "$backup_pod" ]]; then
+        _read_network_from_quadlet_file "$backup_pod"
+        return $?
+    fi
+    return 1
+}
+
 resolve_pod_network() {
     local config_file="${1:-}"
     local network=""
+    local ipv4=""
+
+    if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+        ipv4=$(yq eval '.network.ipv4 // ""' "$config_file" 2>/dev/null || echo "")
+    fi
+    ipv4="${ipv4:-${IPV4:-${EXISTING_IPV4:-}}}"
+
+    # Best signal: map the configured pod IP to an existing macvlan network.
+    if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]]; then
+        network=$(find_network_for_ip "$ipv4" 2>/dev/null || echo "")
+        if [[ -n "$network" ]]; then
+            log "Resolved Podman network '$network' from pod IP $ipv4"
+            echo "$network"
+            return 0
+        fi
+    fi
 
     if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
         network=$(yq eval '.network.network // ""' "$config_file" 2>/dev/null || echo "")
-    fi
-
-    if [[ -z "$network" ]] || [[ "$network" == "null" ]]; then
-        network="${NETWORK:-${EXISTING_NETWORK:-}}"
-    fi
-
-    if [[ -z "$network" ]] || [[ "$network" == "null" ]]; then
-        local ipv4=""
-        if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
-            ipv4=$(yq eval '.network.ipv4 // ""' "$config_file" 2>/dev/null || echo "")
+        if _podman_network_exists "$network"; then
+            echo "$network"
+            return 0
         fi
-        ipv4="${ipv4:-${IPV4:-${EXISTING_IPV4:-}}}"
-        if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]]; then
-            network=$(find_network_for_ip "$ipv4" 2>/dev/null || echo "")
+        network=""
+    fi
+
+    for network in "${NETWORK:-}" "${EXISTING_NETWORK:-}"; do
+        if _podman_network_exists "$network"; then
+            echo "$network"
+            return 0
         fi
+    done
+
+    network=$(_read_network_from_quadlet_file "/etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod" || echo "")
+    if [[ -n "$network" ]]; then
+        echo "$network"
+        return 0
     fi
 
-    if [[ -z "$network" ]] || [[ "$network" == "null" ]]; then
-        local pod_file="/etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod"
-        if [[ -f "$pod_file" ]]; then
-            local pod_network
-            pod_network=$(grep -E '^Network=' "$pod_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]' || echo "")
-            if [[ -n "$pod_network" ]] && [[ "$pod_network" != "null" ]] && [[ "$pod_network" != "host" ]]; then
-                network="$pod_network"
-            fi
-        fi
+    network=$(_read_network_from_backups || echo "")
+    if [[ -n "$network" ]]; then
+        log "Resolved Podman network '$network' from upgrade backup"
+        echo "$network"
+        return 0
     fi
 
-    if [[ -z "$network" ]] || [[ "$network" == "null" ]]; then
-        network="ztpbootstrap-net"
+    if _podman_network_exists "ztpbootstrap-net"; then
+        echo "ztpbootstrap-net"
+        return 0
     fi
 
-    echo "$network"
+    echo "ztpbootstrap-net"
 }
 
 # Read container/pod file
@@ -1504,6 +1512,14 @@ load_existing_installation_values() {
         log "Parsed $parsed_count network-related values from container file"
     else
         log "No container values to parse"
+    fi
+
+    # Ignore quadlet Network= values that refer to missing networks (failed upgrades set ztpbootstrap-net).
+    if [[ -n "$EXISTING_NETWORK" ]] && [[ "$EXISTING_NETWORK" != "host" ]]; then
+        if ! _podman_network_exists "$EXISTING_NETWORK"; then
+            log "  Network '$EXISTING_NETWORK' from installed quadlet not found; will re-detect from pod IP"
+            EXISTING_NETWORK=""
+        fi
     fi
 
     # If we have an IPv4 address but no network (or network is not "host"), try to find which network it belongs to
@@ -3326,7 +3342,7 @@ PYTHON_SCRIPT
 
         NETWORK="${NETWORK:-${EXISTING_NETWORK:-}}"
         if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
-            if [[ -z "$NETWORK" ]] || [[ "$NETWORK" == "null" ]]; then
+            if [[ -z "$NETWORK" ]] || [[ "$NETWORK" == "null" ]] || ! _podman_network_exists "${NETWORK:-}"; then
                 NETWORK=$(resolve_pod_network "$(resolve_config_file)")
             fi
             log "Non-interactive: Podman macvlan network = $NETWORK"
