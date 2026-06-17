@@ -1481,20 +1481,28 @@ load_existing_installation_values() {
     # Recover pod IPs from nginx.conf when config still has template defaults.
     local nginx_file="${script_dir}/nginx.conf"
     if [[ -f "$nginx_file" ]]; then
-        local nginx_ips nginx_ipv4 nginx_ipv6
-        nginx_ips=$(read_nginx_server_ips "$nginx_file" 2>/dev/null || echo "")
-        nginx_ipv4=$(grep '^IPV4=' <<< "$nginx_ips" | cut -d= -f2- || echo "")
-        nginx_ipv6=$(grep '^IPV6=' <<< "$nginx_ips" | cut -d= -f2- || echo "")
-        if [[ -n "$nginx_ipv4" ]]; then
-            if [[ -z "$EXISTING_IPV4" ]] || [[ "$EXISTING_IPV4" == "10.0.0.10" ]]; then
-                EXISTING_IPV4="$nginx_ipv4"
-                log "  Using IPv4 from nginx.conf server_name: $EXISTING_IPV4"
-            fi
+        local nginx_is_template=false
+        if grep -q 'ztpboot\.example\.com' "$nginx_file" 2>/dev/null \
+            || grep -q 'server_name ztpboot\.example\.com 10\.0\.0\.10' "$nginx_file" 2>/dev/null; then
+            nginx_is_template=true
+            log "  nginx.conf looks like repo template (example.com); skipping IP recovery from nginx"
         fi
-        if [[ -n "$nginx_ipv6" ]]; then
-            if [[ -z "$EXISTING_IPV6" ]] || [[ "$EXISTING_IPV6" == "2001:db8::10" ]]; then
-                EXISTING_IPV6="$nginx_ipv6"
-                log "  Using IPv6 from nginx.conf server_name: $EXISTING_IPV6"
+        if [[ "$nginx_is_template" != "true" ]]; then
+            local nginx_ips nginx_ipv4 nginx_ipv6
+            nginx_ips=$(read_nginx_server_ips "$nginx_file" 2>/dev/null || echo "")
+            nginx_ipv4=$(grep '^IPV4=' <<< "$nginx_ips" | cut -d= -f2- || echo "")
+            nginx_ipv6=$(grep '^IPV6=' <<< "$nginx_ips" | cut -d= -f2- || echo "")
+            if [[ -n "$nginx_ipv4" ]]; then
+                if [[ -z "$EXISTING_IPV4" ]] || [[ "$EXISTING_IPV4" == "10.0.0.10" ]]; then
+                    EXISTING_IPV4="$nginx_ipv4"
+                    log "  Using IPv4 from nginx.conf server_name: $EXISTING_IPV4"
+                fi
+            fi
+            if [[ -n "$nginx_ipv6" ]]; then
+                if [[ -z "$EXISTING_IPV6" ]] || [[ "$EXISTING_IPV6" == "2001:db8::10" ]]; then
+                    EXISTING_IPV6="$nginx_ipv6"
+                    log "  Using IPv6 from nginx.conf server_name: $EXISTING_IPV6"
+                fi
             fi
         fi
     fi
@@ -1507,6 +1515,12 @@ load_existing_installation_values() {
         backup_ipv4=$(get_config_yaml_value "$backup_config" "network.ipv4" "")
         backup_ipv6=$(get_config_yaml_value "$backup_config" "network.ipv6" "")
         backup_network=$(get_config_yaml_value "$backup_config" "network.network" "")
+        backup_domain=$(get_config_yaml_value "$backup_config" "network.domain" "")
+        if [[ -n "$backup_domain" ]] && [[ "$backup_domain" != *"example.com"* ]] \
+            && { [[ -z "$EXISTING_DOMAIN" ]] || [[ "$EXISTING_DOMAIN" == *"example.com"* ]]; }; then
+            EXISTING_DOMAIN="$backup_domain"
+            log "  Restored domain from backup config: $EXISTING_DOMAIN"
+        fi
         if [[ -n "$backup_ipv4" ]] && [[ "$backup_ipv4" != "10.0.0.10" ]] \
             && { [[ -z "$EXISTING_IPV4" ]] || [[ "$EXISTING_IPV4" == "10.0.0.10" ]]; }; then
             EXISTING_IPV4="$backup_ipv4"
