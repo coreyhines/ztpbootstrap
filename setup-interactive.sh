@@ -808,6 +808,63 @@ find_network_for_ip() {
     return 1
 }
 
+# Prefer installed config.yaml, then repo checkout.
+resolve_config_file() {
+    local repo_dir
+    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local script_dir="${EXISTING_SCRIPT_DIR:-/opt/containerdata/ztpbootstrap}"
+
+    if [[ -f "${script_dir}/config.yaml" ]]; then
+        echo "${script_dir}/config.yaml"
+    elif [[ -f "${repo_dir}/config.yaml" ]]; then
+        echo "${repo_dir}/config.yaml"
+    elif [[ -f "./config.yaml" ]]; then
+        echo "./config.yaml"
+    fi
+}
+
+# Resolve Podman network for macvlan installs (custom names like net-10 are common).
+resolve_pod_network() {
+    local config_file="${1:-}"
+    local network=""
+
+    if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+        network=$(yq eval '.network.network // ""' "$config_file" 2>/dev/null || echo "")
+    fi
+
+    if [[ -z "$network" ]] || [[ "$network" == "null" ]]; then
+        network="${NETWORK:-${EXISTING_NETWORK:-}}"
+    fi
+
+    if [[ -z "$network" ]] || [[ "$network" == "null" ]]; then
+        local ipv4=""
+        if [[ -n "$config_file" ]] && [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+            ipv4=$(yq eval '.network.ipv4 // ""' "$config_file" 2>/dev/null || echo "")
+        fi
+        ipv4="${ipv4:-${IPV4:-${EXISTING_IPV4:-}}}"
+        if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]]; then
+            network=$(find_network_for_ip "$ipv4" 2>/dev/null || echo "")
+        fi
+    fi
+
+    if [[ -z "$network" ]] || [[ "$network" == "null" ]]; then
+        local pod_file="/etc/containers/systemd/ztpbootstrap/ztpbootstrap.pod"
+        if [[ -f "$pod_file" ]]; then
+            local pod_network
+            pod_network=$(grep -E '^Network=' "$pod_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]' || echo "")
+            if [[ -n "$pod_network" ]] && [[ "$pod_network" != "null" ]] && [[ "$pod_network" != "host" ]]; then
+                network="$pod_network"
+            fi
+        fi
+    fi
+
+    if [[ -z "$network" ]] || [[ "$network" == "null" ]]; then
+        network="ztpbootstrap-net"
+    fi
+
+    echo "$network"
+}
+
 # Read container/pod file
 read_container_file() {
     local base_path="${1:-/etc/containers/systemd/ztpbootstrap}"
@@ -1846,9 +1903,10 @@ create_pod_files_from_config() {
 
         # Update pod file with IP addresses from config.yaml
         local pod_file="${systemd_dir}/ztpbootstrap.pod"
-        local config_file="${repo_dir}/config.yaml"
+        local config_file
+        config_file="$(resolve_config_file)"
 
-        if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+        if [[ -n "$config_file" ]] && command -v yq >/dev/null 2>&1; then
             local host_network
             local ipv4
             local ipv6
@@ -1856,18 +1914,8 @@ create_pod_files_from_config() {
             host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
             ipv4=$(yq eval '.network.ipv4' "$config_file" 2>/dev/null || echo "")
             ipv6=$(yq eval '.network.ipv6' "$config_file" 2>/dev/null || echo "")
-            network=$(yq eval '.network.network' "$config_file" 2>/dev/null || echo "")
-
-            # If network is null or empty, use detected network or default
-            if [[ -z "$network" ]] || [[ "$network" == "null" ]]; then
-                if [[ -n "${EXISTING_NETWORK:-}" ]] && [[ "${EXISTING_NETWORK}" != "host" ]]; then
-                    network="$EXISTING_NETWORK"
-                    log "Using detected network from existing installation: $network"
-                else
-                    network="ztpbootstrap-net"
-                    log "Using default network: $network"
-                fi
-            fi
+            network=$(resolve_pod_network "$config_file")
+            log "Using Podman network: $network"
 
             log "Reading network config: host_network=$host_network, IPv4=$ipv4, IPv6=$ipv6, network=$network"
 
@@ -1906,8 +1954,8 @@ create_pod_files_from_config() {
                 if [[ "$network_exists" != "true" ]]; then
                     warn "Network '$network' does not exist. Static IP addresses cannot be assigned."
                     warn ""
-                    warn "Quick fix: Run the DHCP testing setup script to auto-create the network:"
-                    warn "  sudo ./setup-dhcp-testing.sh"
+                    warn "Check existing networks: podman network ls"
+                    warn "If your macvlan is named differently (e.g. net-10), set network.network in config.yaml."
                     warn ""
                     warn "Or create the network manually:"
                     warn "  podman network create --driver macvlan --subnet <subnet> --gateway <gateway> -o parent=<interface> $network"
@@ -2329,20 +2377,14 @@ start_services_after_install() {
     export SERVICES_STARTED=true
 
     # Validate network exists before starting services (if not using host network)
-    local repo_dir
-    repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    local config_file="${repo_dir}/config.yaml"
+    local config_file
+    config_file="$(resolve_config_file)"
 
-    if [[ -f "$config_file" ]] && command -v yq >/dev/null 2>&1; then
+    if [[ -n "$config_file" ]] && command -v yq >/dev/null 2>&1; then
         local host_network
         local network
         host_network=$(yq eval '.container.host_network' "$config_file" 2>/dev/null || echo "")
-        network=$(yq eval '.network.network' "$config_file" 2>/dev/null || echo "")
-
-        # If network is null or empty, use default
-        if [[ -z "$network" ]] || [[ "$network" == "null" ]]; then
-            network="ztpbootstrap-net"
-        fi
+        network=$(resolve_pod_network "$config_file")
 
         # Check if we need to validate the network
         if [[ "$host_network" != "true" ]] && [[ -n "$network" ]]; then
@@ -2402,14 +2444,14 @@ start_services_after_install() {
                         return 0
                     fi
                 elif [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
-                    # DHCP not enabled, skip gracefully
                     warn "⚠️  Network '$network' does not exist. Skipping service startup."
                     warn ""
                     warn "Setup completed successfully, but services were not started."
-                    warn "Note: Macvlan network is only required for DHCP client testing."
+                    warn "Your install expects macvlan network '$network' (e.g. net-10)."
                     warn ""
-                    warn "Quick fix: Run the DHCP testing setup script:"
-                    warn "  sudo ./setup-dhcp-testing.sh"
+                    warn "Check existing networks: podman network ls"
+                    warn "If the network exists under a different name, set network.network in config.yaml"
+                    warn "or ensure the pod IP matches a subnet in: podman network inspect <name>"
                     warn ""
                     warn "Or create the network manually:"
                     warn "  podman network create --driver macvlan --subnet <subnet> --gateway <gateway> -o parent=<interface> $network"
@@ -3281,6 +3323,16 @@ PYTHON_SCRIPT
         else
             prompt_with_default "IPv6 address (leave empty to disable)" "" IPV6 "false" "true"
         fi
+
+        NETWORK="${NETWORK:-${EXISTING_NETWORK:-}}"
+        if [[ "${NON_INTERACTIVE:-false}" == "true" ]]; then
+            if [[ -z "$NETWORK" ]] || [[ "$NETWORK" == "null" ]]; then
+                NETWORK=$(resolve_pod_network "$(resolve_config_file)")
+            fi
+            log "Non-interactive: Podman macvlan network = $NETWORK"
+        elif [[ -n "${EXISTING_NETWORK:-}" ]] && [[ "${EXISTING_NETWORK}" != "host" ]]; then
+            prompt_with_default "Podman macvlan network name" "$EXISTING_NETWORK" NETWORK
+        fi
     fi
     # HTTPS and HTTP ports - only prompt in extended mode
     if [[ "${EXTENDED_MODE:-false}" == "true" ]]; then
@@ -3925,6 +3977,7 @@ generate_yaml_config() {
     TIMEZONE="${TIMEZONE:-UTC}"
     DNS1="${DNS1:-}"
     DNS2="${DNS2:-}"
+    NETWORK="${NETWORK:-${EXISTING_NETWORK:-}}"
     CV_PROXY="${CV_PROXY:-}"
     EOS_URL="${EOS_URL:-}"
     NTP_SERVER="${NTP_SERVER:-pool.ntp.org}"
@@ -3964,6 +4017,7 @@ network:
   domain: "$DOMAIN"
   ipv4: "${IPV4:-}"
   ipv6: "${IPV6:-}"
+  network: "${NETWORK:-}"
   https_port: $HTTPS_PORT
   http_port: $HTTP_PORT
   http_only: $HTTP_ONLY

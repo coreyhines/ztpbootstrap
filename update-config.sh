@@ -517,10 +517,18 @@ update_pod_file() {
             log "Removed IP6 address from pod file (host network mode)"
         fi
     else
-        # Not using host network - set Network to macvlan network
-        if sed -i.tmp "s|^Network=.*|Network=ztpbootstrap-net|" "$pod_file" 2>/dev/null; then
+        # Not using host network - set Network to configured macvlan network
+        local pod_network
+        pod_network=$(get_yaml_value '.network.network')
+        if [[ -z "$pod_network" ]] || [[ "$pod_network" == "null" ]]; then
+            pod_network=$(grep -E '^Network=' "$pod_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '[:space:]' || echo "")
+        fi
+        if [[ -z "$pod_network" ]] || [[ "$pod_network" == "null" ]] || [[ "$pod_network" == "host" ]]; then
+            pod_network="ztpbootstrap-net"
+        fi
+        if sed -i.tmp "s|^Network=.*|Network=$pod_network|" "$pod_file" 2>/dev/null; then
             rm -f "${pod_file}.tmp" 2>/dev/null || true
-            log "Set Network=ztpbootstrap-net in pod file"
+            log "Set Network=$pod_network in pod file"
         else
             warn "Failed to set Network in pod file"
         fi

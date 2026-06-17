@@ -34,6 +34,9 @@ network:
   # IPv6 address (leave empty to disable IPv6)
   ipv6: "2001:db8::10"
 
+  # Podman macvlan network name (leave empty to auto-detect from pod IP)
+  network: ""
+
   # HTTPS port
   https_port: 443
 
