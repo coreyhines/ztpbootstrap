@@ -517,7 +517,7 @@ _write_nginx_container_file() {
         [[ -n "$ssl_volume_line" ]] && printf '%s\n' "$ssl_volume_line"
         printf 'Volume=/opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw\n'
         printf 'Environment=TZ=UTC\n'
-        printf 'HealthCmd=["sh", "-c", "pgrep nginx > /dev/null || exit 1"]\n'
+        printf 'HealthCmd=["/bin/sh", "-c", "test -s /run/nginx.pid && kill -0 $(cat /run/nginx.pid) 2>/dev/null"]\n'
         printf 'HealthInterval=30s\n'
         printf 'HealthTimeout=10s\n'
         printf 'HealthRetries=3\n'

@@ -10,7 +10,7 @@ Volume=/opt/containerdata/ztpbootstrap/nginx.conf:/etc/nginx/conf.d/default.conf
 Volume=/opt/containerdata/certs/wild:/etc/nginx/ssl:ro
 Volume=/opt/containerdata/ztpbootstrap/logs:/var/log/nginx:rw
 Environment=TZ=UTC
-HealthCmd=["sh", "-c", "pgrep nginx > /dev/null || exit 1"]
+HealthCmd=["/bin/sh", "-c", "test -s /run/nginx.pid && kill -0 $(cat /run/nginx.pid) 2>/dev/null"]
 HealthInterval=30s
 HealthTimeout=10s
 HealthRetries=3

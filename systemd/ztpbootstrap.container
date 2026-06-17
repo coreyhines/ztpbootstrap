@@ -16,7 +16,7 @@ Volume=/opt/containerdata/certs/wild:/etc/nginx/ssl:ro
 Environment="TZ=UTC"
 
 # Health check for ZTP bootstrap - check if nginx is running
-HealthCmd=["sh", "-c", "pgrep nginx > /dev/null || exit 1"]
+HealthCmd=["/bin/sh", "-c", "test -s /run/nginx.pid && kill -0 $(cat /run/nginx.pid) 2>/dev/null"]
 HealthInterval=30s
 HealthTimeout=10s
 HealthRetries=3
