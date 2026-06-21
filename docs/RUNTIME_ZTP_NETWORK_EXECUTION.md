@@ -78,6 +78,8 @@ See [P1 operations note](#p1-operations-note) below.
 | Cursor Agent | Opaque; default **composer-2.5-fast** | Mechanical: **codex-low-fast** |
 | Parallel agents | Cap at **2** cheap + **1** Claude | Avoid 4+ parallel thinking models |
 
+> **Probe vs farm:** Claude usage API returning **429** means the weekly pro quota was exhausted at time of probe — not that Claude CLI is permanently unavailable. W0 buckets (B11, B12m) were rerouted to Cursor Auto inline per waterfall. Claude CLI re-farm of B12m is in progress on opnsense-mcp and will merge separately before B15.
+
 ---
 
 ## Gates
@@ -98,7 +100,7 @@ Stacked PRs [#61](https://github.com/coreyhines/ztpbootstrap/pull/61)–[#66](ht
 
 **Next:** G5 lab acceptance (Apply + switch ZTP), full BATS with `TEST_PASS`, then epic merge to `main` (P3).
 
-**G5 brigade:** [RUNTIME_ZTP_NETWORK_G5_BRIGADE.md](RUNTIME_ZTP_NETWORK_G5_BRIGADE.md) — bucket tracker [docs/research/RUNTIME_ZTP_NETWORK_G5-buckets.md](research/RUNTIME_ZTP_NETWORK_G5-buckets.md) · Cursor Auto + operator gates (no Claude code farms).
+**G5 brigade:** [RUNTIME_ZTP_NETWORK_G5_BRIGADE.md](RUNTIME_ZTP_NETWORK_G5_BRIGADE.md) — bucket tracker [docs/research/RUNTIME_ZTP_NETWORK_G5-buckets.md](research/RUNTIME_ZTP_NETWORK_G5-buckets.md) · Claude CLI (sonnet) for doc/code farms (B18); Cursor Auto for live-MCP buckets; Operator for Apply/switch gates.
 
 ---
 

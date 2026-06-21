@@ -27,7 +27,7 @@
 | 5 | B18 | Ledger + attribution | `coordinator` | sonnet | Claude | claude-cli | sonnet | farm† | B16, B17 |
 | 6 | B19 | PR → `main` + close #60 | `integration_merge` | none | Cursor | cursor-auto | auto | inline | B18 |
 
-† Claude CLI blocked (429) → **Cursor Auto inline** for W0; record reroute.  
+† Claude API 429 (weekly pro quota exhausted — probe, not hard block) → **Cursor Auto inline** for W0; record reroute. Claude CLI re-farm of B12m in progress on opnsense-mcp.  
 ‡ B12m optional fallback: manual OPNsense dnsmasq disable.
 
 **Parallel W0:** B11 ∥ B12 ∥ B12m
@@ -36,7 +36,13 @@
 
 | ID | Status | Resolved backend | Notes |
 |----|--------|------------------|-------|
-| B11 | running | cursor-auto | Claude 429; inline commit |
-| B12 | running | cursor-auto | SSH audit fedora1 |
-| B12m | running | cursor-auto | opnsense-mcp tool |
-| B13–B19 | queued | — | — |
+| B11 | done | cursor-auto | Claude API 429; rerouted inline (`f9d8ae1`) |
+| B12 | done | cursor-auto | SSH audit fedora1 |
+| B12m | done | cursor-auto | `toggle_dhcp_range` merged; Claude CLI re-farm pending merge on opnsense-mcp |
+| B13 | queued | operator | Wave 1 gate |
+| B14 | queued | cursor-auto | — |
+| B15 | queued | cursor-auto | — |
+| B16 | queued | operator | Switch ZTP gate |
+| B17 | queued | cursor-auto | — |
+| B18 | running | claude-cli | sonnet; ledger + attribution |
+| B19 | queued | cursor-auto | — |

@@ -22,7 +22,7 @@
 | 5 | — | B18 | Ledger + attribution | Claude | claude-cli | sonnet | farm | B16,B17 |
 | 6 | **Merge** | B19 | PR → `main` | Cursor | cursor-auto | auto | inline | B18 |
 
-† W0: Claude usage API **429** → routed to Cursor Auto inline per waterfall.
+† W0: Claude usage API **429** (weekly pro quota exhausted — probe, not a hard block on Claude CLI) → routed to Cursor Auto inline per waterfall. Claude CLI re-farm of B12m is underway on opnsense-mcp and will merge separately before B15.
 
 ---
 
@@ -45,9 +45,17 @@
 
 | Bucket | Planned | Resolved | Cost pool | Outcome |
 |--------|---------|----------|-----------|---------|
-| B11 | claude-cli | cursor-auto | cursor_included | _(in progress)_ |
+| B11 | claude-cli | cursor-auto | cursor_included | commit `f9d8ae1` — docs: approve rebalanced schedule |
 | B12 | cursor-auto | cursor-auto | cursor_included | audit table above |
-| B12m | claude-cli | cursor-auto | cursor_included | _(in progress)_ |
+| B12m | claude-cli | cursor-auto | cursor_included | commit `1605f13` — feat: toggle_dhcp_range; Claude CLI re-farm pending merge |
+
+---
+
+## Who did what — W5
+
+| Bucket | Planned | Resolved | Cost pool | Outcome |
+|--------|---------|----------|-----------|---------|
+| B18 | claude-cli | claude-cli | claude_pro | ledger + attribution (this bucket) |
 
 ---
 
