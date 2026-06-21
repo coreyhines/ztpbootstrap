@@ -98,6 +98,11 @@
                                 class="px-6 py-4 border-b-2 font-medium text-sm">
                             ZTP Bootstrap Service
                         </button>
+                        <button @click="activeApplication = 'ztp-network'"
+                                :class="activeApplication === 'ztp-network' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            ZTP Network
+                        </button>
                         <button @click="activeApplication = 'dhcp'"
                                 :class="activeApplication === 'dhcp' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                                 class="px-6 py-4 border-b-2 font-medium text-sm">
@@ -183,6 +188,138 @@
                     </div>
                 </div>
 
+            </div>
+
+            </div>
+
+            <!-- ZTP Network Status Cards -->
+            <div x-show="activeApplication === 'ztp-network'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+                <div class="bg-white rounded-lg shadow-sm p-4 border-l-4"
+                     :class="networkStatus.status === 'applied' && !networkStatus.drift ? 'border-green-500' : (networkStatus.status === 'error' ? 'border-red-500' : 'border-yellow-500')">
+                    <p class="text-xs font-medium text-gray-600 mb-0.5">Apply Status</p>
+                    <p class="text-2xl font-bold capitalize"
+                       :class="networkStatus.status === 'applied' && !networkStatus.drift ? 'text-green-600' : (networkStatus.status === 'error' ? 'text-red-600' : 'text-yellow-600')"
+                       x-text="networkStatus.drift ? 'drift' : (networkStatus.status || 'pending')"></p>
+                    <p class="text-xs text-gray-500 mt-0.5" x-text="networkForm.enabled ? 'Macvlan ZTP mode' : 'Disabled / legacy'"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-4 border-l-4 border-blue-500">
+                    <p class="text-xs font-medium text-gray-600 mb-0.5">Pod Network</p>
+                    <p class="text-lg font-bold text-blue-600 truncate" x-text="networkStatus.effective?.podman_network || '—'"></p>
+                    <p class="text-xs text-gray-500 mt-0.5" x-text="networkStatus.effective?.ipv4_address || 'No IPv4'"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-4 border-l-4"
+                     :class="networkStatus.quadlet?.exists ? 'border-green-500' : 'border-gray-300'">
+                    <p class="text-xs font-medium text-gray-600 mb-0.5">Parent Interface</p>
+                    <p class="text-lg font-bold text-gray-900" x-text="networkForm.parent_interface || '—'"></p>
+                    <p class="text-xs text-gray-500 mt-0.5">Quadlet: <span x-text="networkStatus.quadlet?.network || '—'"></span></p>
+                </div>
+            </div>
+
+            <!-- ZTP Network Panel -->
+            <div x-show="activeApplication === 'ztp-network'" class="bg-white rounded-lg shadow-sm p-6 mb-4">
+                <div x-show="networkStatus.drift" class="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                    <p class="text-sm font-medium text-yellow-900">Configuration drift detected</p>
+                    <ul class="mt-2 text-sm text-yellow-800 list-disc list-inside">
+                        <template x-for="item in networkStatus.drift_items || []" :key="item">
+                            <li x-text="item"></li>
+                        </template>
+                    </ul>
+                </div>
+                <div x-show="networkForm.last_error || networkStatus.ztp?.last_error" class="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-sm font-medium text-red-900">Last error</p>
+                    <p class="text-sm text-red-700 mt-1" x-text="networkForm.last_error || networkStatus.ztp?.last_error"></p>
+                </div>
+                <div x-show="dhcpSubnetMismatch()" class="mb-4 p-4 bg-orange-50 border border-orange-200 rounded-md">
+                    <p class="text-sm text-orange-800">DHCP subnet does not match ZTP network profile. Align subnets before enabling Kea on the ZTP VLAN.
+                        <button type="button" @click="activeApplication = 'dhcp'; activeDhcpTab = 'config'" class="underline text-orange-900 ml-1">Fix in DHCP Server →</button>
+                    </p>
+                </div>
+                <div class="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-md">
+                    <p class="text-sm font-medium text-gray-900 mb-2">Prerequisites (host operator)</p>
+                    <ul class="text-sm text-gray-600 list-disc list-inside space-y-1">
+                        <li>Parent VLAN subinterface exists and is oper-up (e.g. enp7s0.5)</li>
+                        <li>Switch port carries the ZTP VLAN</li>
+                        <li>Pod IP is free on the segment</li>
+                        <li>UDP 67/68 and TCP 443 allowed to pod IP from ZTP VLAN</li>
+                    </ul>
+                </div>
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-900">ZTP Network Profile</h2>
+                        <p class="text-sm text-gray-600">Configure macvlan segment for the entire ztpbootstrap pod</p>
+                    </div>
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="checkbox" x-model="networkForm.enabled" class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600 relative"></div>
+                        <span class="ml-3 text-sm text-gray-700">Enable ZTP macvlan</span>
+                    </label>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">VLAN ID</label>
+                        <input type="number" min="1" max="4094" x-model.number="networkForm.vlan_id" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Parent interface</label>
+                        <select x-model="networkForm.parent_interface" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                            <option value="">Select parent…</option>
+                            <template x-for="parent in networkParents" :key="parent.name">
+                                <option :value="parent.name" x-text="`${parent.name} (${parent.operstate}${parent.ipv4 ? ', ' + parent.ipv4 : ''})`"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Podman network name</label>
+                        <input type="text" x-model="networkForm.podman_network" placeholder="ztp-net-5" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Macvlan mode</label>
+                        <select x-model="networkForm.macvlan_mode" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                            <option value="bridge">bridge</option>
+                            <option value="private">private</option>
+                            <option value="vepa">vepa</option>
+                            <option value="passthru">passthru</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Pod IPv4</label>
+                        <input type="text" x-model="networkForm.ipv4.address" placeholder="10.0.5.10" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">IPv4 subnet (CIDR)</label>
+                        <div class="flex gap-2">
+                            <input type="text" x-model="networkForm.ipv4.subnet" placeholder="10.0.5.0/24" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
+                            <button @click="autoDetectNetwork()" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Auto</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">IPv4 gateway</label>
+                        <input type="text" x-model="networkForm.ipv4.gateway" placeholder="10.0.5.1" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Pod IPv6 (optional)</label>
+                        <input type="text" x-model="networkForm.ipv6.address" placeholder="2601:441:8483:b505::10" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">IPv6 subnet (CIDR)</label>
+                        <input type="text" x-model="networkForm.ipv6.subnet" placeholder="2601:441:8483:b505::/64" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">IPv6 gateway</label>
+                        <input type="text" x-model="networkForm.ipv6.gateway" placeholder="2601:441:8483:b505::1" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                </div>
+                <div x-show="networkValidation.errors.length" class="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+                    <template x-for="err in networkValidation.errors" :key="err">
+                        <p class="text-sm text-red-700" x-text="err"></p>
+                    </template>
+                </div>
+                <div class="flex flex-wrap gap-3">
+                    <button @click="validateNetwork()" :disabled="loadingStates.network" class="px-4 py-2 bg-gray-100 text-gray-800 rounded-md hover:bg-gray-200 text-sm">Validate</button>
+                    <button @click="saveNetwork()" :disabled="loadingStates.network" class="px-4 py-2 bg-blue-100 text-blue-800 rounded-md hover:bg-blue-200 text-sm">Save</button>
+                    <button @click="applyNetwork()" :disabled="loadingStates.network" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm">Apply &amp; restart</button>
+                    <button @click="restartNetworkStack()" :disabled="loadingStates.network" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm">Restart only</button>
+                </div>
             </div>
 
             <!-- DHCP Server Status Cards -->
@@ -690,7 +827,7 @@
                 <!-- DHCP Configuration Tab -->
                 <div x-show="activeDhcpTab === 'config'" class="p-6">
                     <!-- DHCP Status Banner -->
-                    <div x-show="dhcpStatus.networking_mode === 'host'" class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
+                    <div x-show="dhcpStatus.networking_mode === 'host' && !(networkStatus.ztp?.enabled || networkForm.enabled)" class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
                         <div class="flex items-start">
                             <svg class="w-5 h-5 text-blue-600 mt-0.5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -700,6 +837,15 @@
                                 <p class="text-sm text-blue-700 mt-1">DHCP server will bind directly to host interfaces. Ensure no other DHCP server is running on ports 67/68 (IPv4) or 547/548 (IPv6).</p>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- ZTP / DHCP subnet mismatch -->
+                    <div x-show="dhcpSubnetMismatch()" class="mb-4 p-4 bg-orange-50 border border-orange-200 rounded-md">
+                        <p class="text-sm text-orange-900 font-medium">DHCP subnet mismatch</p>
+                        <p class="text-sm text-orange-800 mt-1">
+                            DHCP: <span x-text="dhcpConfig.ipv4.subnet || '—'"></span> · ZTP: <span x-text="networkForm.ipv4.subnet || '—'"></span>.
+                            <button type="button" @click="activeApplication = 'ztp-network'" class="underline text-orange-900 ml-1">Fix in ZTP Network →</button>
+                        </p>
                     </div>
 
                     <!-- Port Conflict Warning -->
@@ -1133,7 +1279,6 @@
                                  x-html="highlightSearch(formatLogsWithMarks(reverseLogLines(logs)))"></pre>
                         </div>
                     </div>
-                </div>
 
                 <!-- DHCP Status Tab -->
                 <div x-show="activeDhcpTab === 'status'" class="p-6">
@@ -1254,68 +1399,7 @@
                         </div>
                     </div>
                 </div>
-
-                <!-- DHCP Logs Tab -->
-                <div x-show="activeDhcpTab === 'logs'" class="p-6">
-                        <div class="mb-4 flex items-center justify-between flex-wrap gap-4">
-                            <div>
-                                <h2 class="text-lg font-semibold text-gray-900 mb-2">DHCP Server Logs</h2>
-                                <p class="text-sm text-gray-600">View logs from Kea DHCP server</p>
-                            </div>
-                            <div class="flex items-center space-x-1.5 flex-wrap">
-                                <div class="relative group">
-                                    <input type="text"
-                                           x-model="logSearchTerm"
-                                           @input="highlightLogs()"
-                                           placeholder="Search..."
-                                           class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-32"
-                                           title="Search logs">
-                                    <button x-show="logSearchTerm"
-                                            @click="logSearchTerm = ''; highlightLogs()"
-                                            class="absolute right-1 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                        </svg>
-                                    </button>
-                                </div>
-                                <div class="relative group">
-                                    <select x-model="logLines" @change="loadLogs()" class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 pr-6" title="Number of lines">
-                                        <option value="50">50</option>
-                                        <option value="100">100</option>
-                                        <option value="200">200</option>
-                                        <option value="500">500</option>
-                                    </select>
-                                </div>
-                                <button @click="markLogs()" class="px-2.5 py-1.5 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs font-medium transition-colors" title="Mark current position in logs">
-                                    Mark
-                                </button>
-                                <div class="relative group">
-                                    <label class="inline-flex items-center cursor-pointer" title="Auto-refresh logs">
-                                        <input type="checkbox" x-model="autoRefreshEnabled" @change="toggleAutoRefresh()" class="sr-only peer">
-                                        <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                                    </label>
-                                </div>
-                                <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-1.5 py-0.5 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
-                                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    <span>New entries</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto" x-ref="logsContainer">
-                            <div class="text-xs text-gray-400 mb-2 font-semibold flex items-center justify-between">
-                                <span>DHCP Logs</span>
-                                <span x-show="logNewEntriesIndicator" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-500 text-white animate-pulse">
-                                    New entries
-                                </span>
-                            </div>
-                            <pre class="text-sm font-mono overflow-x-auto whitespace-pre-wrap text-green-400"
-                                 x-html="highlightSearch(formatLogsWithMarks(reverseLogLines(logs)))"></pre>
-                        </div>
-                    </div>
-                </div>
+            </div>
         </main>
 
         <!-- Script Viewer Modal -->
@@ -1518,7 +1602,10 @@
     <script>
         function dashboard() {
             return {
-                activeApplication: localStorage.getItem('ztpbootstrap-activeApplication') || 'ztpbootstrap', // 'ztpbootstrap' or 'dhcp'
+                activeApplication: (() => {
+                    const stored = localStorage.getItem('ztpbootstrap-activeApplication');
+                    return ['ztpbootstrap', 'ztp-network', 'dhcp'].includes(stored) ? stored : 'ztpbootstrap';
+                })(),
                 activeTab: 'scripts',
                 status: {
                     container_running: false,
@@ -1575,8 +1662,31 @@
                     logs: false,
                     deviceConnections: false,
                     status: false,
-                    dhcp: false
+                    dhcp: false,
+                    network: false
                 },
+                networkForm: {
+                    enabled: false,
+                    vlan_id: null,
+                    parent_interface: '',
+                    podman_network: '',
+                    macvlan_mode: 'bridge',
+                    ipv4: { address: '', subnet: '', gateway: '' },
+                    ipv6: { address: '', subnet: '', gateway: '' },
+                    last_error: ''
+                },
+                networkStatus: {
+                    status: 'pending',
+                    drift: false,
+                    drift_items: [],
+                    subnet_mismatch: false,
+                    effective: {},
+                    quadlet: {},
+                    ztp: {}
+                },
+                networkParents: [],
+                networkValidation: { errors: [], warnings: [] },
+                networkPollInterval: null,
                 // DHCP state
                 dhcpConfig: {
                     enabled: false,
@@ -1656,6 +1766,13 @@
                             this.loadDhcpStatus();
                             this.loadDhcpConfig();
                             this.loadDhcpLeases();
+                            this.loadNetworkStatus();
+                        } else if (newApp === 'ztp-network') {
+                            this.loadNetworkStatus();
+                            this.loadNetworkParents();
+                            this.startNetworkPolling();
+                        } else {
+                            this.stopNetworkPolling();
                         }
                         // Ensure modal stays hidden when switching applications
                         this.showLoginModal = false;
@@ -1697,30 +1814,6 @@
                         }
                     });
 
-                    // Watch for DHCP tab changes
-                    this.$watch('activeDhcpTab', (newTab) => {
-                        // Save to localStorage for persistence across refreshes
-                        localStorage.setItem('ztpbootstrap-activeDhcpTab', newTab);
-                        if (newTab === 'logs') {
-                            // Set log source to DHCP and start auto-refresh when entering DHCP logs tab (only if enabled)
-                            this.logSource = 'dhcp';
-                            this.loadLogs();
-                            if (this.autoRefreshEnabled) {
-                                this.startAutoRefresh();
-                            }
-                        } else {
-                            // Stop auto-refresh when leaving DHCP logs tab
-                            this.stopAutoRefresh();
-                        }
-                        if (newTab === 'status') {
-                            // Load leases when entering status tab
-                            this.loadDhcpLeases();
-                        }
-                        if (newTab === 'reservations') {
-                            // Load reservations when entering reservations tab
-                            this.loadDhcpReservations();
-                        }
-                    });
                     // Ensure modal is hidden on initial load
                     this.showLoginModal = false;
 
@@ -1765,6 +1858,11 @@
                         await this.loadDhcpStatus();
                         await this.loadDhcpConfig();
                         await this.loadDhcpLeases();
+                        await this.loadNetworkStatus();
+                    } else if (this.activeApplication === 'ztp-network') {
+                        await this.loadNetworkStatus();
+                        await this.loadNetworkParents();
+                        this.startNetworkPolling();
                     }
                     await this.loadLogs();
 
@@ -3070,6 +3168,226 @@
                     } catch (error) {
                         console.error('Error marking logs:', error);
                         alert('Failed to mark logs: ' + error.message);
+                    }
+                },
+
+                // ZTP Network Functions
+                dhcpSubnetMismatch() {
+                    if (this.networkStatus.subnet_mismatch) {
+                        return true;
+                    }
+                    const ztpSubnet = this.networkForm.ipv4?.subnet;
+                    const dhcpSubnet = this.dhcpConfig.ipv4?.subnet;
+                    return !!(this.dhcpConfig.enabled && ztpSubnet && dhcpSubnet && ztpSubnet !== dhcpSubnet);
+                },
+
+                syncNetworkFormFromStatus() {
+                    const ztp = this.networkStatus.ztp || {};
+                    this.networkForm = {
+                        enabled: !!ztp.enabled,
+                        vlan_id: ztp.vlan_id ?? null,
+                        parent_interface: ztp.parent_interface || '',
+                        podman_network: ztp.podman_network || '',
+                        macvlan_mode: ztp.macvlan_mode || 'bridge',
+                        ipv4: {
+                            address: ztp.ipv4?.address || '',
+                            subnet: ztp.ipv4?.subnet || '',
+                            gateway: ztp.ipv4?.gateway || ''
+                        },
+                        ipv6: {
+                            address: ztp.ipv6?.address || '',
+                            subnet: ztp.ipv6?.subnet || '',
+                            gateway: ztp.ipv6?.gateway || ''
+                        },
+                        last_error: ztp.last_error || ''
+                    };
+                },
+
+                async loadNetworkStatus() {
+                    this.loadingStates.network = true;
+                    try {
+                        const response = await fetch('/api/network/status', { credentials: 'same-origin' });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            return;
+                        }
+                        if (response.ok) {
+                            this.networkStatus = await response.json();
+                            this.syncNetworkFormFromStatus();
+                        }
+                    } catch (error) {
+                        console.error('Failed to load network status:', error);
+                    } finally {
+                        this.loadingStates.network = false;
+                    }
+                },
+
+                async loadNetworkParents() {
+                    try {
+                        const response = await fetch('/api/network/parents', { credentials: 'same-origin' });
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.networkParents = data.parents || [];
+                        }
+                    } catch (error) {
+                        console.error('Failed to load network parents:', error);
+                    }
+                },
+
+                startNetworkPolling() {
+                    this.stopNetworkPolling();
+                    this.networkPollInterval = setInterval(() => {
+                        if (this.activeApplication === 'ztp-network') {
+                            this.loadNetworkStatus();
+                        }
+                    }, 30000);
+                },
+
+                stopNetworkPolling() {
+                    if (this.networkPollInterval) {
+                        clearInterval(this.networkPollInterval);
+                        this.networkPollInterval = null;
+                    }
+                },
+
+                networkPayload() {
+                    return {
+                        ztp: {
+                            enabled: this.networkForm.enabled,
+                            vlan_id: this.networkForm.vlan_id,
+                            parent_interface: this.networkForm.parent_interface,
+                            podman_network: this.networkForm.podman_network,
+                            macvlan_mode: this.networkForm.macvlan_mode,
+                            ipv4: { ...this.networkForm.ipv4 },
+                            ipv6: { ...this.networkForm.ipv6 }
+                        }
+                    };
+                },
+
+                async ensureAuthForNetwork(action) {
+                    await this.checkAuthStatus();
+                    if (!this.authenticated) {
+                        this.pendingAction = action;
+                        this.showLoginModal = true;
+                        await this.$nextTick();
+                        return false;
+                    }
+                    return true;
+                },
+
+                async validateNetwork() {
+                    if (!await this.ensureAuthForNetwork(() => this.validateNetwork())) return;
+                    this.loadingStates.network = true;
+                    try {
+                        const response = await fetch('/api/network/validate', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.networkPayload())
+                        });
+                        const data = await response.json();
+                        this.networkValidation = {
+                            errors: data.errors || (data.error ? [data.error] : []),
+                            warnings: data.warnings || []
+                        };
+                        if (!response.ok) {
+                            alert('Validation failed: ' + (data.error || this.networkValidation.errors.join('; ')));
+                        } else if (data.valid) {
+                            alert('Validation passed' + (data.warnings?.length ? ' (with warnings)' : ''));
+                        }
+                    } catch (error) {
+                        alert('Validation error: ' + error.message);
+                    } finally {
+                        this.loadingStates.network = false;
+                    }
+                },
+
+                async saveNetwork() {
+                    if (!await this.ensureAuthForNetwork(() => this.saveNetwork())) return;
+                    this.loadingStates.network = true;
+                    try {
+                        const response = await fetch('/api/network/ztp', {
+                            method: 'PUT',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.networkPayload())
+                        });
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.error || 'Save failed');
+                        await this.loadNetworkStatus();
+                        alert('ZTP network profile saved');
+                    } catch (error) {
+                        alert('Save failed: ' + error.message);
+                    } finally {
+                        this.loadingStates.network = false;
+                    }
+                },
+
+                async applyNetwork() {
+                    if (!await this.ensureAuthForNetwork(() => this.applyNetwork())) return;
+                    if (!confirm('Apply network changes and restart the ztpbootstrap pod?')) return;
+                    this.loadingStates.network = true;
+                    try {
+                        const response = await fetch('/api/network/apply', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.networkPayload())
+                        });
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.error || 'Apply failed');
+                        await this.loadNetworkStatus();
+                        alert('Network applied and stack restarted');
+                    } catch (error) {
+                        alert('Apply failed: ' + error.message);
+                        await this.loadNetworkStatus();
+                    } finally {
+                        this.loadingStates.network = false;
+                    }
+                },
+
+                async restartNetworkStack() {
+                    if (!await this.ensureAuthForNetwork(() => this.restartNetworkStack())) return;
+                    if (!confirm('Restart the ztpbootstrap stack?')) return;
+                    this.loadingStates.network = true;
+                    try {
+                        const response = await fetch('/api/network/restart', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({})
+                        });
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.error || 'Restart failed');
+                        await this.loadNetworkStatus();
+                        alert('Stack restart requested');
+                    } catch (error) {
+                        alert('Restart failed: ' + error.message);
+                    } finally {
+                        this.loadingStates.network = false;
+                    }
+                },
+
+                async autoDetectNetwork() {
+                    if (!this.networkForm.parent_interface) {
+                        alert('Select a parent interface first');
+                        return;
+                    }
+                    try {
+                        const response = await fetch('/api/network/auto-detect', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ parent_interface: this.networkForm.parent_interface })
+                        });
+                        const data = await response.json();
+                        if (data.ipv4) {
+                            if (data.ipv4.subnet) this.networkForm.ipv4.subnet = data.ipv4.subnet;
+                            if (data.ipv4.gateway) this.networkForm.ipv4.gateway = data.ipv4.gateway;
+                            if (data.ipv4.address) this.networkForm.ipv4.address = data.ipv4.address;
+                        }
+                    } catch (error) {
+                        alert('Auto-detect failed: ' + error.message);
                     }
                 },
 
