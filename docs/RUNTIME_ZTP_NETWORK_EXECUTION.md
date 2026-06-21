@@ -84,11 +84,19 @@ See [P1 operations note](#p1-operations-note) below.
 
 | Gate | Check | Status |
 |------|--------|--------|
-| G1 | 13 network unit tests pass | **Done** — PR [#61](https://github.com/coreyhines/ztpbootstrap/pull/61) merged |
-| G2 | Opus deploy review merged | Pending PR-62 |
-| G3 | 8 `/api/network/*` routes | Pending PR-63 |
-| G4 | ZTP Network tab + DHCP banners | Pending PR-64 |
-| G5 | Lab test fedora1 + switch ZTP | Not started |
+| G1 | 13 network unit tests pass | **Done** — PR [#61](https://github.com/coreyhines/ztpbootstrap/pull/61), [#67](https://github.com/coreyhines/ztpbootstrap/pull/67) |
+| G2 | Opus deploy review merged | **Done** — PR [#62](https://github.com/coreyhines/ztpbootstrap/pull/62) → [#67](https://github.com/coreyhines/ztpbootstrap/pull/67) |
+| G3 | 8 `/api/network/*` routes | **Done** — PR [#63](https://github.com/coreyhines/ztpbootstrap/pull/63) → [#67](https://github.com/coreyhines/ztpbootstrap/pull/67) |
+| G4 | ZTP Network tab + DHCP banners | **Done** — PR [#64](https://github.com/coreyhines/ztpbootstrap/pull/64) → [#67](https://github.com/coreyhines/ztpbootstrap/pull/67) |
+| G5 | Lab test fedora1 + switch ZTP | **Not started** |
+
+---
+
+## Merge train (completed 2026-06-21)
+
+Stacked PRs [#61](https://github.com/coreyhines/ztpbootstrap/pull/61)–[#66](https://github.com/coreyhines/ztpbootstrap/pull/66) merged into their stack bases; consolidated onto `feature/runtime-ztp-network` via [#67](https://github.com/coreyhines/ztpbootstrap/pull/67).
+
+**Next:** G5 lab acceptance, BATS on VM (B9), then epic merge to `main` (P3).
 
 ---
 
