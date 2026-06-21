@@ -1,8 +1,8 @@
 # Runtime ZTP Network Configuration — Feature Specification
 
 **Branch:** `feature/runtime-ztp-network`  
-**Status:** Draft  
-**Last updated:** 2026-06-17  
+**Status:** Draft — farm-out tracked in [GitHub #60](https://github.com/coreyhines/ztpbootstrap/issues/60)  
+**Last updated:** 2026-06-20  
 **Related:** Kea DHCP (`docs/DHCP_IMPLEMENTATION_PLAN.md`), `webui/dhcp_deploy.py`, `update-config.sh`
 
 ---
@@ -416,6 +416,223 @@ The DHCP Server tab does **not** host ZTP Network controls. Integration is via s
 - [ ] `docs/ZTP_NETWORK_HOST_SETUP.md` — VLAN subinterface examples (Fedora NM, ip-link)
 - [ ] AGENTS.md / README pointer
 - [ ] Migration note: moving from `net-10` @ `10.0.10.10` to `ztp-net-5` @ `10.0.5.10`
+
+### 10.1 Farm-out buckets & PR stack
+
+Phases above are **sequential milestones**. Buckets below are **parallel work units** for separate PRs or agents. Each bucket has explicit deliverables, dependencies, and acceptance checks.
+
+#### Dependency graph
+
+```text
+B0 (Contract) → B1 (Validation) → B2 (Deploy) ─┬→ B3 (API) → B4 (UI tab)
+                                                │              → B5 (DHCP glue)
+                                                ├→ B6 (Hardening)
+                                                └→ B7 (Install scripts)
+B0 → B8 (Unit tests)     B3+B4 → B9 (Integration)     B0 → B10 (Ops docs)
+```
+
+**Merge train:** B0 → B1 → B2 (+ B6) → B3 → B4 ∥ B5 → B7 → B8/B9 → B10
+
+#### Bucket map
+
+| Bucket | Name | Depends on | Parallel with |
+|--------|------|------------|---------------|
+| **B0** | Contract & schema | — | — |
+| **B1** | Discovery & validation | B0 | B8 (stubs) |
+| **B2** | Deploy orchestrator | B1 | B6 |
+| **B3** | REST API | B2 | B8 |
+| **B4** | ZTP Network UI tab | B3 | B5, B10 |
+| **B5** | DHCP cross-tab glue | B3 | B4 |
+| **B6** | Hardening | B2 | — |
+| **B7** | Install alignment | B2 | B10 |
+| **B8** | Unit tests | B0, B1 | B1, B3 |
+| **B9** | Integration tests | B3, B4 | B8 |
+| **B10** | Ops docs | B0 | B4, B7 |
+
+GitHub issues use labels `network/B0` … `network/B10` and epic label `runtime-ztp-network`.
+
+| Bucket | GitHub issue |
+|--------|--------------|
+| Epic | [#60](https://github.com/coreyhines/ztpbootstrap/issues/60) |
+| B0 | [#49](https://github.com/coreyhines/ztpbootstrap/issues/49) |
+| B1 | [#50](https://github.com/coreyhines/ztpbootstrap/issues/50) |
+| B2 | [#51](https://github.com/coreyhines/ztpbootstrap/issues/51) |
+| B3 | [#53](https://github.com/coreyhines/ztpbootstrap/issues/53) |
+| B4 | [#52](https://github.com/coreyhines/ztpbootstrap/issues/52) |
+| B5 | [#56](https://github.com/coreyhines/ztpbootstrap/issues/56) |
+| B6 | [#54](https://github.com/coreyhines/ztpbootstrap/issues/54) |
+| B7 | [#57](https://github.com/coreyhines/ztpbootstrap/issues/57) |
+| B8 | [#55](https://github.com/coreyhines/ztpbootstrap/issues/55) |
+| B9 | [#58](https://github.com/coreyhines/ztpbootstrap/issues/58) |
+| B10 | [#59](https://github.com/coreyhines/ztpbootstrap/issues/59) |
+
+#### B0 — Contract & schema
+
+**Deliverables**
+
+- `config.yaml.template` — add `network.ztp` block (§5)
+- Shared read/write helpers; legacy alias (`network.ipv4` ↔ `network.ztp.ipv4.address`)
+- API contract appendix (request/response shapes for all §8 endpoints)
+
+**Done when:** Empty/default and legacy-only configs load without regression.
+
+**Out of scope:** Podman calls, UI.
+
+#### B1 — Discovery & validation
+
+**Deliverables**
+
+- `webui/network_utils.py` — `discover_parent_interfaces()`, `inspect_podman_network()`, quadlet parse; reuse `get_podman_cmd()` from `dhcp_deploy.py`
+- `webui/network_validation.py` — `validate_ztp_profile()`, `plan_network_changes()`; shared-network removal guard
+
+**Done when:** Validate returns `{ errors[], warnings[], plan }` with no side effects.
+
+**Out of scope:** Flask, UI, pod restart.
+
+#### B2 — Deploy orchestrator
+
+**Deliverables**
+
+- `webui/network_deploy.py` — `ensure_podman_network()`, `remove_stale_network()`, `sync_pod_quadlet()`, `apply_ztp_network()`, `restart_ztp_stack()`, `get_network_status()`
+- Mirror legacy `network.ipv4` / `network.network` on apply; Kea regen when `dhcp.enabled`
+
+**Done when:** Manual call moves pod to new macvlan on test VM.
+
+**Out of scope:** HTTP routes, UI, backup/rollback (B6).
+
+#### B3 — REST API
+
+**Deliverables** — `webui/app.py`, all mutations `@require_auth`:
+
+| Method | Path |
+|--------|------|
+| GET | `/api/network/status` |
+| GET | `/api/network/parents` |
+| GET | `/api/network/podman` |
+| POST | `/api/network/validate` |
+| PUT | `/api/network/ztp` |
+| POST | `/api/network/apply` |
+| POST | `/api/network/restart` |
+| POST | `/api/network/auto-detect` |
+
+**Done when:** `curl` exercises happy path and 400 on invalid CIDR.
+
+#### B4 — ZTP Network UI tab
+
+**Deliverables** — `webui/templates/index.html`:
+
+- Third top-level tab: `activeApplication === 'ztp-network'` (+ `localStorage`)
+- Prerequisites, status cards, config form, Validate / Save / Apply & restart / Restart only
+- Tab enter: status + parents; poll while pending or apply in progress
+
+**Done when:** Full operator flow in browser without SSH.
+
+**Out of scope:** DHCP mismatch banner (B5).
+
+#### B5 — DHCP cross-tab glue
+
+**Deliverables**
+
+- Auto-fill `dhcp.ipv4.subnet` / gateway from ZTP profile when empty
+- DHCP Configuration sub-tab mismatch banner + link to ZTP Network tab
+- ZTP Network tab reminder when DHCP enabled but subnets disagree
+- De-emphasize DHCP host-network banner when `network.ztp.enabled`
+
+**Done when:** Mismatch visible on both tabs; tab switch works.
+
+#### B6 — Hardening (lock, backup, rollback)
+
+**Deliverables**
+
+- Mutex: `/opt/containerdata/ztpbootstrap/.network-apply.lock`
+- Pre-apply snapshot: `.ztpbootstrap-backups/network/`
+- Failure after pod stop: restore quadlet, attempt start, set `status: error` + `last_error`
+- Resolve §15 sudo-helper decision (polkit script vs mounted systemd dir)
+
+**Done when:** Simulated network-create failure leaves pod on old network.
+
+#### B7 — Install script alignment
+
+**Deliverables**
+
+- Extract quadlet sync from `update-config.sh` into shared Python (or document runtime-only path)
+- `setup-interactive.sh` seeds `network.ztp` from install prompts
+- `update-config.sh` delegates to shared sync
+
+**Done when:** Fresh install + UI apply produce identical quadlet; host-network lab mode unchanged when `network.ztp.enabled: false`.
+
+#### B8 — Unit tests
+
+**Deliverables**
+
+- `tests/unit/test_network_validation.py`
+- `tests/unit/test_network_deploy.py` (quadlet text, planner; mocked podman)
+- `tests/unit/test_network_utils.py`
+
+**Done when:** `make test-unit` passes without Podman.
+
+#### B9 — Integration tests
+
+**Deliverables**
+
+- `tests/integration/test_network_api.bats` — validate → save → apply → status → drift
+- Scenario: create → apply → health → dhcp enable (§12)
+- Regression: host-network mode
+
+**Done when:** Passes on VM with macvlan parent or documented mock.
+
+#### B10 — Ops docs
+
+**Deliverables**
+
+- `docs/ZTP_NETWORK_HOST_SETUP.md` — VLAN subinterface, macvlan-host bridge, firewall
+- Migration note: `net-10` → `ztp-net-5`
+- `AGENTS.md` / `webui/README.md` pointers
+
+**Done when:** Operator can complete host plumbing from docs alone.
+
+#### Suggested PR stack
+
+| PR | Buckets | Title |
+|----|---------|-------|
+| PR-1 | B0 + B1 + B8 (validation) | feat(network): schema, validation, and discovery |
+| PR-2 | B2 + B6 | feat(network): deploy orchestrator with backup/rollback |
+| PR-3 | B3 | feat(network): REST API |
+| PR-4 | B4 | feat(network): ZTP Network UI tab |
+| PR-5 | B5 | feat(network): DHCP subnet alignment and cross-tab UX |
+| PR-6 | B7 + B9 | feat(network): install script sync and integration tests |
+| PR-7 | B10 | docs(network): host setup and migration guide |
+
+PR-4 and PR-5 can merge in either order after PR-3. PR-7 can open anytime after B0.
+
+#### Pre-flight decisions (before B2+)
+
+1. **Sudo / systemd writes** — mounted `/etc/containers/systemd/ztpbootstrap` vs polkit helper?
+2. **IPv6** — required field or “disabled” toggle in UI?
+3. **Branch base** — confirm `main` (Kea merged) as integration target.
+
+#### Acceptance criteria → bucket owner
+
+| Criterion (§16) | Primary bucket |
+|-----------------|----------------|
+| Configure VLAN 5 from UI | B4 + B3 |
+| Apply & restart moves pod | B2 + B3 |
+| Kea on ZTP VLAN after apply | B2 + B5 |
+| Switch ZTP lab test | Manual / B9 |
+| Drift & errors in UI | B2 + B4 |
+| Host-network lab unchanged | B0 + B7 + B9 |
+
+#### Agent dispatch cheat sheet
+
+```text
+Agent A (B0+B1+B8): config schema, network_utils.py, network_validation.py, unit tests. No Flask, no restart.
+Agent B (B2+B6): network_deploy.py, lock, backup/restore. Mirror dhcp_deploy.py.
+Agent C (B3): Flask /api/network/* only.
+Agent D (B4): index.html ZTP Network tab only. Mock API until B3 lands.
+Agent E (B5): DHCP auto-fill + mismatch banners only.
+Agent F (B7+B9): setup-interactive, update-config, BATS integration tests.
+Agent G (B10): ZTP_NETWORK_HOST_SETUP.md + migration doc.
+```
 
 ---
 
