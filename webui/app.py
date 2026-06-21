@@ -65,6 +65,31 @@ except ImportError as e:
     # DHCP modules not available - will fail gracefully
     print(f"Warning: DHCP modules not available: {e}", flush=True)
 
+# Import network modules
+try:
+    from network_config import get_ztp_profile, merge_ztp_update, sync_legacy_network_fields
+    from network_deploy import (
+        apply_ztp_network,
+        auto_detect_from_parent,
+        get_network_status,
+        restart_ztp_stack,
+    )
+    from network_utils import discover_parent_interfaces, list_ztp_podman_networks
+    from network_validation import plan_network_changes, validate_ztp_profile
+except ImportError as e:
+    print(f"Warning: Network modules not available: {e}", flush=True)
+    get_ztp_profile = None
+    merge_ztp_update = None
+    sync_legacy_network_fields = None
+    apply_ztp_network = None
+    auto_detect_from_parent = None
+    get_network_status = None
+    restart_ztp_stack = None
+    discover_parent_interfaces = None
+    list_ztp_podman_networks = None
+    plan_network_changes = None
+    validate_ztp_profile = None
+
 # Import security utilities
 try:
     from security_utils import (
@@ -3628,6 +3653,182 @@ def get_dhcp_statistics():
         stats["ipv6"] = ipv6_stats
 
         return jsonify({"statistics": stats})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================================
+# ZTP Network API Endpoints
+# ============================================================================
+
+
+def _load_full_config() -> dict:
+    if config_manager:
+        return config_manager.read_config()
+    if CONFIG_FILE.exists():
+        with open(CONFIG_FILE, "r") as f:
+            return yaml.safe_load(f) or {}
+    return {}
+
+
+def _save_full_config(config: dict):
+    if config_manager:
+        try:
+            config_manager.write_config(config)
+            return True, None
+        except Exception as exc:
+            return False, str(exc)
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
+
+
+@app.route("/api/network/status", methods=["GET"])
+@require_auth
+def api_network_status():
+    """Current ZTP network profile, drift, and runtime state."""
+    try:
+        if not get_network_status:
+            return jsonify({"error": "Network modules not available"}), 503
+        config = _load_full_config()
+        payload = get_network_status(config)
+        return jsonify(payload)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/network/parents", methods=["GET"])
+@require_auth
+def api_network_parents():
+    """Discover candidate macvlan parent interfaces."""
+    try:
+        if not discover_parent_interfaces:
+            return jsonify({"error": "Network modules not available"}), 503
+        return jsonify({"parents": discover_parent_interfaces()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/network/podman", methods=["GET"])
+@require_auth
+def api_network_podman():
+    """List ZTP-related Podman networks."""
+    try:
+        if not list_ztp_podman_networks:
+            return jsonify({"error": "Network modules not available"}), 503
+        return jsonify({"networks": list_ztp_podman_networks()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/network/validate", methods=["POST"])
+@require_auth
+def api_network_validate():
+    """Dry-run validation and change plan."""
+    try:
+        if not validate_ztp_profile or not plan_network_changes:
+            return jsonify({"error": "Network modules not available"}), 503
+        data = request.get_json() or {}
+        current = _load_full_config()
+        desired = merge_ztp_update(current, data.get("ztp") or data)
+        errors, warnings = validate_ztp_profile(desired)
+        plan = plan_network_changes(current, desired)
+        return jsonify(
+            {
+                "valid": len(errors) == 0,
+                "errors": errors,
+                "warnings": warnings,
+                "plan": plan,
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/network/ztp", methods=["PUT"])
+@require_auth
+def api_network_ztp_save():
+    """Save ZTP profile to config without restart."""
+    try:
+        if not merge_ztp_update or not validate_ztp_profile:
+            return jsonify({"error": "Network modules not available"}), 503
+        data = request.get_json() or {}
+        ztp_data = data.get("ztp") or data
+        config = _load_full_config()
+        config = merge_ztp_update(config, ztp_data)
+        errors, warnings = validate_ztp_profile(config)
+        if errors:
+            return jsonify({"error": "; ".join(errors), "errors": errors, "warnings": warnings}), 400
+        network = config.setdefault("network", {})
+        ztp = network.setdefault("ztp", {})
+        if ztp.get("enabled") and ztp.get("status") != "applied":
+            ztp["status"] = "pending"
+        ok, err = _save_full_config(config)
+        if not ok:
+            return jsonify({"error": err}), 500
+        return jsonify({"success": True, "ztp": get_ztp_profile(config), "warnings": warnings})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/network/apply", methods=["POST"])
+@require_auth
+def api_network_apply():
+    """Save ZTP profile and apply network changes with restart."""
+    try:
+        if not apply_ztp_network or not merge_ztp_update:
+            return jsonify({"error": "Network modules not available"}), 503
+        data = request.get_json() or {}
+        ztp_data = data.get("ztp") or data
+        current = _load_full_config()
+        config = merge_ztp_update(current, ztp_data)
+        success, error_msg, updated = apply_ztp_network(
+            config, restart=True, current_config=current
+        )
+        if success:
+            ok, save_err = _save_full_config(updated)
+            if not ok:
+                return jsonify({"error": save_err}), 500
+            return jsonify({"success": True, "ztp": get_ztp_profile(updated)})
+        ok, save_err = _save_full_config(updated)
+        if not ok:
+            return jsonify({"error": save_err}), 500
+        return jsonify({"error": error_msg or "Apply failed"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/network/restart", methods=["POST"])
+@require_auth
+def api_network_restart():
+    """Restart ZTP stack without config changes."""
+    try:
+        if not restart_ztp_stack:
+            return jsonify({"error": "Network modules not available"}), 503
+        config = _load_full_config()
+        success, error_msg = restart_ztp_stack(config)
+        if success:
+            return jsonify({"success": True})
+        return jsonify({"error": error_msg or "Restart failed"}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/network/auto-detect", methods=["POST"])
+@require_auth
+def api_network_auto_detect():
+    """Suggest subnet/gateway from parent interface."""
+    try:
+        if not auto_detect_from_parent:
+            return jsonify({"error": "Network modules not available"}), 503
+        data = request.get_json() or {}
+        parent = (data.get("parent_interface") or "").strip()
+        if not parent:
+            return jsonify({"error": "parent_interface is required"}), 400
+        return jsonify(auto_detect_from_parent(parent))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
