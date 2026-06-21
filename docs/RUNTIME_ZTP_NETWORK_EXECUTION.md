@@ -98,6 +98,8 @@ Stacked PRs [#61](https://github.com/coreyhines/ztpbootstrap/pull/61)–[#66](ht
 
 **Next:** G5 lab acceptance (Apply + switch ZTP), full BATS with `TEST_PASS`, then epic merge to `main` (P3).
 
+**G5 brigade:** [RUNTIME_ZTP_NETWORK_G5_BRIGADE.md](RUNTIME_ZTP_NETWORK_G5_BRIGADE.md) — bucket tracker [docs/research/RUNTIME_ZTP_NETWORK_G5-buckets.md](research/RUNTIME_ZTP_NETWORK_G5-buckets.md) · Cursor Auto + operator gates (no Claude code farms).
+
 ---
 
 ## Lab status — fedora1 (2026-06-21)
