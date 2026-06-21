@@ -34,6 +34,10 @@ The dashboard will be available at `http://localhost:5000/`. Use the **DHCP Serv
 - Integration tests require Podman and are in `tests/integration/test_dhcp_api.bats`.
 - See `docs/DHCP_TESTING.md` and `docs/DHCP_IMPLEMENTATION_PLAN.md` for full setup.
 
+### Runtime ZTP network
+
+Production deployments attach the pod to a ZTP VLAN via Podman macvlan from the **ZTP Network** Web UI tab. Feature design: `docs/RUNTIME_ZTP_NETWORK_SPEC.md`. Host VLAN, firewall, and migration steps (not automated by the UI): `docs/ZTP_NETWORK_HOST_SETUP.md`.
+
 ### Lint, test, format
 
 Standard commands are in the `Makefile` — run `make help` for the full list. Key commands:
