@@ -96,7 +96,29 @@ See [P1 operations note](#p1-operations-note) below.
 
 Stacked PRs [#61](https://github.com/coreyhines/ztpbootstrap/pull/61)–[#66](https://github.com/coreyhines/ztpbootstrap/pull/66) merged into their stack bases; consolidated onto `feature/runtime-ztp-network` via [#67](https://github.com/coreyhines/ztpbootstrap/pull/67).
 
-**Next:** G5 lab acceptance, BATS on VM (B9), then epic merge to `main` (P3).
+**Next:** G5 lab acceptance (Apply + switch ZTP), full BATS with `TEST_PASS`, then epic merge to `main` (P3).
+
+---
+
+## Lab status — fedora1 (2026-06-21)
+
+| Step | Status |
+|------|--------|
+| Deploy `feature/runtime-ztp-network` webui to `/opt/containerdata` | **Done** |
+| P1 mounts on `ztpbootstrap-webui.container` (systemd dir + `/sys/class/net`) | **Done** on host |
+| `enp7s0.5` VLAN parent oper-up | **Done** |
+| `/api/network/validate` for VLAN 5 profile | **Pass** (`valid: true`, plan `create` → `ztp-net-5` @ `10.0.5.10`) |
+| BATS `test_network_api.bats` (macvlan HTTPS) | **2/2** unauth tests pass; auth tests need `TEST_PASS` |
+| **Apply & restart** (migrate off `net-10`) | **Not run** — ~30s outage; DNS must follow |
+| Switch ZTP bootstrap on VLAN 5 | **Not run** — manual §16 |
+
+**BATS on macvlan hosts:**
+
+```bash
+sudo ip addr add 10.0.10.2/24 dev macvlan-host  # if missing
+export BASE_URL=https://10.0.10.10 CURL_INSECURE=1 CURL_INTERFACE=macvlan-host TEST_PASS='…'
+bats tests/integration/test_network_api.bats
+```
 
 ---
 

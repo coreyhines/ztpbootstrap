@@ -43,14 +43,26 @@ setup() {
         skip "WebUI service not running"
     fi
 
-    WEBUI_PORT="${WEBUI_PORT:-8080}"
-    BASE_URL="http://localhost:${WEBUI_PORT}"
-    if ! curl -s --connect-timeout 2 --max-time 5 "http://localhost:8080" >/dev/null 2>&1; then
-        BASE_URL="http://localhost:5000"
+    CURL_OPTS=()
+    if [[ -n "${CURL_INSECURE:-}" ]]; then
+        CURL_OPTS+=(-k)
+    fi
+    if [[ -n "${CURL_INTERFACE:-}" ]]; then
+        CURL_OPTS+=(--interface "${CURL_INTERFACE}")
     fi
 
-    if ! curl -s --connect-timeout 2 --max-time 5 "${BASE_URL}" >/dev/null 2>&1; then
-        skip "WebUI not accessible"
+    if [[ -n "${BASE_URL:-}" ]]; then
+        :
+    else
+        WEBUI_PORT="${WEBUI_PORT:-8080}"
+        BASE_URL="http://localhost:${WEBUI_PORT}"
+        if ! curl "${CURL_OPTS[@]}" -s --connect-timeout 2 --max-time 5 "http://localhost:8080" >/dev/null 2>&1; then
+            BASE_URL="http://localhost:5000"
+        fi
+    fi
+
+    if ! curl "${CURL_OPTS[@]}" -s --connect-timeout 2 --max-time 5 "${BASE_URL}/api/status" >/dev/null 2>&1; then
+        skip "WebUI not accessible at ${BASE_URL}"
     fi
 
     TEST_PASS="${TEST_PASS:-admin}"
@@ -64,7 +76,7 @@ authenticate() {
     fi
 
     local response
-    response=$(curl -s -w "\n%{http_code}" -c /tmp/test_cookies.txt -X POST \
+    response=$(curl "${CURL_OPTS[@]}" -s -w "\n%{http_code}" -c /tmp/test_cookies.txt -X POST \
         "${BASE_URL}/api/auth/login" \
         -H "Content-Type: application/json" \
         -d "{\"password\":\"${TEST_PASS}\"}" 2>/dev/null || true)
@@ -88,12 +100,12 @@ require_auth_or_skip() {
 
 get_csrf_token() {
     local auth_status
-    auth_status=$(curl -s -b /tmp/test_cookies.txt "${BASE_URL}/api/auth/status" 2>/dev/null || true)
+    auth_status=$(curl "${CURL_OPTS[@]}" -s -b /tmp/test_cookies.txt "${BASE_URL}/api/auth/status" 2>/dev/null || true)
     AUTH_CSRF_TOKEN=$(printf "%s" "$auth_status" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('csrf_token', ''))" 2>/dev/null || echo "")
 }
 
 @test "network status endpoint requires auth" {
-    run curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/api/network/status"
+    run curl "${CURL_OPTS[@]}" -s -o /dev/null -w "%{http_code}" "${BASE_URL}/api/network/status"
     assert_success
     [[ "$output" == "401" ]]
 }
@@ -101,7 +113,7 @@ get_csrf_token() {
 @test "network status endpoint returns ztp payload when authenticated" {
     require_auth_or_skip
 
-    run curl -s -b /tmp/test_cookies.txt "${BASE_URL}/api/network/status"
+    run curl "${CURL_OPTS[@]}" -s -b /tmp/test_cookies.txt "${BASE_URL}/api/network/status"
     assert_success
     assert_output --partial "ztp"
 }
@@ -109,7 +121,7 @@ get_csrf_token() {
 @test "network parents endpoint returns parent list when authenticated" {
     require_auth_or_skip
 
-    run curl -s -b /tmp/test_cookies.txt "${BASE_URL}/api/network/parents"
+    run curl "${CURL_OPTS[@]}" -s -b /tmp/test_cookies.txt "${BASE_URL}/api/network/parents"
     assert_success
     assert_output --partial "parents"
 }
@@ -117,7 +129,7 @@ get_csrf_token() {
 @test "network podman endpoint returns network list when authenticated" {
     require_auth_or_skip
 
-    run curl -s -b /tmp/test_cookies.txt "${BASE_URL}/api/network/podman"
+    run curl "${CURL_OPTS[@]}" -s -b /tmp/test_cookies.txt "${BASE_URL}/api/network/podman"
     assert_success
     assert_output --partial "networks"
 }
@@ -126,7 +138,7 @@ get_csrf_token() {
     require_auth_or_skip
     get_csrf_token
 
-    run curl -s -b /tmp/test_cookies.txt \
+    run curl "${CURL_OPTS[@]}" -s -b /tmp/test_cookies.txt \
         -X POST \
         -H "Content-Type: application/json" \
         ${AUTH_CSRF_TOKEN:+-H "X-CSRF-Token: ${AUTH_CSRF_TOKEN}"} \
@@ -142,7 +154,7 @@ get_csrf_token() {
     require_auth_or_skip
     get_csrf_token
 
-    run curl -s -b /tmp/test_cookies.txt \
+    run curl "${CURL_OPTS[@]}" -s -b /tmp/test_cookies.txt \
         -X POST \
         -H "Content-Type: application/json" \
         ${AUTH_CSRF_TOKEN:+-H "X-CSRF-Token: ${AUTH_CSRF_TOKEN}"} \
@@ -154,7 +166,7 @@ get_csrf_token() {
 }
 
 @test "network apply endpoint requires auth" {
-    run curl -s -X POST \
+    run curl "${CURL_OPTS[@]}" -s -X POST \
         "${BASE_URL}/api/network/apply" \
         -H "Content-Type: application/json" \
         -d '{"ztp":{"enabled":false}}'
