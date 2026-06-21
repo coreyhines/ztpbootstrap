@@ -53,16 +53,45 @@
 | PR-6 | `network/pr-6-install-tests` | PR-4 branch | B7, B9 | Codex |
 | PR-7 | `network/pr-7-docs` | PR-6 branch | B10 + this ledger | Sonnet + Composer (first draft) |
 
-**Excluded from network PRs:** `systemd/ztpbootstrap-webui.container` (unrelated WIP), `.playwright-mcp/`
+**Excluded from network PRs:** `systemd/ztpbootstrap-webui.container` (unrelated WIP reverted per P4), `.playwright-mcp/`
+
+---
+
+## Pre-flight decisions (approved 2026-06-21)
+
+| ID | Decision | Approved choice |
+|----|----------|-----------------|
+| **P1** | Sudo / systemd writes | **Mounted `/etc/containers/systemd/ztpbootstrap`** (same as DHCP deploy); no polkit helper in v1 |
+| **P2** | IPv6 in UI | **Optional** — empty IPv6 fields = disabled in quadlet |
+| **P3** | Branch base | **`main`** (Kea merged) for final epic merge |
+| **P4** | Unrelated WIP | **Reverted** `HTTPS_ENABLED` webui container change; keep out of network PRs |
+
+See [P1 operations note](#p1-operations-note) below.
+
+---
+
+## Usage limits (checked 2026-06-21)
+
+| Resource | Headroom | Routing rule |
+|----------|----------|--------------|
+| Claude CLI Pro | ~**99%** weekly quota left (resets Jun 27) | P1 design, B6 bash, B9 on VM |
+| Cursor Agent | Opaque; default **composer-2.5-fast** | Mechanical: **codex-low-fast** |
+| Parallel agents | Cap at **2** cheap + **1** Claude | Avoid 4+ parallel thinking models |
 
 ---
 
 ## Gates
 
-| Gate | Check |
-|------|--------|
-| G1 | 13 network unit tests pass |
-| G2 | Opus deploy review merged |
-| G3 | 8 `/api/network/*` routes |
-| G4 | ZTP Network tab + DHCP banners |
-| G5 | Lab test fedora1 + switch ZTP |
+| Gate | Check | Status |
+|------|--------|--------|
+| G1 | 13 network unit tests pass | **Done** — PR [#61](https://github.com/coreyhines/ztpbootstrap/pull/61) merged |
+| G2 | Opus deploy review merged | Pending PR-62 |
+| G3 | 8 `/api/network/*` routes | Pending PR-63 |
+| G4 | ZTP Network tab + DHCP banners | Pending PR-64 |
+| G5 | Lab test fedora1 + switch ZTP | Not started |
+
+---
+
+## P1 operations note
+
+Production path: WebUI container mounts host `/etc/containers/systemd/ztpbootstrap` (or writes via existing DHCP deploy privilege model). **`network_deploy.sync_pod_quadlet()`** writes `ztpbootstrap.pod` directly; no setuid helper in v1. Document in ops runbook if direct write fails on a host — operator copies from `.ztpbootstrap-backups/network/` or re-runs `update-config.sh`.
