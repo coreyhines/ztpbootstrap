@@ -58,6 +58,6 @@
 | W5 | done | **cursor-auto** | integration | `test_dhcp_{reservation,delete,status}_api.py` |
 | W6 | done | **cursor-auto** | integration | merge commits + session report |
 
-## G6b (P1 backlog — not approved)
+## G6b (P1 — approved 2026-06-22, done)
 
-See `docs/research/WEBUI_P1_G6b-buckets.md`.
+See `docs/research/WEBUI_P1_G6b-buckets.md` and `docs/research/WEBUI_P1_G6b-session-2026-06-22.md`.

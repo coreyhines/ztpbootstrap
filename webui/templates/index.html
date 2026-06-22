@@ -3396,7 +3396,7 @@
                         const response = await fetch('/api/network/auto-detect', {
                             method: 'POST',
                             credentials: 'same-origin',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: this.getCsrfHeaders(),
                             body: JSON.stringify({ parent_interface: this.networkForm.parent_interface })
                         });
                         const data = await response.json();
@@ -3437,6 +3437,15 @@
                                 if (this.dhcpConfig.ipv4 && this.dhcpConfig.ipv4.ntp_servers) {
                                     // Clean trailing periods/commas and join
                                     this.dhcpConfig.ipv4.ntp_servers_str = this.dhcpConfig.ipv4.ntp_servers
+                                        .map(s => String(s).replace(/[.,\s]+$/, '').trim())
+                                        .filter(s => s)
+                                        .join(', ');
+                                }
+                                if (!this.dhcpConfig.ipv6) {
+                                    this.dhcpConfig.ipv6 = { dns_servers_str: '' };
+                                }
+                                if (this.dhcpConfig.ipv6 && this.dhcpConfig.ipv6.dns_servers) {
+                                    this.dhcpConfig.ipv6.dns_servers_str = this.dhcpConfig.ipv6.dns_servers
                                         .map(s => String(s).replace(/[.,\s]+$/, '').trim())
                                         .filter(s => s)
                                         .join(', ');
@@ -3659,10 +3668,32 @@
                             delete config.ipv6.dns_servers_str;
                         }
 
-                        const headers = {'Content-Type': 'application/json'};
-                        if (this.csrfToken) {
-                            headers['X-CSRF-Token'] = this.csrfToken;
+                        // enabled is controlled by /api/dhcp/enable|disable — never via config save
+                        delete config.enabled;
+
+                        const dnsError = this.validateDhcpServerList(
+                            config.ipv4?.dns_servers_str, 'IPv4 DNS server'
+                        );
+                        if (dnsError) {
+                            alert(dnsError);
+                            return;
                         }
+                        const ntpError = this.validateDhcpServerList(
+                            config.ipv4?.ntp_servers_str, 'NTP server', 4
+                        );
+                        if (ntpError) {
+                            alert(ntpError);
+                            return;
+                        }
+                        const ipv6DnsError = this.validateDhcpServerList(
+                            config.ipv6?.dns_servers_str, 'IPv6 DNS server'
+                        );
+                        if (ipv6DnsError) {
+                            alert(ipv6DnsError);
+                            return;
+                        }
+
+                        const headers = this.getCsrfHeaders();
                         const response = await fetch('/api/dhcp/config', {
                             method: 'PUT',
                             headers: headers,
@@ -3704,7 +3735,7 @@
                             : {ipv6_address: this.dhcpConfig.ipv6.subnet || '2001:db8::10'};
                         const response = await fetch('/api/dhcp/config/auto-detect', {
                             method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
+                            headers: this.getCsrfHeaders(),
                             body: JSON.stringify(requestBody),
                             credentials: 'same-origin'
                         });
@@ -3737,7 +3768,7 @@
                     try {
                         const response = await fetch('/api/dhcp/config/auto-detect', {
                             method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
+                            headers: this.getCsrfHeaders(),
                             body: JSON.stringify({}),
                             credentials: 'same-origin'
                         });
@@ -3846,6 +3877,11 @@
                         return;
                     }
 
+                    if (!this.validateIpAddress(this.newReservation.ip)) {
+                        this.reservationError = 'Invalid IP address. Use a valid IPv4 or IPv6 address.';
+                        return;
+                    }
+
                     try {
                         const headers = {'Content-Type': 'application/json'};
                         if (this.csrfToken) {
@@ -3933,6 +3969,50 @@
                 validateMacAddress(mac) {
                     // Validate MAC format XX:XX:XX:XX:XX:XX
                     return /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(mac);
+                },
+
+                looksLikeHostname(value) {
+                    const v = String(value || '').trim();
+                    if (!v) return false;
+                    if (/^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$/.test(v)) {
+                        return false;
+                    }
+                    if (/^[0-9a-fA-F:.]+$/.test(v) && v.includes(':')) {
+                        return false;
+                    }
+                    if (v.includes('_') || v.endsWith('.')) return true;
+                    if (/[g-zG-Z]/.test(v)) return true;
+                    return /^[a-zA-Z][a-zA-Z0-9-]*(\.[a-zA-Z0-9-]+)+$/.test(v);
+                },
+
+                validateIpAddress(value) {
+                    const v = String(value || '').trim();
+                    if (!v || this.looksLikeHostname(v)) return false;
+                    if (v.includes(':')) {
+                        return /^[0-9a-fA-F:.]+$/.test(v) && v.includes(':');
+                    }
+                    return /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$/.test(v);
+                },
+
+                validateDhcpServerList(value, label, version = null) {
+                    if (!value) return '';
+                    const entries = String(value).split(',').map(s => s.trim()).filter(Boolean);
+                    for (let i = 0; i < entries.length; i++) {
+                        const entry = entries[i];
+                        if (this.looksLikeHostname(entry)) {
+                            return `${label} #${i + 1} must be an IP address, not a hostname ('${entry}').`;
+                        }
+                        if (!this.validateIpAddress(entry)) {
+                            if (version === 4 && entry.includes(':')) {
+                                return `${label} #${i + 1} must be IPv4, got '${entry}'.`;
+                            }
+                            return `Invalid ${label} #${i + 1}: '${entry}'.`;
+                        }
+                        if (version === 4 && entry.includes(':')) {
+                            return `${label} #${i + 1} must be IPv4, got '${entry}'.`;
+                        }
+                    }
+                    return '';
                 },
 
                 // OUI Filtering Management

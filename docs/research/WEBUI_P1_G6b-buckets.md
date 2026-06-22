@@ -8,9 +8,10 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **`pending`** |
-| Approved by | — |
-| Notes | Bucketized with G6 re-farm; execute after user approves G6b |
+| Status | **`approved`** |
+| Approved by | user |
+| Approved waves | all (2026-06-22) |
+| Notes | Executed inline by coordinator after approval |
 
 ## Bucket registry
 
@@ -26,10 +27,12 @@
 
 ## Execution status
 
-| ID | Status |
-|----|--------|
-| P1a | pending |
-| P1b | pending |
-| P1c | pending |
-| P1d | pending |
-| P1e | pending |
+| ID | Status | Resolved backend | Notes |
+|----|--------|------------------|-------|
+| P1a | done | cursor-auto | `getCsrfHeaders()` on auto-detect POSTs |
+| P1b | done | cursor-auto | Server `_looks_like_hostname`; client `validateIpAddress` / `validateDhcpServerList` |
+| P1c | done | cursor-auto | IPv6 `dns_servers_str` in `loadDhcpConfig` |
+| P1d | done | cursor-auto | Client `delete config.enabled`; server preserves existing on PUT |
+| P1e | done | cursor-auto | `tests/unit/test_dhcp_g6b.py`; hostname tests unblocked |
+
+Session report: `docs/research/WEBUI_P1_G6b-session-2026-06-22.md`

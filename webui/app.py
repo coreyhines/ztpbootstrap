@@ -3028,9 +3028,20 @@ def update_dhcp_config():
                 )
                 return jsonify({"error": f"Invalid DHCP configuration: {error_msg}"}), 400
 
+        dhcp_payload = dict(data["dhcp"])
+        # enabled is owned by /api/dhcp/enable|disable — preserve existing flag on config save
+        dhcp_payload.pop("enabled", None)
+
         # Use ConfigManager for thread-safe update (Issue #1)
         if config_manager:
-            success, error_msg = config_manager.update_section("dhcp", data["dhcp"])
+            try:
+                existing = config_manager.read_config()
+            except FileNotFoundError:
+                existing = {}
+            preserved_enabled = (existing.get("dhcp") or {}).get("enabled", False)
+            dhcp_payload["enabled"] = preserved_enabled
+
+            success, error_msg = config_manager.update_section("dhcp", dhcp_payload)
             if not success:
                 log_security_event(
                     "dhcp_config_update", "failure", client_ip, f"update_error={error_msg}"
@@ -3047,7 +3058,9 @@ def update_dhcp_config():
             else:
                 config = {}
 
-            config["dhcp"] = data["dhcp"]
+            preserved_enabled = (config.get("dhcp") or {}).get("enabled", False)
+            dhcp_payload["enabled"] = preserved_enabled
+            config["dhcp"] = dhcp_payload
 
             with open(CONFIG_FILE, "w") as f:
                 yaml.dump(config, f, default_flow_style=False, sort_keys=False)
