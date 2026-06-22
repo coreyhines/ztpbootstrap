@@ -133,12 +133,12 @@
                                 class="px-6 py-4 border-b-2 font-medium text-sm">
                             ZTP Bootstrap Service
                         </button>
-                        <button @click="activeApplication = 'ztp-network'"
+                        <button @click="openLoginModal(() => activeApplication = 'ztp-network')"
                                 :class="activeApplication === 'ztp-network' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                                 class="px-6 py-4 border-b-2 font-medium text-sm">
                             ZTP Network
                         </button>
-                        <button @click="activeApplication = 'dhcp'"
+                        <button @click="openLoginModal(() => activeApplication = 'dhcp')"
                                 :class="activeApplication === 'dhcp' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                                 class="px-6 py-4 border-b-2 font-medium text-sm">
                             DHCP Server
@@ -225,8 +225,21 @@
 
             </div>
 
+            <!-- Auth wall for protected tabs -->
+            <div x-show="(activeApplication === 'ztp-network' || activeApplication === 'dhcp') && !authenticated"
+                 class="bg-white rounded-lg shadow-sm p-12 mb-4 text-center border border-gray-200">
+                <div class="text-gray-400 mb-4">
+                    <svg class="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                    </svg>
+                </div>
+                <h3 class="text-lg font-medium text-gray-900 mb-2">Authentication required</h3>
+                <p class="text-sm text-gray-500 mb-6">Sign in to access network and DHCP configuration.</p>
+                <button @click="openLoginModal()" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">Sign In</button>
+            </div>
+
             <!-- ZTP Network Status Cards -->
-            <div x-show="activeApplication === 'ztp-network'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+            <div x-show="activeApplication === 'ztp-network' && authenticated" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
                 <div class="bg-white rounded-lg shadow-sm p-4 border-l-4"
                      :class="networkStatus.status === 'applied' && !networkStatus.drift ? 'border-green-500' : (networkStatus.status === 'error' ? 'border-red-500' : 'border-yellow-500')">
                     <p class="text-xs font-medium text-gray-600 mb-0.5">Apply Status</p>
@@ -249,7 +262,7 @@
             </div>
 
             <!-- ZTP Network Panel -->
-            <div x-show="activeApplication === 'ztp-network'" class="bg-white rounded-lg shadow-sm p-6 mb-4">
+            <div x-show="activeApplication === 'ztp-network' && authenticated" class="bg-white rounded-lg shadow-sm p-6 mb-4">
                 <div x-show="networkStatus.drift" class="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
                     <p class="text-sm font-medium text-yellow-900">Configuration drift detected</p>
                     <ul class="mt-2 text-sm text-yellow-800 list-disc list-inside">
@@ -356,7 +369,7 @@
             </div>
 
             <!-- DHCP Server Status Cards -->
-            <div x-show="activeApplication === 'dhcp'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+            <div x-show="activeApplication === 'dhcp' && authenticated" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
                 <!-- DHCP Service Status -->
                 <div class="bg-white rounded-lg shadow-sm p-4 border-l-4 relative"
                      :class="!dhcpStatus.enabled ? 'border-gray-300' : (dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'border-green-500' : 'border-yellow-500'">
@@ -498,7 +511,7 @@
             </div>
 
             <!-- DHCP: Active Leases (in same position as Device Connections) -->
-            <div x-show="activeApplication === 'dhcp'" class="bg-white rounded-lg shadow-sm p-4 mb-4">
+            <div x-show="activeApplication === 'dhcp' && authenticated" class="bg-white rounded-lg shadow-sm p-4 mb-4">
                 <div class="flex items-center justify-between mb-3">
                     <div>
                         <h2 class="text-base font-semibold text-gray-900 mb-1">Active Leases</h2>
@@ -831,7 +844,7 @@
             </div>
 
             <!-- DHCP Server Tabs -->
-            <div x-show="activeApplication === 'dhcp'" class="bg-white rounded-lg shadow-sm">
+            <div x-show="activeApplication === 'dhcp' && authenticated" class="bg-white rounded-lg shadow-sm">
                 <div class="border-b border-gray-200">
                     <nav class="flex -mb-px">
                         <button @click="activeDhcpTab = 'config'"
@@ -2111,6 +2124,8 @@
                             if (this.activeApplication === 'dhcp') {
                                 await this.loadDhcpConfig();
                                 await this.loadDhcpLeases();
+                            } else if (this.activeApplication === 'ztp-network') {
+                                await this.loadNetworkStatus();
                             }
 
                             const pendingAction = this.pendingAction;
