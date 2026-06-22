@@ -37,7 +37,12 @@ except ImportError as e:
 
 # Import DHCP modules
 try:
-    from dhcp_config import generate_kea_config
+    from dhcp_config import (
+        build_kea_reservation_payload,
+        dhcp_subnet_id_for_service,
+        find_reservation_in_config,
+        generate_kea_config,
+    )
     from dhcp_deploy import (
         check_dhcp_container_status,
         create_dhcp_container,
@@ -3586,13 +3591,14 @@ def add_dhcp_reservation():
         if not data or "mac" not in data or "ip" not in data:
             return jsonify({"error": "MAC and IP address required"}), 400
 
-        # Add via Kea API
-        reservation = {
-            "hw-address": data["mac"],
-            "ip-address": data["ip"],
-        }
-        if "hostname" in data:
-            reservation["hostname"] = data["hostname"]
+        # Build proper Kea reservation payload with subnet-id
+        subnet_id = dhcp_subnet_id_for_service("dhcp4")
+        reservation = build_kea_reservation_payload(
+            mac=data["mac"],
+            ip_address=data["ip"],
+            hostname=data.get("hostname"),
+            subnet_id=subnet_id,
+        )
 
         success = add_reservation(reservation, "dhcp4")
         if success:
@@ -3615,12 +3621,13 @@ def add_dhcp_reservation():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/dhcp/reservations/<mac>", methods=["DELETE"])
+@app.route("/api/dhcp/reservations/<path:mac>", methods=["DELETE"])
 @require_auth
 def remove_dhcp_reservation(mac):
     """Remove static reservation"""
     try:
-        success = delete_reservation(mac, "dhcp4")
+        subnet_id = dhcp_subnet_id_for_service("dhcp4")
+        success = delete_reservation(mac, subnet_id, "dhcp4")
         if success:
             # Also update config file
             if CONFIG_FILE.exists():
