@@ -3672,25 +3672,7 @@
                             config.ipv6 = {};
                         }
 
-                        // Convert IPv4 string fields to arrays
-                        if (config.ipv4.dns_servers_str) {
-                            config.ipv4.dns_servers = config.ipv4.dns_servers_str.split(',').map(s => s.trim()).filter(s => s);
-                            delete config.ipv4.dns_servers_str;
-                        }
-                        if (config.ipv4.ntp_servers_str) {
-                            config.ipv4.ntp_servers = config.ipv4.ntp_servers_str.split(',').map(s => s.trim()).filter(s => s);
-                            delete config.ipv4.ntp_servers_str;
-                        }
-
-                        // Convert IPv6 string fields to arrays
-                        if (config.ipv6.dns_servers_str) {
-                            config.ipv6.dns_servers = config.ipv6.dns_servers_str.split(',').map(s => s.trim()).filter(s => s);
-                            delete config.ipv6.dns_servers_str;
-                        }
-
-                        // enabled is controlled by /api/dhcp/enable|disable — never via config save
-                        delete config.enabled;
-
+                        // Validate string fields BEFORE converting to arrays
                         const dnsError = this.validateDhcpServerList(
                             config.ipv4?.dns_servers_str, 'IPv4 DNS server'
                         );
@@ -3712,6 +3694,25 @@
                             alert(ipv6DnsError);
                             return;
                         }
+
+                        // Convert IPv4 string fields to arrays
+                        if (config.ipv4.dns_servers_str) {
+                            config.ipv4.dns_servers = config.ipv4.dns_servers_str.split(',').map(s => s.trim()).filter(s => s);
+                            delete config.ipv4.dns_servers_str;
+                        }
+                        if (config.ipv4.ntp_servers_str) {
+                            config.ipv4.ntp_servers = config.ipv4.ntp_servers_str.split(',').map(s => s.trim()).filter(s => s);
+                            delete config.ipv4.ntp_servers_str;
+                        }
+
+                        // Convert IPv6 string fields to arrays
+                        if (config.ipv6.dns_servers_str) {
+                            config.ipv6.dns_servers = config.ipv6.dns_servers_str.split(',').map(s => s.trim()).filter(s => s);
+                            delete config.ipv6.dns_servers_str;
+                        }
+
+                        // enabled is controlled by /api/dhcp/enable|disable — never via config save
+                        delete config.enabled;
 
                         const headers = this.getCsrfHeaders();
                         const response = await fetch('/api/dhcp/config', {
