@@ -3684,8 +3684,10 @@ def delete_dhcp_lease(mac):
             )
         if success:
             return jsonify({"success": True})
-        return jsonify({"error": "Failed to delete lease — Kea may be unreachable"}), 500
+        app.logger.warning("delete_dhcp_lease: all delete paths failed for MAC=%s ip=%s", mac, ip_address)
+        return jsonify({"error": "Lease not found or Kea DHCP service is not running. Start the Kea service and retry."}), 500
     except Exception as e:
+        app.logger.error("delete_dhcp_lease exception for MAC=%s: %s", mac, e)
         return jsonify({"error": str(e)}), 500
 
 

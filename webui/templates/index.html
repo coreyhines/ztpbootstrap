@@ -3847,19 +3847,16 @@
                         return;
                     }
                     try {
-                        const headers = {};
-                        if (this.csrfToken) {
-                            headers['X-CSRF-Token'] = this.csrfToken;
-                        }
-                        const response = await fetch(`/api/dhcp/leases/${mac}`, {
+                        const response = await fetch(`/api/dhcp/leases/${encodeURIComponent(mac)}`, {
                             method: 'DELETE',
-                            headers: headers,
+                            headers: this.getCsrfHeaders(),
                             credentials: 'same-origin'
                         });
                         if (response.ok) {
                             await this.loadDhcpLeases();
                         } else {
-                            alert('Failed to delete lease');
+                            const data = await response.json().catch(() => ({}));
+                            alert('Failed to delete lease: ' + (data.error || `HTTP ${response.status}`));
                         }
                     } catch (error) {
                         console.error('Failed to delete lease:', error);
