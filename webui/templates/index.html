@@ -4,7 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZTP Bootstrap Service - Dashboard</title>
-    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <!-- ui-build: 20260622-login-fix17 -->
+    <script>
+        // Strip leaked passwords from old cached HTML before Alpine loads.
+        (function () {
+            if (window.location.search && window.location.search.indexOf('loginPassword') !== -1) {
+                window.history.replaceState(null, document.title, window.location.pathname);
+            }
+        })();
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js" defer></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Prism.js for YAML syntax highlighting -->
     <link id="prism-theme" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
@@ -12,8 +21,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
     <style>
         [x-cloak] { display: none !important; }
-        /* Ensure login modal is hidden by default */
-        .login-modal-hidden { display: none !important; }
+        /* Login modal hidden until Alpine opens it */
+        [data-login-modal] { display: none; }
         /* Custom styling for YAML in config */
         pre[class*="language-"] {
             margin: 0;
@@ -34,7 +43,7 @@
     </style>
 </head>
 <body class="bg-gray-50">
-    <div x-data="dashboard()" x-init="init()" x-cloak class="min-h-screen">
+    <div x-data="dashboard()" x-init="init()" class="min-h-screen">
         <!-- Header -->
         <header class="bg-white shadow-sm">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex justify-between items-center">
@@ -42,6 +51,19 @@
                     <h1 class="text-xl font-bold text-gray-900">ZTP Bootstrap Service</h1>
                     <p class="text-xs text-gray-500">Configuration and Monitoring Dashboard</p>
                 </div>
+                <!-- Auth status (always visible) -->
+                <div class="flex items-center gap-3">
+                    <button x-show="!authenticated"
+                            type="button"
+                            @click="openLoginModal()"
+                            class="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md">
+                        Sign in
+                    </button>
+                    <span x-show="authenticated"
+                          class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-green-800 bg-green-100 rounded-full">
+                        <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+                        Signed in
+                    </span>
                 <!-- Profile Dropdown -->
                 <div class="relative" x-data="{ showProfileMenu: false }" @click.away="showProfileMenu = false">
                     <button @click="showProfileMenu = !showProfileMenu"
@@ -62,9 +84,21 @@
                         <div class="py-2">
                             <!-- Session Info -->
                             <div class="px-4 py-2 border-b border-gray-200">
-                                <p class="text-xs text-gray-500">Session expires:</p>
-                                <p class="text-sm font-medium text-gray-900" x-text="authExpiresAt ? new Date(authExpiresAt * 1000).toLocaleString() : 'Unknown'"></p>
+                                <p class="text-xs text-gray-500" x-show="authenticated">Session expires:</p>
+                                <p class="text-xs text-gray-500" x-show="!authenticated">Status:</p>
+                                <p class="text-sm font-medium text-gray-900"
+                                   x-show="authenticated"
+                                   x-text="authExpiresAt ? new Date(authExpiresAt * 1000).toLocaleString() : 'Unknown'"></p>
+                                <p class="text-sm font-medium text-orange-700" x-show="!authenticated">Not signed in</p>
                             </div>
+                            <button x-show="!authenticated"
+                                    @click="showProfileMenu = false; openLoginModal()"
+                                    class="w-full text-left px-4 py-2 text-sm text-blue-700 hover:bg-gray-100 flex items-center space-x-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+                                </svg>
+                                <span>Sign in</span>
+                            </button>
                             <!-- Change Password -->
                             <button @click="triggerChangePassword(); showProfileMenu = false"
                                     class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2">
@@ -83,6 +117,7 @@
                             </button>
                         </div>
                     </div>
+                </div>
                 </div>
             </div>
         </header>
@@ -1539,22 +1574,16 @@
         </template>
 
         <!-- Login Modal -->
-        <div x-show="showLoginModal"
-             x-transition:enter="transition ease-out duration-300"
-             x-transition:enter-start="opacity-0"
-             x-transition:enter-end="opacity-100"
-             x-transition:leave="transition ease-in duration-200"
-             x-transition:leave-start="opacity-100"
-             x-transition:leave-end="opacity-0"
-             @keydown.escape.window="if(showLoginModal) { showLoginModal = false; loginPassword = ''; loginError = ''; }"
+        <div data-login-modal
              class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
-             @click.self="showLoginModal = false; loginPassword = ''; loginError = ''">
-            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
+             @keydown.escape.window="closeLoginModal()"
+             @click.self="closeLoginModal()">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white z-[60]"
                  @click.stop>
                 <div class="mt-3">
                     <div class="flex items-center justify-between mb-4">
                         <h3 class="text-lg font-medium text-gray-900">Authentication Required</h3>
-                        <button type="button" @click="showLoginModal = false; loginPassword = ''; loginError = ''"
+                        <button type="button" @click="closeLoginModal()"
                                 class="text-gray-400 hover:text-gray-600">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -1566,28 +1595,28 @@
                         Please enter the admin password to perform this action.
                     </p>
 
-                    <form @submit.prevent="login()">
+                    <form id="login-form" action="javascript:void(0)" method="post" novalidate
+                          onsubmit="if (window.ztpSubmitLogin) { window.ztpSubmitLogin(event); } return false;">
                         <div class="mb-4">
-                            <label for="loginPassword" class="block text-sm font-medium text-gray-700 mb-2">
+                            <label for="login-password-input" class="block text-sm font-medium text-gray-700 mb-2">
                                 Password
                             </label>
                             <input
                                 type="password"
-                                id="loginPassword"
+                                id="login-password-input"
+                                name="password"
                                 x-model="loginPassword"
                                 x-ref="passwordInput"
                                 autocomplete="current-password"
-                                @keyup.escape="showLoginModal = false; loginPassword = ''; loginError = ''"
+                                @input="loginPassword = $event.target.value"
+                                @paste="$nextTick(() => { loginPassword = $refs.passwordInput.value })"
                                 class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                                 placeholder="Enter admin password"
-                                :disabled="loginLoading"
-                                required
                             />
                         </div>
 
-                        <!-- Error message - only show when there's an error -->
                         <div x-show="loginError && loginError.length > 0"
-                             x-transition
+                             x-cloak
                              class="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
                             <p class="text-sm text-red-800" x-text="loginError"></p>
                         </div>
@@ -1595,20 +1624,16 @@
                         <div class="flex items-center justify-end gap-3">
                             <button
                                 type="button"
-                                @click="showLoginModal = false; loginPassword = ''; loginError = ''"
-                                :disabled="loginLoading"
-                                class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50">
+                                @click="closeLoginModal()"
+                                class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md">
                                 Cancel
                             </button>
                             <button
+                                id="login-submit-btn"
                                 type="submit"
-                                :disabled="loginLoading || !loginPassword"
-                                class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 flex items-center gap-2">
-                                <svg x-show="loginLoading" x-cloak class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                <span x-text="loginLoading ? 'Logging in...' : 'Login'"></span>
+                                class="px-4 py-2 min-w-[5.5rem] text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md cursor-pointer disabled:opacity-50"
+                                :disabled="loginLoading">
+                                Login
                             </button>
                         </div>
                     </form>
@@ -1756,7 +1781,97 @@
                 newBlockedOui: '',
                 dhcpActionBanner: { show: false, message: '', detail: '' },
 
+                bindLoginFormHandlers() {
+                    window.ztpSubmitLogin = (event) => {
+                        if (event) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }
+                        this.login();
+                        return false;
+                    };
+                },
+
+                syncLoginModalVisibility() {
+                    const el = document.querySelector('[data-login-modal]');
+                    if (!el) {
+                        return;
+                    }
+                    const visible = this.showLoginModal && !this.authenticated;
+                    el.style.display = visible ? 'block' : 'none';
+                },
+
+                closeLoginModal() {
+                    this.showLoginModal = false;
+                    this.loginPassword = '';
+                    this.loginError = '';
+                    this.loginLoading = false;
+                    this.syncLoginModalVisibility();
+                },
+
+                openLoginModal(pendingAction = null) {
+                    if (this.authenticated) {
+                        if (pendingAction) {
+                            pendingAction();
+                        }
+                        return;
+                    }
+                    this.pendingAction = pendingAction;
+                    this.loginPassword = '';
+                    this.loginError = '';
+                    this.loginLoading = false;
+                    this.showLoginModal = true;
+                    this.bindLoginFormHandlers();
+                    this.syncLoginModalVisibility();
+                    this.$nextTick(() => {
+                        const input = document.getElementById('login-password-input');
+                        if (input) {
+                            input.focus();
+                        }
+                    });
+                },
+
+                loginPasswordFromDom() {
+                    const el = document.getElementById('login-password-input');
+                    const domValue = el && typeof el.value === 'string' ? el.value : '';
+                    if (domValue && domValue !== this.loginPassword) {
+                        this.loginPassword = domValue;
+                    }
+                    return this.loginPassword || domValue;
+                },
+
+                resetLoginLoadingSoon() {
+                    if (this._loginLoadingTimer) {
+                        clearTimeout(this._loginLoadingTimer);
+                    }
+                    this._loginLoadingTimer = setTimeout(() => {
+                        if (this.loginLoading) {
+                            this.loginLoading = false;
+                            const btn = document.getElementById('login-submit-btn');
+                            if (btn) {
+                                btn.textContent = 'Login';
+                            }
+                        }
+                    }, 15000);
+                },
+
                 async init() {
+                    if (window.location.search && window.location.search.includes('loginPassword')) {
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                    }
+                    this.bindLoginFormHandlers();
+
+                    this.$watch('authenticated', (isAuthed) => {
+                        if (isAuthed) {
+                            this.closeLoginModal();
+                        } else {
+                            this.syncLoginModalVisibility();
+                        }
+                    });
+                    this.$watch('showLoginModal', () => {
+                        this.syncLoginModalVisibility();
+                    });
+
                     // Initialize modal states - ensure all modals start hidden
                     this.showLoginModal = false;
                     this.showScriptModal = false;
@@ -1794,7 +1909,7 @@
                             this.stopNetworkPolling();
                         }
                         // Ensure modal stays hidden when switching applications
-                        this.showLoginModal = false;
+                        this.closeLoginModal();
                     });
 
                     // Watch for tab changes to start/stop auto-refresh
@@ -1834,7 +1949,7 @@
                     });
 
                     // Ensure modal is hidden on initial load
-                    this.showLoginModal = false;
+                    this.closeLoginModal();
 
                     // File input change handler is bound via x-on:change directive
                     // No need for explicit addEventListener since we authenticate before opening file picker
@@ -1951,125 +2066,67 @@
                 },
 
                 async login() {
-                    console.log('=== LOGIN FUNCTION CALLED ===');
-                    console.log('loginLoading before:', this.loginLoading);
-                    console.log('loginPassword length:', this.loginPassword ? this.loginPassword.length : 0);
+                    if (this.loginLoading) {
+                        return;
+                    }
+
+                    const password = this.loginPasswordFromDom();
+                    if (!password) {
+                        this.loginError = 'Password is required';
+                        return;
+                    }
 
                     this.loginLoading = true;
                     this.loginError = '';
+                    this.resetLoginLoadingSoon();
+                    const submitBtn = document.getElementById('login-submit-btn');
+                    if (submitBtn) {
+                        submitBtn.textContent = 'Logging in...';
+                    }
 
-                    console.log('Login attempt started, password length:', this.loginPassword.length);
-                    console.log('Login password value:', this.loginPassword ? '***' : 'empty');
-                    console.log('loginLoading after setting to true:', this.loginLoading);
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
                     try {
-                        const loginUrl = '/api/auth/login';
-                        const loginPayload = { password: this.loginPassword };
-                        console.log('Sending login request to:', loginUrl);
-                        console.log('Request payload keys:', Object.keys(loginPayload));
-
-                        const response = await fetch(loginUrl, {
+                        const response = await fetch('/api/auth/login', {
                             method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify(loginPayload),
-                            credentials: 'same-origin'
-                        }).catch(fetchError => {
-                            console.error('Fetch error:', fetchError);
-                            throw fetchError;
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ password: password }),
+                            credentials: 'same-origin',
+                            signal: controller.signal
                         });
 
-                        console.log('Login response received, status:', response.status, response.statusText);
-                        console.log('Response headers:', Object.fromEntries(response.headers.entries()));
-
-                        // Check for Set-Cookie header
-                        const setCookieHeader = response.headers.get('Set-Cookie');
-                        if (setCookieHeader) {
-                            console.log('Set-Cookie header received:', setCookieHeader);
-                        } else {
-                            console.warn('WARNING: No Set-Cookie header in login response!');
-                        }
-
                         let data;
-                        try {
-                            const responseText = await response.text();
-                            console.log('Response text length:', responseText.length);
-                            console.log('Response text preview:', responseText.substring(0, 200));
-
-                            if (!responseText) {
-                                throw new Error('Empty response from server');
-                            }
-
-                            data = JSON.parse(responseText);
-                            console.log('Login response data:', data);
-                        } catch (jsonError) {
-                            console.error('Failed to parse JSON response:', jsonError);
-                            console.error('Response status:', response.status);
-                            const text = await response.text().catch(() => 'Could not read response');
-                            console.error('Response text:', text);
-                            this.loginError = 'Invalid response from server. Please try again.';
-                            this.loginLoading = false;
-                            return;
+                        const responseText = await response.text();
+                        if (!responseText) {
+                            throw new Error('Empty response from server');
                         }
+                        data = JSON.parse(responseText);
 
                         if (response.ok && data.success) {
-                            // Update authentication state first
                             this.authenticated = true;
                             this.authExpiresAt = data.expires_at;
                             this.csrfToken = data.csrf_token || null;
-                            console.log('Login successful, authenticated:', this.authenticated);
+                            this.closeLoginModal();
 
-                            // Store pending action before clearing modal
+                            await this.loadDhcpStatus();
+                            if (this.activeApplication === 'dhcp') {
+                                await this.loadDhcpConfig();
+                                await this.loadDhcpLeases();
+                            }
+
                             const pendingAction = this.pendingAction;
                             this.pendingAction = null;
 
-                            // Hide modal and clear form immediately - do this FIRST
-                            this.showLoginModal = false;
-                            this.loginPassword = '';
-                            this.loginError = '';
-
-                            // Force Alpine.js to process the modal hide
-                            await this.$nextTick();
-
-                            // Verify modal is actually hidden
-                            if (this.showLoginModal) {
-                                console.warn('Modal still showing after hide attempt, forcing again');
-                                this.showLoginModal = false;
-                                await this.$nextTick();
-                            }
-
-                            console.log('Modal should be hidden now, showLoginModal:', this.showLoginModal);
-
-                            // Small delay to ensure browser processes the session cookie
-                            await new Promise(resolve => setTimeout(resolve, 200));
-
-                            // Verify authentication status after login to confirm cookie was set
-                            console.log('Verifying authentication after login...');
-                            await this.checkAuthStatus();
-                            console.log('After login verification, authenticated:', this.authenticated);
-
-                            if (!this.authenticated) {
-                                console.error('WARNING: Authentication failed after login! Cookie may not have been set.');
-                                this.loginError = 'Login succeeded but session not established. Please try again.';
-                                this.loginLoading = false;
-                                return;
-                            }
-
-                            // Execute pending action if any (now that we're authenticated)
                             if (pendingAction) {
                                 try {
-                                    console.log('Executing pending action after login');
                                     await pendingAction();
-                                    console.log('Pending action completed');
                                 } catch (error) {
                                     console.error('Error executing pending action:', error);
                                     alert('Action failed: ' + error.message);
-                                    // Don't re-show modal if action fails
                                 }
                             }
                         } else {
-                            // Handle specific error codes
                             if (data.code === 'RATE_LIMITED') {
                                 const remaining = data.remaining_time || 0;
                                 const minutes = Math.ceil(remaining / 60);
@@ -2078,15 +2135,26 @@
                                 this.loginError = data.error || 'Login failed. Please check your password.';
                             }
                             this.loginPassword = '';
-                            // Don't close modal on error - let user try again or cancel
                         }
                     } catch (error) {
                         console.error('Login error:', error);
-                        this.loginError = 'Login failed. Please try again. Error: ' + (error.message || 'Unknown error');
+                        if (error.name === 'AbortError') {
+                            this.loginError = 'Login timed out. Please try again.';
+                        } else {
+                            this.loginError = 'Login failed. Please try again.';
+                        }
                         this.loginPassword = '';
-                        // Don't close modal on error - let user try again or cancel
                     } finally {
+                        clearTimeout(timeoutId);
+                        if (this._loginLoadingTimer) {
+                            clearTimeout(this._loginLoadingTimer);
+                            this._loginLoadingTimer = null;
+                        }
                         this.loginLoading = false;
+                        const btn = document.getElementById('login-submit-btn');
+                        if (btn) {
+                            btn.textContent = 'Login';
+                        }
                     }
                 },
 
@@ -2175,38 +2243,14 @@
                 },
 
                 async requireAuth(action) {
-                    console.log('requireAuth called, current authenticated state:', this.authenticated);
-                    // Only check auth status if we're not already authenticated
-                    // This prevents unnecessary API calls and race conditions after login
                     if (!this.authenticated) {
                         await this.checkAuthStatus();
-                        console.log('After checkAuthStatus, authenticated:', this.authenticated);
                     }
 
-                    // Double-check authentication status
                     if (!this.authenticated) {
-                        console.log('User not authenticated, showing login modal');
-                        this.pendingAction = action;
-                        // Reset modal state before showing
-                        this.loginPassword = '';
-                        this.loginError = '';
-                        this.loginLoading = false;
-                        // Show the modal
-                        this.showLoginModal = true;
-                        console.log('Set showLoginModal to true');
-                        // Focus the password input after modal is shown
-                        await this.$nextTick();
-                        const input = document.getElementById('loginPassword');
-                        if (input) {
-                            input.focus();
-                            console.log('Focused password input');
-                        }
-                        // Return early to prevent action from executing
-                        console.log('requireAuth returning early (not authenticated)');
+                        this.openLoginModal(action);
                         return;
                     }
-                    // User is authenticated, execute the action
-                    console.log('User authenticated, executing action');
                     return await action();
                 },
 
@@ -3494,13 +3538,9 @@
                     // Check authentication first
                     await this.checkAuthStatus();
                     if (!this.authenticated) {
-                        console.log('Not authenticated for toggleDhcp, showing login modal');
-                        this.pendingAction = () => this.toggleDhcp();
-                        this.showLoginModal = true;
-                        await this.$nextTick();
-                        // Revert the toggle since we didn't actually change it
                         this.dhcpConfig.enabled = !this.dhcpConfig.enabled;
                         this.loadingStates.dhcp = false;
+                        this.openLoginModal(() => this.toggleDhcp());
                         return;
                     }
 
@@ -3525,16 +3565,11 @@
                             credentials: 'same-origin'
                         });
                         if (response.status === 401) {
-                            console.log('Received 401 in toggleDhcp, showing login modal');
                             this.authenticated = false;
                             await this.checkAuthStatus();
-                            this.pendingAction = () => this.toggleDhcp();
-                            this.showLoginModal = true;
-                            await this.$nextTick();
-                            // Revert the toggle since we didn't actually change it
                             this.dhcpConfig.enabled = !this.dhcpConfig.enabled;
                             this.dhcpStatus.enabled = this.dhcpConfig.enabled;
-                            // Alpine.js is automatically reactive, no need for force update
+                            this.openLoginModal(() => this.toggleDhcp());
                             return;
                         }
                         if (response.status === 502 || response.status === 504) {
@@ -3620,22 +3655,9 @@
                 },
 
                 async saveDhcpConfig() {
-                    // Check authentication first
                     await this.checkAuthStatus();
-                    console.log('saveDhcpConfig: authenticated =', this.authenticated, 'showLoginModal =', this.showLoginModal);
                     if (!this.authenticated) {
-                        console.log('Not authenticated, showing login modal');
-                        this.pendingAction = () => this.saveDhcpConfig();
-                        this.showLoginModal = true;
-                        console.log('Set showLoginModal to true, current value:', this.showLoginModal);
-                        await this.$nextTick();
-                        console.log('After $nextTick, showLoginModal:', this.showLoginModal);
-                        // Force a re-render by toggling
-                        this.showLoginModal = false;
-                        await this.$nextTick();
-                        this.showLoginModal = true;
-                        await this.$nextTick();
-                        console.log('Login modal should be visible now, showLoginModal:', this.showLoginModal);
+                        this.openLoginModal(() => this.saveDhcpConfig());
                         return;
                     }
 
@@ -3701,13 +3723,9 @@
                             credentials: 'same-origin'
                         });
                         if (response.status === 401) {
-                            console.log('Received 401, showing login modal');
                             this.authenticated = false;
                             await this.checkAuthStatus();
-                            this.pendingAction = () => this.saveDhcpConfig();
-                            this.showLoginModal = true;
-                            await this.$nextTick();
-                            console.log('Login modal should be visible after 401, showLoginModal:', this.showLoginModal);
+                            this.openLoginModal(() => this.saveDhcpConfig());
                             return;
                         }
                         if (response.ok) {
