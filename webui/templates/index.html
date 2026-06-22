@@ -865,6 +865,24 @@
                         </div>
                     </div>
 
+                    <!-- DHCP Action Warning Banner -->
+                    <div x-show="dhcpActionBanner.show" class="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                        <div class="flex items-start">
+                            <svg class="w-5 h-5 text-yellow-600 mt-0.5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                            </svg>
+                            <div class="flex-1">
+                                <p class="text-sm font-medium text-yellow-900" x-text="dhcpActionBanner.message"></p>
+                                <p x-show="dhcpActionBanner.detail" class="text-sm text-yellow-700 mt-1 font-mono break-all" x-text="dhcpActionBanner.detail"></p>
+                            </div>
+                            <button @click="dhcpActionBanner.show = false" class="ml-3 text-yellow-600 hover:text-yellow-800 flex-shrink-0">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Configuration Tab Content -->
                     <div class="space-y-6">
                         <!-- DHCP Configuration Form -->
@@ -1736,6 +1754,7 @@
                 // OUI filtering form state
                 newAllowedOui: '',
                 newBlockedOui: '',
+                dhcpActionBanner: { show: false, message: '', detail: '' },
 
                 async init() {
                     // Initialize modal states - ensure all modals start hidden
@@ -3509,7 +3528,18 @@
                             // Alpine.js is automatically reactive, no need for force update
                             return;
                         }
+                        if (response.status === 502 || response.status === 504) {
+                            this.dhcpShowActionBanner(
+                                'Gateway timeout — operation may still be in progress. Checking status...',
+                                ''
+                            );
+                            await this.loadDhcpStatus();
+                            setTimeout(() => this.loadDhcpStatus(), 3000);
+                            setTimeout(() => this.loadDhcpStatus(), 8000);
+                            return;
+                        }
                         if (response.ok) {
+                            const data = await response.json();
                             // Immediately update the status to reflect the toggle change
                             this.dhcpStatus.enabled = this.dhcpConfig.enabled;
                             // Alpine.js is automatically reactive, no need for force update
@@ -3520,6 +3550,7 @@
                             if (this.dhcpConfig.enabled) {
                                 await this.loadDhcpConfig();
                             }
+                            this.applyDhcpToggleResult(data, !wasEnabled);
                         } else {
                             // Try to parse JSON error response, but handle non-JSON responses gracefully
                             let errorMessage = 'Unknown error';
@@ -3545,6 +3576,38 @@
                     } finally {
                         this.loadingStates.dhcp = false;
                     }
+                },
+
+                dhcpShowActionBanner(message, detail) {
+                    this.dhcpActionBanner = { show: true, message, detail: detail || '' };
+                },
+
+                applyDhcpToggleResult(data, wasEnabling) {
+                    if (!data) return;
+                    if (data.manual_start_required) {
+                        const cmd = data.temp_file_location
+                            ? `sudo cp ${data.temp_file_location} /etc/containers/systemd/ztpbootstrap/ztpbootstrap-dhcp.container && sudo systemctl daemon-reload && sudo systemctl start ztpbootstrap-dhcp.service`
+                            : 'sudo systemctl daemon-reload && sudo systemctl start ztpbootstrap-dhcp.service';
+                        this.dhcpShowActionBanner(
+                            'DHCP enabled in configuration but requires manual start on the host:',
+                            cmd
+                        );
+                        return;
+                    }
+                    if (data.warning) {
+                        if (!wasEnabling) {
+                            this.dhcpPartialDisable(data);
+                        } else {
+                            this.dhcpShowActionBanner(data.warning, '');
+                        }
+                    }
+                },
+
+                dhcpPartialDisable(data) {
+                    this.dhcpShowActionBanner(
+                        'DHCP disabled in configuration but the container may still be running.',
+                        data.warning || 'Check service status and stop the container manually if needed.'
+                    );
                 },
 
                 async saveDhcpConfig() {
