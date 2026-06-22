@@ -15,8 +15,18 @@ logger = logging.getLogger(__name__)
 # Kea Control Agent default port
 KEA_CTRL_AGENT_PORT = 8000
 
-# Default subnet ID for DHCPv4 - matches the "id" in generate_dhcp4_config
+# Default subnet IDs — match generate_dhcp4/6_config "id" fields
 DEFAULT_DHCP4_SUBNET_ID = 1
+DEFAULT_DHCP6_SUBNET_ID = 1
+
+
+def dhcp_service_for_ip(ip: str) -> str:
+    """Return Kea service name for an IP address."""
+    return "dhcp6" if ":" in str(ip) else "dhcp4"
+
+
+def _normalize_mac(mac: str) -> str:
+    return str(mac).lower().replace("-", ":").strip()
 
 
 def generate_kea_config(config_yaml: Dict) -> Dict:
@@ -695,69 +705,43 @@ def generate_ctrl_agent_config() -> Dict:
 # ============================================================================
 
 
-def dhcp_subnet_id_for_service(service: str) -> int:
-    """
-    Return the subnet ID for a given Kea service.
-
-    Args:
-        service: "dhcp4" or "dhcp6"
-
-    Returns:
-        Integer subnet ID (default: 1)
-    """
-    # Both dhcp4 and dhcp6 use subnet id=1 in our default config
-    return DEFAULT_DHCP4_SUBNET_ID
+def dhcp_subnet_id_for_service(config: Dict, service: str) -> int:
+    """Return configured Kea subnet id (matches generate_dhcp4/6_config id field)."""
+    dhcp = config.get("dhcp") or {}
+    if service == "dhcp6":
+        return int(dhcp.get("ipv6_subnet_id") or DEFAULT_DHCP6_SUBNET_ID)
+    return int(dhcp.get("ipv4_subnet_id") or DEFAULT_DHCP4_SUBNET_ID)
 
 
-def find_reservation_in_config(config_yaml: Dict, mac: str) -> Optional[Dict]:
-    """
-    Find a reservation by MAC address in the parsed YAML config.
-
-    Args:
-        config_yaml: Parsed YAML config dict
-        mac: MAC address to search for (case-insensitive)
-
-    Returns:
-        Reservation dict if found, None otherwise
-    """
-    dhcp_config = config_yaml.get("dhcp", {})
-    reservations = dhcp_config.get("reservations", [])
-    mac_lower = mac.lower()
-    for reservation in reservations:
-        if reservation.get("hw-address", "").lower() == mac_lower:
-            return reservation
+def find_reservation_in_config(config: Dict, mac: str) -> Optional[Dict]:
+    """Find a reservation dict in config by MAC (normalized compare)."""
+    target = _normalize_mac(mac)
+    for row in (config.get("dhcp") or {}).get("reservations") or []:
+        row_mac = row.get("hw-address") or row.get("mac") or ""
+        if _normalize_mac(str(row_mac)) == target:
+            return row
     return None
 
 
 def build_kea_reservation_payload(
     mac: str,
-    ip_address: str,
-    hostname: str = None,
-    subnet_id: int = DEFAULT_DHCP4_SUBNET_ID,
-) -> Dict:
+    ip: str,
+    config: Dict,
+    hostname: Optional[str] = None,
+):
     """
-    Build a Kea reservation-add payload with required fields.
-
-    Kea requires:
-       - subnet-id (int): which subnet the reservation belongs to
-       - identifier-type: e.g. "hw-address" or "client-id"
-       - identifier: the MAC address or client ID
-
-    Args:
-        mac: MAC address (identifier value)
-        ip_address: IP address to reserve
-        hostname: Optional hostname
-        subnet_id: Subnet ID (default: 1)
+    Build reservation-add payload for Kea host_cmds API.
 
     Returns:
-        Reservation dict ready for Kea reservation-add command
+        (reservation dict, service name)
     """
-    payload = {
-        "subnet-id": subnet_id,
+    service = dhcp_service_for_ip(ip)
+    reservation = {
+        "subnet-id": dhcp_subnet_id_for_service(config, service),
         "identifier-type": "hw-address",
-        "identifier": mac,
-        "ip-address": ip_address,
+        "identifier": _normalize_mac(mac),
+        "ip-address": str(ip).strip(),
     }
     if hostname:
-        payload["hostname"] = hostname
-    return payload
+        reservation["hostname"] = str(hostname).strip()
+    return reservation, service

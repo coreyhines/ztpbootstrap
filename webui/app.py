@@ -17,7 +17,16 @@ from functools import wraps
 from pathlib import Path
 
 import yaml
-from flask import Flask, jsonify, render_template, request, send_from_directory, session
+from flask import (
+    Flask,
+    jsonify,
+    make_response,
+    render_template,
+    request,
+    send_from_directory,
+    session,
+)
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 
 # Debug flag - set via environment variable
@@ -26,7 +35,7 @@ DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
 # Import security and utility modules
 try:
     from config_manager import ConfigManager
-    from dhcp_validation import validate_dhcp_config
+    from dhcp_validation import validate_cidr, validate_dhcp_config
     from rate_limiter import rate_limiter
 except ImportError as e:
     print(f"Warning: Security/utility modules not available: {e}", flush=True)
@@ -34,11 +43,13 @@ except ImportError as e:
     rate_limiter = None
     ConfigManager = None
     validate_dhcp_config = None
+    validate_cidr = None
 
 # Import DHCP modules
 try:
     from dhcp_config import (
         build_kea_reservation_payload,
+        dhcp_service_for_ip,
         dhcp_subnet_id_for_service,
         find_reservation_in_config,
         generate_kea_config,
@@ -56,9 +67,11 @@ try:
         detect_host_interfaces,
         detect_networking_mode,
         detect_subnet,
+        subnet_defaults_from_cidr,
     )
     from kea_client import (
         add_reservation,
+        delete_all_leases_for_mac,
         delete_lease,
         delete_reservation,
         get_lease,
@@ -330,9 +343,22 @@ def reload_auth_config():
 app.secret_key = AUTH_CONFIG["session_secret"]
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-# Only set Secure flag if HTTPS is available
-app.config["SESSION_COOKIE_SECURE"] = os.environ.get("HTTPS_ENABLED", "false").lower() == "true"
+# Trust reverse-proxy TLS (nginx sets X-Forwarded-Proto). Required for session cookies
+# when the dashboard is served at https:// while Flask listens on http://127.0.0.1:5000.
+_trust_proxy = os.environ.get("TRUST_PROXY", "true").lower() in ("1", "true", "yes")
+if _trust_proxy:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+_https_env = os.environ.get("HTTPS_ENABLED", "auto").lower()
+if _https_env == "true":
+    app.config["SESSION_COOKIE_SECURE"] = True
+elif _https_env == "auto" and _trust_proxy:
+    # Secure cookies when clients use HTTPS via the front proxy (typical production).
+    app.config["SESSION_COOKIE_SECURE"] = True
+else:
+    app.config["SESSION_COOKIE_SECURE"] = False
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(seconds=AUTH_CONFIG["session_timeout"])
+# Mounted webui volume: pick up template edits without container rebuild
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 # Rate limiting storage (simple in-memory dict)
 login_attempts = {}
@@ -420,14 +446,11 @@ def require_auth(f):
 
         # CSRF protection for write operations (POST, PUT, DELETE, PATCH)
         if request.method in ["POST", "PUT", "DELETE", "PATCH"]:
-            # Get CSRF token from header or JSON body
-            csrf_token = (
-                request.headers.get("X-CSRF-Token")
-                or request.get_json(silent=True, force=True)
-                or {}
-            )
-            if isinstance(csrf_token, dict):
-                csrf_token = csrf_token.get("csrf_token")
+            csrf_token = request.headers.get("X-CSRF-Token")
+            if not csrf_token:
+                body = request.get_json(silent=True)
+                if isinstance(body, dict):
+                    csrf_token = body.get("csrf_token")
 
             if not csrf_token or not validate_csrf_token(csrf_token):
                 # Log CSRF failure
@@ -918,7 +941,11 @@ def auth_change_password():
 @app.route("/")
 def index():
     """Main dashboard page"""
-    return render_template("index.html")
+    response = make_response(render_template("index.html"))
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 @app.route("/images/<path:filename>")
@@ -1754,6 +1781,22 @@ def save_device_connections(connections):
         return False
 
 
+def _tail_nginx_log_lines(log_path: Path, max_bytes: int = 2 * 1024 * 1024) -> list[str]:
+    """Read the tail of a possibly large nginx access log (binary-safe)."""
+    if not log_path.exists():
+        return []
+    try:
+        with open(log_path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes))
+            data = f.read().decode("utf-8", errors="replace")
+        return data.splitlines()
+    except Exception as e:
+        logger.warning(f"Failed to read nginx access log tail: {e}")
+        return []
+
+
 def parse_nginx_access_log():
     """Parse nginx access log to track device connections"""
     connections = load_device_connections()
@@ -1792,17 +1835,15 @@ def parse_nginx_access_log():
     # Nginx log format: IP - - [timestamp] "method path protocol" status size "referer" "user-agent"
     # Example: 10.0.2.15 - - [08/Nov/2025:12:00:00 +0000] "GET /bootstrap.py HTTP/1.1" 200 1234 "-" "Arista-ZTP/1.0"
 
-    if not NGINX_ACCESS_LOG.exists():
-        return connections
-
     try:
-        # Read last 1000 lines to avoid processing too much
-        with open(NGINX_ACCESS_LOG, "r") as f:
-            lines = f.readlines()
-            recent_lines = lines[-1000:] if len(lines) > 1000 else lines
+        # Tail the log (UI polling can flood the file; bootstrap GETs may be older than 1000 lines)
+        recent_lines = _tail_nginx_log_lines(NGINX_ACCESS_LOG)
+        # Always include bootstrap download lines from a slightly wider window if needed
+        bootstrap_lines = [ln for ln in recent_lines if "/bootstrap.py" in ln or ' "GET / ' in ln]
+        lines_to_scan = list(dict.fromkeys(recent_lines[-5000:] + bootstrap_lines))
 
         new_processed_lines = set()
-        for line in recent_lines:
+        for line in lines_to_scan:
             line_stripped = line.strip()
             # Skip if we've already processed this line
             if line_stripped in processed_lines:
@@ -3067,6 +3108,37 @@ def update_dhcp_config():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/dhcp/config/subnet-defaults", methods=["POST"])
+@require_auth
+def dhcp_subnet_defaults():
+    """Suggest gateway (and optional range) from a subnet CIDR."""
+    try:
+        data = request.get_json() or {}
+        subnet = (data.get("subnet") or "").strip()
+        if not subnet:
+            return jsonify({"error": "subnet is required"}), 400
+
+        version = data.get("version", 4)
+        try:
+            version = int(version)
+        except (TypeError, ValueError):
+            return jsonify({"error": "version must be 4 or 6"}), 400
+        if version not in (4, 6):
+            return jsonify({"error": "version must be 4 or 6"}), 400
+
+        if validate_cidr:
+            is_valid, err = validate_cidr(subnet, version=version)
+            if not is_valid:
+                return jsonify({"error": err}), 400
+
+        include_range = bool(data.get("include_range", True))
+        pod_ip = (data.get("pod_ip") or "").strip() or None
+        defaults = subnet_defaults_from_cidr(subnet, include_range=include_range, pod_ip=pod_ip)
+        return jsonify(defaults)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/dhcp/config/auto-detect", methods=["POST"])
 @require_auth
 def auto_detect_dhcp_config():
@@ -3119,7 +3191,6 @@ def auto_detect_dhcp_config():
 
 
 @app.route("/api/dhcp/status", methods=["GET"])
-@require_auth
 def get_dhcp_status():
     """Get DHCP service status (enabled/disabled, container status, networking mode)"""
     try:
@@ -3151,6 +3222,35 @@ def get_dhcp_status():
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+def _dhcp_toggle_response(
+    *,
+    networking_mode=None,
+    port_conflicts=None,
+    partial_success=False,
+    warning=None,
+    manual_start_required=False,
+    container_status=None,
+    extra=None,
+):
+    """Consistent JSON shape for DHCP enable/disable toggle responses."""
+    if container_status is None:
+        container_status = check_dhcp_container_status()
+    payload = {
+        "success": True,
+        "partial_success": partial_success,
+        "warning": warning,
+        "manual_start_required": manual_start_required,
+        "container_status": container_status,
+    }
+    if networking_mode is not None:
+        payload["networking_mode"] = networking_mode
+    if port_conflicts is not None:
+        payload["port_conflicts"] = port_conflicts
+    if extra:
+        payload.update(extra)
+    return jsonify(payload)
 
 
 @app.route("/api/dhcp/enable", methods=["POST"])
@@ -3267,15 +3367,13 @@ def enable_dhcp():
             final_status = check_dhcp_container_status()
             if final_status.get("container_running", False):
                 logger.info("Container is running despite start_dhcp_container returning False")
-                # Container is running, so return success
                 networking_mode = detect_networking_mode(config)
-                return jsonify(
-                    {
-                        "success": True,
-                        "networking_mode": networking_mode,
-                        "port_conflicts": port_conflicts,
-                        "warning": "Container started but systemctl commands may have failed. Container is running.",
-                    }
+                return _dhcp_toggle_response(
+                    networking_mode=networking_mode,
+                    port_conflicts=port_conflicts,
+                    partial_success=True,
+                    warning="Container started but systemctl commands may have failed. Container is running.",
+                    container_status=final_status,
                 )
 
             # Container file was created but we couldn't start it automatically
@@ -3285,29 +3383,33 @@ def enable_dhcp():
             temp_file_exists = TEMP_DHCP_CONTAINER_FILE.exists()
 
             if temp_file_exists:
-                # File exists in temp location but needs to be copied to systemd directory
                 networking_mode = detect_networking_mode(config)
-                return jsonify(
-                    {
-                        "success": True,
-                        "networking_mode": networking_mode,
-                        "port_conflicts": port_conflicts,
-                        "warning": f"DHCP container file created in temp location, but could not be copied to systemd directory automatically. Please run: sudo cp {TEMP_DHCP_CONTAINER_FILE} /etc/containers/systemd/ztpbootstrap/ztpbootstrap-dhcp.container && sudo systemctl daemon-reload && sudo systemctl start ztpbootstrap-dhcp.service",
-                        "manual_start_required": True,
-                        "temp_file_location": str(TEMP_DHCP_CONTAINER_FILE),
-                    }
+                return _dhcp_toggle_response(
+                    networking_mode=networking_mode,
+                    port_conflicts=port_conflicts,
+                    partial_success=True,
+                    warning=(
+                        f"DHCP container file created in temp location, but could not be copied to "
+                        f"systemd directory automatically. Please run: sudo cp {TEMP_DHCP_CONTAINER_FILE} "
+                        f"/etc/containers/systemd/ztpbootstrap/ztpbootstrap-dhcp.container && "
+                        f"sudo systemctl daemon-reload && sudo systemctl start ztpbootstrap-dhcp.service"
+                    ),
+                    manual_start_required=True,
+                    extra={"temp_file_location": str(TEMP_DHCP_CONTAINER_FILE)},
                 )
             else:
-                # File should be in systemd directory but we can't start it
                 networking_mode = detect_networking_mode(config)
-                return jsonify(
-                    {
-                        "success": True,
-                        "networking_mode": networking_mode,
-                        "port_conflicts": port_conflicts,
-                        "warning": "DHCP container file created successfully, but automatic start failed due to Podman socket permission issues. Please run 'sudo systemctl daemon-reload && sudo systemctl start ztpbootstrap-dhcp.service' on the host to start the service manually.",
-                        "manual_start_required": True,
-                    }
+                return _dhcp_toggle_response(
+                    networking_mode=networking_mode,
+                    port_conflicts=port_conflicts,
+                    partial_success=True,
+                    warning=(
+                        "DHCP container file created successfully, but automatic start failed due to "
+                        "Podman socket permission issues. Please run "
+                        "'sudo systemctl daemon-reload && sudo systemctl start ztpbootstrap-dhcp.service' "
+                        "on the host to start the service manually."
+                    ),
+                    manual_start_required=True,
                 )
 
             # Container file doesn't exist and we couldn't start - this is a real error
@@ -3323,12 +3425,11 @@ def enable_dhcp():
         # Log successful DHCP enable (Issue #10)
         log_security_event("dhcp_enable", "success", client_ip, "dhcp_container_started")
 
-        return jsonify(
-            {
-                "success": True,
-                "networking_mode": networking_mode,
-                "port_conflicts": port_conflicts,
-            }
+        final_status = check_dhcp_container_status()
+        return _dhcp_toggle_response(
+            networking_mode=networking_mode,
+            port_conflicts=port_conflicts,
+            container_status=final_status,
         )
     except Exception as e:
         log_security_event("dhcp_enable", "failure", request.remote_addr, f"exception={str(e)}")
@@ -3390,14 +3491,14 @@ def disable_dhcp():
 
         if not stop_success or container_still_running:
             logger.warning("Failed to stop DHCP container or container still running")
-            # Config is updated, but container didn't stop
-            # Return success with warning so UI doesn't revert, but include status
-            return jsonify(
-                {
-                    "success": True,
-                    "warning": "DHCP has been disabled in configuration, but the container may still be running. Please check the status.",
-                    "container_status": container_status,
-                }
+            return _dhcp_toggle_response(
+                partial_success=True,
+                warning=(
+                    "DHCP has been disabled in configuration, but the Kea container is still running. "
+                    "Check the Status tab or run "
+                    "'sudo systemctl stop ztpbootstrap-dhcp.service' on the host."
+                ),
+                container_status=container_status,
             )
 
         # Optionally remove container (or leave it for future use)
@@ -3406,14 +3507,13 @@ def disable_dhcp():
         # Log successful DHCP disable (Issue #10)
         log_security_event("dhcp_disable", "success", client_ip, "dhcp_container_stopped")
 
-        return jsonify({"success": True})
+        return _dhcp_toggle_response(container_status=container_status)
     except Exception as e:
         log_security_event("dhcp_disable", "failure", request.remote_addr, f"exception={str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/dhcp/leases", methods=["GET"])
-@require_auth
 def get_dhcp_leases():
     """Get current DHCP leases (IPv4 and IPv6)"""
     try:
@@ -3425,11 +3525,14 @@ def get_dhcp_leases():
         for lease in ipv4_leases:
             # Use expire field if available, otherwise calculate from valid-lifetime
             expires = lease.get("expire", 0)
-            if not expires and lease.get("valid-lifetime"):
+            valid_lifetime = lease.get("valid-lifetime")
+            if valid_lifetime is None:
+                valid_lifetime = lease.get("valid-lft")
+            if not expires and valid_lifetime:
                 # If expire not set, calculate from current time + valid-lifetime
                 import time
 
-                expires = int(time.time()) + lease.get("valid-lifetime", 0)
+                expires = int(time.time()) + int(valid_lifetime)
 
             # Convert state to readable string
             state = lease.get("state", "unknown")
@@ -3476,11 +3579,14 @@ def get_dhcp_leases():
         for lease in ipv6_leases:
             # Use expire field if available, otherwise calculate from valid-lifetime
             expires = lease.get("expire", 0)
-            if not expires and lease.get("valid-lifetime"):
+            valid_lifetime = lease.get("valid-lifetime")
+            if valid_lifetime is None:
+                valid_lifetime = lease.get("valid-lft")
+            if not expires and valid_lifetime:
                 # If expire not set, calculate from current time + valid-lifetime
                 import time
 
-                expires = int(time.time()) + lease.get("valid-lifetime", 0)
+                expires = int(time.time()) + int(valid_lifetime)
 
             # Convert state to readable string
             state = lease.get("state", "unknown")
@@ -3549,16 +3655,23 @@ def get_dhcp_lease(mac):
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/api/dhcp/leases/<mac>", methods=["DELETE"])
+@app.route("/api/dhcp/leases/<path:mac>", methods=["DELETE"])
 @require_auth
 def delete_dhcp_lease(mac):
-    """Delete/release a lease"""
+    """Delete/release a lease (single IP if ?ip= given, else all for MAC)."""
     try:
-        success = delete_lease(mac, "dhcp4") or delete_lease(mac, "dhcp6")
+        ip_address = (request.args.get("ip") or "").strip() or None
+        if ip_address:
+            success = delete_lease(mac, "dhcp4", ip_address=ip_address) or delete_lease(
+                mac, "dhcp6", ip_address=ip_address
+            )
+        else:
+            success = delete_all_leases_for_mac(mac, "dhcp4") or delete_all_leases_for_mac(
+                mac, "dhcp6"
+            )
         if success:
             return jsonify({"success": True})
-        else:
-            return jsonify({"error": "Failed to delete lease"}), 500
+        return jsonify({"error": "Failed to delete lease — Kea may be unreachable"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -3591,32 +3704,36 @@ def add_dhcp_reservation():
         if not data or "mac" not in data or "ip" not in data:
             return jsonify({"error": "MAC and IP address required"}), 400
 
-        # Build proper Kea reservation payload with subnet-id
-        subnet_id = dhcp_subnet_id_for_service("dhcp4")
-        reservation = build_kea_reservation_payload(
-            mac=data["mac"],
-            ip_address=data["ip"],
+        config = _load_full_config()
+        kea_reservation, service = build_kea_reservation_payload(
+            data["mac"],
+            data["ip"],
+            config,
             hostname=data.get("hostname"),
-            subnet_id=subnet_id,
         )
 
-        success = add_reservation(reservation, "dhcp4")
+        success = add_reservation(kea_reservation, service)
         if success:
-            # Also update config file
+            config_record = {
+                "hw-address": kea_reservation["identifier"],
+                "ip-address": kea_reservation["ip-address"],
+            }
+            if kea_reservation.get("hostname"):
+                config_record["hostname"] = kea_reservation["hostname"]
+
             if CONFIG_FILE.exists():
                 with open(CONFIG_FILE, "r") as f:
-                    config = yaml.safe_load(f)
+                    config = yaml.safe_load(f) or {}
                 if "dhcp" not in config:
                     config["dhcp"] = {}
                 if "reservations" not in config["dhcp"]:
                     config["dhcp"]["reservations"] = []
-                config["dhcp"]["reservations"].append(reservation)
+                config["dhcp"]["reservations"].append(config_record)
                 with open(CONFIG_FILE, "w") as f:
                     yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
             return jsonify({"success": True})
-        else:
-            return jsonify({"error": "Failed to add reservation"}), 500
+        return jsonify({"error": "Failed to add reservation"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -3626,23 +3743,39 @@ def add_dhcp_reservation():
 def remove_dhcp_reservation(mac):
     """Remove static reservation"""
     try:
-        subnet_id = dhcp_subnet_id_for_service("dhcp4")
-        success = delete_reservation(mac, subnet_id, "dhcp4")
+        config = _load_full_config()
+        row = find_reservation_in_config(config, mac)
+        ip = (row or {}).get("ip-address") or (row or {}).get("ip") or ""
+        if ip:
+            service = dhcp_service_for_ip(str(ip))
+        else:
+            service = "dhcp4"
+        subnet_id = dhcp_subnet_id_for_service(config, service)
+
+        success = delete_reservation(mac, subnet_id, service=service)
+        if not success and service == "dhcp4":
+            success = delete_reservation(
+                mac, dhcp_subnet_id_for_service(config, "dhcp6"), service="dhcp6"
+            )
+
         if success:
-            # Also update config file
+            from dhcp_config import _normalize_mac
+
+            target = _normalize_mac(mac)
             if CONFIG_FILE.exists():
                 with open(CONFIG_FILE, "r") as f:
-                    config = yaml.safe_load(f)
+                    config = yaml.safe_load(f) or {}
                 if "dhcp" in config and "reservations" in config["dhcp"]:
                     config["dhcp"]["reservations"] = [
-                        r for r in config["dhcp"]["reservations"] if r.get("hw-address") != mac
+                        r
+                        for r in config["dhcp"]["reservations"]
+                        if _normalize_mac(str(r.get("hw-address") or r.get("mac") or "")) != target
                     ]
                     with open(CONFIG_FILE, "w") as f:
                         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
             return jsonify({"success": True})
-        else:
-            return jsonify({"error": "Failed to remove reservation"}), 500
+        return jsonify({"error": "Failed to remove reservation"}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -3768,7 +3901,10 @@ def api_network_ztp_save():
         config = merge_ztp_update(config, ztp_data)
         errors, warnings = validate_ztp_profile(config)
         if errors:
-            return jsonify({"error": "; ".join(errors), "errors": errors, "warnings": warnings}), 400
+            return (
+                jsonify({"error": "; ".join(errors), "errors": errors, "warnings": warnings}),
+                400,
+            )
         network = config.setdefault("network", {})
         ztp = network.setdefault("ztp", {})
         if ztp.get("enabled") and ztp.get("status") != "applied":
