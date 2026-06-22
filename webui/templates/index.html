@@ -3343,7 +3343,7 @@
                         const response = await fetch('/api/network/validate', {
                             method: 'POST',
                             credentials: 'same-origin',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: this.getCsrfHeaders(),
                             body: JSON.stringify(this.networkPayload())
                         });
                         const data = await response.json();
@@ -3370,7 +3370,7 @@
                         const response = await fetch('/api/network/ztp', {
                             method: 'PUT',
                             credentials: 'same-origin',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: this.getCsrfHeaders(),
                             body: JSON.stringify(this.networkPayload())
                         });
                         const data = await response.json();
@@ -3392,7 +3392,7 @@
                         const response = await fetch('/api/network/apply', {
                             method: 'POST',
                             credentials: 'same-origin',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: this.getCsrfHeaders(),
                             body: JSON.stringify(this.networkPayload())
                         });
                         const data = await response.json();
@@ -3415,7 +3415,7 @@
                         const response = await fetch('/api/network/restart', {
                             method: 'POST',
                             credentials: 'same-origin',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: this.getCsrfHeaders(),
                             body: JSON.stringify({})
                         });
                         const data = await response.json();
