@@ -171,6 +171,13 @@ def inspect_podman_network(name: str) -> Optional[Dict[str, Any]]:
                 }
             )
         options = data.get("options") or {}
+        # Podman >= 4.x macvlan parent is top-level network_interface; older
+        # versions may store it under options.parent / parent_interface.
+        parent = (
+            data.get("network_interface")
+            or options.get("parent")
+            or options.get("parent_interface")
+        )
         containers = data.get("containers") or {}
         container_names: List[str] = []
         for cid, cinfo in containers.items():
@@ -183,7 +190,7 @@ def inspect_podman_network(name: str) -> Optional[Dict[str, Any]]:
             "name": data.get("name") or name,
             "driver": data.get("driver"),
             "subnets": subnets,
-            "parent": options.get("parent") or options.get("parent_interface"),
+            "parent": parent,
             "mode": options.get("mode"),
             "container_count": len(container_names),
             "containers": container_names,

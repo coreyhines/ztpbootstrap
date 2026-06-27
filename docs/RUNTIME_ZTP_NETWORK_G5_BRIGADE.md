@@ -63,7 +63,22 @@
 
 | Gate | When |
 |------|------|
-| Start ztpbootstrap on fedora1 | Before B13 |
-| Approve Wave 1 Apply | Before B13 |
-| `TEST_PASS` | Before B14 BATS |
-| Approve merge | Before B19 |
+| ~~Start ztpbootstrap on fedora1~~ | Done |
+| ~~Approve Wave 1 Apply~~ | Done (2026-06-22) |
+| ~~`TEST_PASS` / B14 verify~~ | Done (2026-06-27) |
+| ~~Switch ZTP / DNS~~ | Done — `ztpboot` → `10.0.5.10` |
+| Approve merge | Before B19 PR to `main` |
+
+---
+
+## Finish pass (2026-06-27)
+
+| Bucket | Outcome |
+|--------|---------|
+| B13 | Applied live — tracker synced |
+| B14 | Drift fix in `network_utils.py`; BATS + in-container API PASS |
+| B15 | Kea macvlan active; OPNsense no dynamic `10.0.5` leases |
+| B16 | OPNsense DNS updated; `bootstrap.py` HTTP 200 |
+| B17 | Host-network quadlet unit test (`render_host_when_disabled`) |
+| B18 | Ledger commit `6c85554` marked done |
+| B19 | Branch ready for PR → `main` / close #60 |

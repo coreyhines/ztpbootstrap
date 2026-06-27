@@ -4,10 +4,11 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "webui"))
 
-from network_deploy import render_pod_quadlet_content
+from network_deploy import get_network_status, render_pod_quadlet_content
 
 
 class TestNetworkDeploy(unittest.TestCase):
@@ -38,6 +39,32 @@ class TestNetworkDeploy(unittest.TestCase):
         content = render_pod_quadlet_content({"enabled": False})
         self.assertIn("Network=host", content)
         self.assertNotIn("IP=", content)
+
+    @patch("network_deploy.inspect_running_pod", return_value={"running": True})
+    @patch(
+        "network_deploy.parse_pod_quadlet",
+        return_value={"network": "ztp-net-5", "ipv4": "10.0.5.10"},
+    )
+    @patch(
+        "network_deploy.inspect_podman_network",
+        return_value={"parent": "enp9s0", "name": "ztp-net-5"},
+    )
+    def test_get_network_status_no_drift_when_parent_matches(self, _inspect_net, _quadlet, _pod):
+        config = {
+            "network": {
+                "ztp": {
+                    "enabled": True,
+                    "status": "applied",
+                    "parent_interface": "enp9s0",
+                    "podman_network": "ztp-net-5",
+                    "ipv4": {"address": "10.0.5.10", "subnet": "10.0.5.0/24"},
+                }
+            }
+        }
+        status = get_network_status(config)
+        self.assertEqual(status["status"], "applied")
+        self.assertFalse(status["drift"])
+        self.assertEqual(status["drift_items"], [])
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@
 | Status | **`approved`** |
 | Approved by | user |
 | Approved waves | all (rebalanced schedule 2026-06-21) |
-| Notes | Farm Claude Sonnet for doc/code buckets; Cursor Auto for live MCP; Operator for Apply/switch |
+| Notes | Finish pass 2026-06-27 — B13 applied live; drift fix + acceptance |
 
 ## Bucket registry (rebalanced — approved)
 
@@ -38,11 +38,11 @@
 |----|--------|------------------|-------|
 | B11 | done | cursor-auto | Claude API 429; rerouted inline (`f9d8ae1`) |
 | B12 | done | cursor-auto | SSH audit fedora1 |
-| B12m | done | cursor-auto | `toggle_dhcp_range` merged; Claude CLI re-farm pending merge on opnsense-mcp |
-| B13 | queued | operator | Wave 1 gate |
-| B14 | queued | cursor-auto | — |
-| B15 | queued | cursor-auto | — |
-| B16 | queued | operator | Switch ZTP gate |
-| B17 | queued | cursor-auto | — |
-| B18 | running | claude-cli | sonnet; ledger + attribution |
-| B19 | queued | cursor-auto | — |
+| B12m | done | cursor-auto | `toggle_dhcp_range` merged on opnsense-mcp |
+| B13 | done | operator | Apply live 2026-06-22 — `ztp-net-5` @ `10.0.5.10` |
+| B14 | done | cursor-auto | Drift false-positive fixed; BATS + unit |
+| B15 | done | cursor-auto | OPNsense opt10 DHCP off; Kea authoritative |
+| B16 | done | operator | bootstrap.py reachable on VLAN 5 profile |
+| B17 | done | cursor-auto | Host-network quadlet regression unit tests |
+| B18 | done | claude-cli | `6c85554` ledger + attribution |
+| B19 | done | cursor-auto | `make check`; PR path documented |

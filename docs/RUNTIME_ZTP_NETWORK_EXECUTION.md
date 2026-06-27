@@ -104,17 +104,18 @@ Stacked PRs [#61](https://github.com/coreyhines/ztpbootstrap/pull/61)–[#66](ht
 
 ---
 
-## Lab status — fedora1 (2026-06-21)
+## Lab status — fedora1 (2026-06-27)
 
 | Step | Status |
 |------|--------|
 | Deploy `feature/runtime-ztp-network` webui to `/opt/containerdata` | **Done** |
-| P1 mounts on `ztpbootstrap-webui.container` (systemd dir + `/sys/class/net`) | **Done** on host |
-| `enp7s0.5` VLAN parent oper-up | **Done** |
-| `/api/network/validate` for VLAN 5 profile | **Pass** (`valid: true`, plan `create` → `ztp-net-5` @ `10.0.5.10`) |
-| BATS `test_network_api.bats` (macvlan HTTPS) | **2/2** unauth tests pass; auth tests need `TEST_PASS` |
-| **Apply & restart** (migrate off `net-10`) | **Not run** — ~30s outage; DNS must follow |
-| Switch ZTP bootstrap on VLAN 5 | **Not run** — manual §16 |
+| P1 mounts on `ztpbootstrap-webui.container` | **Done** on host |
+| `enp7s0.5` / `enp9s0` VLAN parent | **Done** — live macvlan uses `enp9s0` per config |
+| `/api/network/validate` for VLAN 5 profile | **Pass** |
+| **Apply & restart** (migrate to `ztp-net-5`) | **Done** — applied 2026-06-22 |
+| BATS `test_network_api.bats` | **Pass** (unauth + auth with `TEST_PASS`) |
+| Switch ZTP bootstrap on VLAN 5 | **Done** — `bootstrap.py` over HTTPS verified |
+| Drift UI | **Fixed** — Podman `network_interface` parent parsed correctly |
 
 **BATS on macvlan hosts:**
 
