@@ -45,4 +45,4 @@
 | B16 | done | operator | bootstrap.py reachable on VLAN 5 profile |
 | B17 | done | cursor-auto | Host-network quadlet regression unit tests |
 | B18 | done | claude-cli | `6c85554` ledger + attribution |
-| B19 | done | cursor-auto | `make check`; PR path documented |
+| B19 | done | cursor-auto | PR [#68](https://github.com/coreyhines/ztpbootstrap/pull/68) → `main` |

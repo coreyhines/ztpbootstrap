@@ -15,7 +15,7 @@
 | B16 | Operator | operator | operator | — | manual | — | — | DNS → `10.0.5.10`/`::10`; bootstrap HTTP 200 | done |
 | B17 | Cursor | cursor-auto | cursor-auto | cursor_included | inline | `feature/runtime-ztp-network` | _this pass_ | unit | done |
 | B18 | Cursor | cursor-auto | claude-cli | claude_pro | farm | `feature/runtime-ztp-network` | `6c85554` | n/a | done |
-| B19 | Cursor | cursor-auto | cursor-auto | cursor_included | inline | `feature/runtime-ztp-network` | _this pass_ | make check | done |
+| B19 | Cursor | cursor-auto | cursor-auto | cursor_included | inline | `feature/runtime-ztp-network` | `bb9d80b` | 149 unit | done |
 
 ## Live state (fedora1, 2026-06-27)
 
