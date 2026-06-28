@@ -447,6 +447,52 @@
                 </div>
             </div>
 
+            <!-- DHCP Instrumentation Summary -->
+            <div x-show="activeApplication === 'dhcp' && authenticated" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
+                    <p class="text-xs font-medium text-gray-500 mb-1">Active Leases</p>
+                    <p class="text-2xl font-bold text-gray-900" x-text="dhcpSummary.leases?.total ?? '—'"></p>
+                    <p class="text-xs text-gray-500 mt-1"
+                       x-text="`${dhcpSummary.leases?.ipv4 ?? 0} IPv4 / ${dhcpSummary.leases?.ipv6 ?? 0} IPv6`"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
+                    <p class="text-xs font-medium text-gray-500 mb-1">Reservations</p>
+                    <p class="text-2xl font-bold text-gray-900" x-text="dhcpSummary.reservations?.total ?? '—'"></p>
+                    <p class="text-xs text-gray-500 mt-1"
+                       x-text="`${dhcpSummary.reservations?.active_matches ?? 0} active / ${dhcpSummary.reservations?.unique_hosts ?? 0} hosts`"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
+                    <p class="text-xs font-medium text-gray-500 mb-1">Pool Used</p>
+                    <p class="text-2xl font-bold"
+                       :class="(dhcpSummary.pool?.ipv4?.percent ?? 0) >= 80 ? 'text-amber-600' : 'text-gray-900'"
+                       x-text="dhcpSummary.pool?.ipv4?.total ? `${dhcpSummary.pool.ipv4.percent}%` : '—'"></p>
+                    <p class="text-xs text-gray-500 mt-1"
+                       x-text="dhcpSummary.pool?.ipv4?.total ? `${dhcpSummary.pool.ipv4.used} of ${dhcpSummary.pool.ipv4.total} dynamic` : 'No pool configured'"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
+                    <p class="text-xs font-medium text-gray-500 mb-1">Reservation Drift</p>
+                    <p class="text-2xl font-bold"
+                       :class="(dhcpSummary.reservations?.drift_count ?? 0) > 0 ? 'text-amber-600' : 'text-green-600'"
+                       x-text="dhcpSummary.reservations?.drift_count ?? '—'"></p>
+                    <p class="text-xs text-gray-500 mt-1">Reserved MAC on pool IP</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
+                    <p class="text-xs font-medium text-gray-500 mb-1">Kea API</p>
+                    <p class="text-2xl font-bold"
+                       :class="dhcpSummary.kea?.reachable ? 'text-green-600' : 'text-red-600'"
+                       x-text="dhcpSummary.kea?.reachable ? 'OK' : 'Down'"></p>
+                    <p class="text-xs text-gray-500 mt-1"
+                       x-text="dhcpSummary.kea?.reachable ? `${dhcpSummary.kea.lease_cmds_loaded ? 'lease_cmds' : 'no lease_cmds'}${dhcpSummary.kea.latency_ms != null ? `, ${dhcpSummary.kea.latency_ms} ms` : ''}` : (dhcpSummary.kea?.error || 'Unreachable')"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
+                    <p class="text-xs font-medium text-gray-500 mb-1">Last Lease</p>
+                    <p class="text-2xl font-bold text-gray-900" x-text="formatRelativeTime(dhcpSummary.last_activity?.timestamp)"></p>
+                    <p class="text-xs text-gray-500 mt-1 truncate"
+                       :title="dhcpSummary.last_activity ? `${dhcpSummary.last_activity.hostname || dhcpSummary.last_activity.mac} ${dhcpSummary.last_activity.ip}` : ''"
+                       x-text="dhcpSummary.last_activity ? `${dhcpSummary.last_activity.hostname || dhcpSummary.last_activity.mac} ${dhcpSummary.last_activity.ip}` : 'No recent activity'"></p>
+                </div>
+            </div>
+
             <!-- Application-Specific Content Area -->
             <!-- ZTP Bootstrap: Device Connections -->
             <div x-show="activeApplication === 'ztpbootstrap'" class="bg-white rounded-lg shadow-sm p-4 mb-4">
@@ -517,7 +563,7 @@
                         <h2 class="text-base font-semibold text-gray-900 mb-1">Active Leases</h2>
                         <p class="text-xs text-gray-500">Current DHCP leases and reservations</p>
                     </div>
-                    <button @click="loadDhcpLeases()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Refresh</button>
+                    <button @click="loadDhcpLeases(); loadDhcpSummary();" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Refresh</button>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200">
@@ -536,7 +582,11 @@
                                     <td class="px-4 py-3 text-sm text-gray-900" x-text="lease.mac"></td>
                                     <td class="px-4 py-3 text-sm text-gray-900" x-text="lease.ip"></td>
                                     <td class="px-4 py-3 text-sm text-gray-500" x-text="lease.type"></td>
-                                    <td class="px-4 py-3 text-sm text-gray-500" x-text="lease.state"></td>
+                                    <td class="px-4 py-3 text-sm">
+                                        <span class="px-2 py-0.5 rounded text-xs font-medium"
+                                              :class="lease.state === 'active' ? 'bg-green-50 text-green-700' : (lease.state === 'expired' ? 'bg-gray-50 text-gray-600' : 'bg-amber-50 text-amber-700')"
+                                              x-text="formatLeaseState(lease.state)"></span>
+                                    </td>
                                     <td class="px-4 py-3 text-sm">
                                         <button @click="createReservationFromLease(lease)" class="text-blue-600 hover:text-blue-800 mr-3">Reserve</button>
                                         <button @click="deleteDhcpLease(lease.mac)" class="text-red-600 hover:text-red-800">Delete</button>
@@ -1778,6 +1828,7 @@
                 },
                 dhcpLeases: [],
                 dhcpReservations: [],
+                dhcpSummary: {},
                 activeDhcpTab: localStorage.getItem('ztpbootstrap-activeDhcpTab') || 'config', // 'config', 'reservations', 'status', or 'logs'
                 // Reservation form state
                 showReservationForm: false,
@@ -1911,6 +1962,7 @@
                             this.loadDhcpStatus();
                             this.loadDhcpConfig();
                             this.loadDhcpLeases();
+                            this.loadDhcpSummary();
                             this.loadNetworkStatus();
                         } else if (newApp === 'ztp-network') {
                             this.loadNetworkStatus();
@@ -2003,6 +2055,7 @@
                         await this.loadDhcpStatus();
                         await this.loadDhcpConfig();
                         await this.loadDhcpLeases();
+                        await this.loadDhcpSummary();
                         await this.loadNetworkStatus();
                     } else if (this.activeApplication === 'ztp-network') {
                         await this.loadNetworkStatus();
@@ -2031,6 +2084,7 @@
                             this.loadDhcpStatus();
                             if (this.activeDhcpTab === 'status') {
                                 this.loadDhcpLeases();
+                                this.loadDhcpSummary();
                             }
                         }
                         // Only refresh logs if currently on a logs tab AND auto-refresh is enabled
@@ -2124,6 +2178,7 @@
                             if (this.activeApplication === 'dhcp') {
                                 await this.loadDhcpConfig();
                                 await this.loadDhcpLeases();
+                                await this.loadDhcpSummary();
                             } else if (this.activeApplication === 'ztp-network') {
                                 await this.loadNetworkStatus();
                             }
@@ -3015,6 +3070,26 @@
                     return Math.round(seconds / 3600) + 'h';
                 },
 
+                formatRelativeTime(timestamp) {
+                    if (!timestamp) return '—';
+                    const seconds = Math.floor(Date.now() / 1000) - Number(timestamp);
+                    if (seconds < 0) return 'just now';
+                    if (seconds < 60) return `${seconds}s ago`;
+                    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+                    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+                    return `${Math.floor(seconds / 86400)}d ago`;
+                },
+
+                formatLeaseState(state) {
+                    const labels = {
+                        active: 'Active',
+                        expired: 'Expired',
+                        reclaimed: 'Reclaimed',
+                        unknown: 'Unknown',
+                    };
+                    return labels[state] || (state != null ? String(state) : 'Unknown');
+                },
+
                 getDeviceIcon(userAgent, bootstrapDownloaded) {
                     // Handle empty or missing user agent
                     if (!userAgent || userAgent.trim() === '' || userAgent === '-') {
@@ -3842,6 +3917,27 @@
                     }
                 },
 
+                async loadDhcpSummary() {
+                    try {
+                        const response = await fetch('/api/dhcp/summary', {
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.dhcpSummary = {};
+                            return;
+                        }
+                        if (response.ok) {
+                            this.dhcpSummary = await response.json();
+                        } else {
+                            const errorText = await response.text();
+                            console.error('Failed to load DHCP summary:', response.status, errorText);
+                        }
+                    } catch (error) {
+                        console.error('Failed to load DHCP summary:', error);
+                    }
+                },
+
                 async deleteDhcpLease(mac) {
                     if (!confirm('Are you sure you want to delete this lease?')) {
                         return;
@@ -3854,6 +3950,7 @@
                         });
                         if (response.ok) {
                             await this.loadDhcpLeases();
+                            await this.loadDhcpSummary();
                         } else {
                             const data = await response.json().catch(() => ({}));
                             alert('Failed to delete lease: ' + (data.error || `HTTP ${response.status}`));
@@ -3933,6 +4030,7 @@
                             this.newReservation = {mac: '', ip: '', hostname: ''};
                             this.showReservationForm = false;
                             await this.loadDhcpReservations();
+                            await this.loadDhcpSummary();
                         } else {
                             const data = await response.json();
                             this.reservationError = data.error || 'Failed to add reservation';
@@ -3975,6 +4073,7 @@
                         if (response.ok) {
                             alert('Reservation deleted successfully');
                             await this.loadDhcpReservations();
+                            await this.loadDhcpSummary();
                         } else {
                             alert('Failed to delete reservation');
                         }

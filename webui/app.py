@@ -3526,127 +3526,36 @@ def disable_dhcp():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/dhcp/summary", methods=["GET"])
+def get_dhcp_summary():
+    """Compact DHCP instrumentation for dashboard summary cards."""
+    try:
+        from dhcp_summary import build_dhcp_summary
+        from kea_client import probe_lease_api_health
+
+        config = _load_full_config()
+        ipv4_leases = get_leases("dhcp4")
+        ipv6_leases = get_leases("dhcp6")
+        kea_health = probe_lease_api_health("dhcp4")
+        summary = build_dhcp_summary(config, ipv4_leases, ipv6_leases, kea_health)
+        return jsonify(summary)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/dhcp/leases", methods=["GET"])
 def get_dhcp_leases():
     """Get current DHCP leases (IPv4 and IPv6)"""
     try:
-        leases = []
-        seen_leases = {}  # Track seen MAC+IP combinations to deduplicate
+        from dhcp_summary import dedupe_formatted_leases, format_lease_for_api
+
         ipv4_leases = get_leases("dhcp4")
         ipv6_leases = get_leases("dhcp6")
-
-        for lease in ipv4_leases:
-            # Use expire field if available, otherwise calculate from valid-lifetime
-            expires = lease.get("expire", 0)
-            valid_lifetime = lease.get("valid-lifetime")
-            if valid_lifetime is None:
-                valid_lifetime = lease.get("valid-lft")
-            if not expires and valid_lifetime:
-                # If expire not set, calculate from current time + valid-lifetime
-                import time
-
-                expires = int(time.time()) + int(valid_lifetime)
-
-            # Convert state to readable string
-            state = lease.get("state", "unknown")
-            if state == "0":
-                state = "active"
-            elif state == "1":
-                state = "expired"
-            elif state == "2":
-                state = "reclaimed"
-
-            mac = lease.get("hw-address", "")
-            ip = lease.get("ip-address", "")
-            lease_key = f"{mac}:{ip}"
-
-            # Deduplicate: prefer active leases, then most recent expires
-            if lease_key not in seen_leases:
-                seen_leases[lease_key] = {
-                    "mac": mac,
-                    "ip": ip,
-                    "type": "ipv4",
-                    "state": state,
-                    "expires": expires,
-                }
-            else:
-                # If we've seen this MAC+IP combo, prefer active state or more recent expire
-                existing = seen_leases[lease_key]
-                if state == "active" and existing["state"] != "active":
-                    seen_leases[lease_key] = {
-                        "mac": mac,
-                        "ip": ip,
-                        "type": "ipv4",
-                        "state": state,
-                        "expires": expires,
-                    }
-                elif expires > existing["expires"]:
-                    seen_leases[lease_key] = {
-                        "mac": mac,
-                        "ip": ip,
-                        "type": "ipv4",
-                        "state": state,
-                        "expires": expires,
-                    }
-
-        for lease in ipv6_leases:
-            # Use expire field if available, otherwise calculate from valid-lifetime
-            expires = lease.get("expire", 0)
-            valid_lifetime = lease.get("valid-lifetime")
-            if valid_lifetime is None:
-                valid_lifetime = lease.get("valid-lft")
-            if not expires and valid_lifetime:
-                # If expire not set, calculate from current time + valid-lifetime
-                import time
-
-                expires = int(time.time()) + int(valid_lifetime)
-
-            # Convert state to readable string
-            state = lease.get("state", "unknown")
-            if state == "0":
-                state = "active"
-            elif state == "1":
-                state = "expired"
-            elif state == "2":
-                state = "reclaimed"
-
-            mac = lease.get("hw-address", "")
-            ip = lease.get("ip-address", "")
-            lease_key = f"{mac}:{ip}"
-
-            # Deduplicate: prefer active leases, then most recent expires
-            if lease_key not in seen_leases:
-                seen_leases[lease_key] = {
-                    "mac": mac,
-                    "ip": ip,
-                    "type": "ipv6",
-                    "state": state,
-                    "expires": expires,
-                }
-            else:
-                # If we've seen this MAC+IP combo, prefer active state or more recent expire
-                existing = seen_leases[lease_key]
-                if state == "active" and existing["state"] != "active":
-                    seen_leases[lease_key] = {
-                        "mac": mac,
-                        "ip": ip,
-                        "type": "ipv6",
-                        "state": state,
-                        "expires": expires,
-                    }
-                elif expires > existing["expires"]:
-                    seen_leases[lease_key] = {
-                        "mac": mac,
-                        "ip": ip,
-                        "type": "ipv6",
-                        "state": state,
-                        "expires": expires,
-                    }
-
-        # Convert deduplicated dict to list
-        leases = list(seen_leases.values())
-
-        return jsonify({"leases": leases})
+        formatted = dedupe_formatted_leases(
+            [format_lease_for_api(lease, "ipv4") for lease in ipv4_leases]
+            + [format_lease_for_api(lease, "ipv6") for lease in ipv6_leases]
+        )
+        return jsonify({"leases": formatted})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
