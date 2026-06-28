@@ -82,6 +82,24 @@ def _apply_subnet_reservations(subnet_config: Dict, dhcp_config: Dict, ip_versio
         subnet_config["reservations"] = reservations
 
 
+# Default Kea hook directory in the runtime image (RHEL/Fedora layout).
+DEFAULT_HOOK_LIBRARY_PATH = "/usr/lib64/kea/hooks"
+
+
+def _build_hooks_libraries(backend_config: Dict, backend_type: str) -> List[Dict]:
+    """Build Kea hooks-libraries list.
+
+    lease_cmds works with every backend (including memfile) and is required for
+    the Control Agent / Web UI to enumerate and manage leases. host_cmds needs a
+    database backend, so it is only loaded for PostgreSQL/MySQL.
+    """
+    hook_path = backend_config.get("hook_library_path", DEFAULT_HOOK_LIBRARY_PATH)
+    hooks = [{"library": f"{hook_path}/libdhcp_lease_cmds.so"}]
+    if backend_type in ["postgresql", "mysql"]:
+        hooks.append({"library": f"{hook_path}/libdhcp_host_cmds.so"})
+    return hooks
+
+
 def generate_kea_config(config_yaml: Dict) -> Dict:
     """
     Main config generator - creates complete Kea configuration.
@@ -265,13 +283,9 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     if backend_type in ["postgresql", "mysql"]:
         config["hosts-database"] = generate_lease_database(backend_config)
 
-    # Add hooks for lease and host commands (required for Control Agent access with PG backend)
-    if backend_type in ["postgresql", "mysql"]:
-        hook_path = backend_config.get("hook_library_path", "/usr/lib/x86_64-linux-gnu/kea/hooks")
-        config["hooks-libraries"] = [
-            {"library": f"{hook_path}/libdhcp_lease_cmds.so"},
-            {"library": f"{hook_path}/libdhcp_host_cmds.so"},
-        ]
+    # Always load lease_cmds (memfile-compatible) so the Control Agent / Web UI
+    # can enumerate leases; host_cmds is added for DB backends inside the helper.
+    config["hooks-libraries"] = _build_hooks_libraries(backend_config, backend_type)
 
     # Add client classification for OUI filtering
     oui_config = dhcp_config.get("oui_filtering", {})
@@ -426,13 +440,9 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     if backend_type in ["postgresql", "mysql"]:
         config["hosts-database"] = generate_lease_database(backend_config)
 
-    # Add hooks for lease and host commands (required for Control Agent access with PG backend)
-    if backend_type in ["postgresql", "mysql"]:
-        hook_path = backend_config.get("hook_library_path", "/usr/lib/x86_64-linux-gnu/kea/hooks")
-        config["hooks-libraries"] = [
-            {"library": f"{hook_path}/libdhcp_lease_cmds.so"},
-            {"library": f"{hook_path}/libdhcp_host_cmds.so"},
-        ]
+    # Always load lease_cmds (memfile-compatible) so the Control Agent / Web UI
+    # can enumerate leases; host_cmds is added for DB backends inside the helper.
+    config["hooks-libraries"] = _build_hooks_libraries(backend_config, backend_type)
 
     # Add client classification for OUI filtering
     oui_config = dhcp_config.get("oui_filtering", {})

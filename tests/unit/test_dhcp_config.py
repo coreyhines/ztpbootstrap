@@ -143,6 +143,35 @@ class TestDHCPConfig(unittest.TestCase):
 
     @patch("dhcp_config.detect_networking_mode")
     @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp4_config_memfile_loads_lease_cmds(self, mock_interfaces, mock_networking):
+        """Memfile must load lease_cmds so the Control Agent/Web UI can list leases."""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+
+        dhcp_config = self.minimal_config["dhcp"]
+        result = generate_dhcp4_config(dhcp_config, "macvlan", self.minimal_config)
+
+        libraries = [h["library"] for h in result.get("hooks-libraries", [])]
+        self.assertTrue(any("libdhcp_lease_cmds.so" in lib for lib in libraries))
+        self.assertFalse(any("libdhcp_host_cmds.so" in lib for lib in libraries))
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp4_config_postgres_loads_host_cmds(self, mock_interfaces, mock_networking):
+        """PostgreSQL backend loads both lease_cmds and host_cmds."""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+
+        config = self.minimal_config.copy()
+        config["dhcp"] = {**self.minimal_config["dhcp"], "backend": {"type": "postgresql"}}
+        result = generate_dhcp4_config(config["dhcp"], "macvlan", config)
+
+        libraries = [h["library"] for h in result.get("hooks-libraries", [])]
+        self.assertTrue(any("libdhcp_lease_cmds.so" in lib for lib in libraries))
+        self.assertTrue(any("libdhcp_host_cmds.so" in lib for lib in libraries))
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
     def test_generate_dhcp4_config_with_dns(self, mock_interfaces, mock_networking):
         """Test DHCPv4 configuration with DNS servers"""
         mock_networking.return_value = "macvlan"
