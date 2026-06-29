@@ -790,6 +790,61 @@
                         </div>
                     </div>
 
+                    <div class="mb-6 bg-white rounded-lg border border-gray-200 p-4">
+                        <h3 class="text-base font-semibold text-gray-900 mb-1">CVaaS Enrollment</h3>
+                        <p class="text-sm text-gray-600 mb-4">
+                            Paste the enrollment value from the CVaaS Device Registration page.
+                            Saving updates <code class="text-xs bg-gray-100 px-1 rounded">config.yaml</code>
+                            and syncs <code class="text-xs bg-gray-100 px-1 rounded">bootstrap.py</code> immediately.
+                        </p>
+
+                        <div class="space-y-3 max-w-3xl">
+                            <div>
+                                <label for="enroll-chars-input" class="block text-sm font-medium text-gray-700 mb-1">
+                                    Enrollment chars
+                                </label>
+                                <div class="flex gap-2">
+                                    <input id="enroll-chars-input"
+                                           :type="showEnrollChars ? 'text' : 'password'"
+                                           x-model="cvaasConfig.enroll_chars"
+                                           autocomplete="off"
+                                           spellcheck="false"
+                                           placeholder="Paste enrollment JWT from CVaaS"
+                                           class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                    <button type="button"
+                                            @click="showEnrollChars = !showEnrollChars"
+                                            class="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+                                            x-text="showEnrollChars ? 'Hide' : 'Show'"></button>
+                                </div>
+                                <p class="mt-1 text-xs text-gray-500" x-show="cvaasConfig.address">
+                                    CVaaS address: <span class="font-mono" x-text="cvaasConfig.address"></span>
+                                </p>
+                            </div>
+
+                            <div class="flex items-center gap-3 flex-wrap">
+                                <button type="button"
+                                        @click="saveEnrollChars()"
+                                        :disabled="loadingStates.cvaas || !cvaasConfig.enroll_chars"
+                                        class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium disabled:opacity-50">
+                                    <span x-show="!loadingStates.cvaas">Save enrollment chars</span>
+                                    <span x-show="loadingStates.cvaas">Saving...</span>
+                                </button>
+                                <span x-show="cvaasConfig.enroll_chars_configured"
+                                      class="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-green-50 text-green-700 border border-green-200">
+                                    Configured
+                                </span>
+                                <span x-show="!cvaasConfig.enroll_chars_configured"
+                                      class="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-amber-50 text-amber-800 border border-amber-200">
+                                    Not configured
+                                </span>
+                            </div>
+
+                            <div x-show="cvaasSaveMessage" class="text-sm text-green-700" x-text="cvaasSaveMessage"></div>
+                            <div x-show="cvaasSaveWarning" class="text-sm text-amber-700" x-text="cvaasSaveWarning"></div>
+                            <div x-show="cvaasSaveError" class="text-sm text-red-600" x-text="cvaasSaveError"></div>
+                        </div>
+                    </div>
+
                     <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
                         <div x-show="config.error" class="text-red-600" x-text="config.error"></div>
                         <div x-show="config.raw && !config.error" class="overflow-x-auto overflow-y-auto max-h-[600px]">
@@ -1720,6 +1775,15 @@
                 scripts: [],
                 backups: [],
                 config: {},
+                cvaasConfig: {
+                    enroll_chars: '',
+                    address: '',
+                    enroll_chars_configured: false
+                },
+                showEnrollChars: false,
+                cvaasSaveMessage: '',
+                cvaasSaveWarning: '',
+                cvaasSaveError: '',
                 logs: 'Loading...',
                 logsNginx: '',
                 logsWebUI: '',
@@ -1763,6 +1827,7 @@
                     scripts: false,
                     backups: false,
                     config: false,
+                    cvaas: false,
                     logs: false,
                     deviceConnections: false,
                     status: false,
@@ -2719,6 +2784,7 @@
                         console.log('Config API response:', data);
                         // Update config object for Alpine.js reactivity
                         this.config = data;
+                        await this.loadCvaasConfig();
                         // Highlight syntax after config loads, then apply search highlighting if needed
                         this.$nextTick(() => {
                             if (window.Prism && this.$refs.yamlCode) {
@@ -2735,6 +2801,87 @@
                         console.error('Failed to load config:', error);
                     } finally {
                         this.loadingStates.config = false;
+                    }
+                },
+
+                async loadCvaasConfig() {
+                    if (!this.authenticated) {
+                        return;
+                    }
+                    this.loadingStates.cvaas = true;
+                    this.cvaasSaveMessage = '';
+                    this.cvaasSaveWarning = '';
+                    this.cvaasSaveError = '';
+                    try {
+                        const response = await fetch('/api/cvaas/config', {
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            return;
+                        }
+                        if (!response.ok) {
+                            return;
+                        }
+                        const data = await response.json();
+                        const cvaas = data.cvaas || {};
+                        this.cvaasConfig = {
+                            enroll_chars: cvaas.enroll_chars || '',
+                            address: cvaas.address || '',
+                            enroll_chars_configured: !!cvaas.enroll_chars_configured
+                        };
+                    } catch (error) {
+                        console.error('Failed to load CVaaS config:', error);
+                    } finally {
+                        this.loadingStates.cvaas = false;
+                    }
+                },
+
+                async saveEnrollChars() {
+                    await this.checkAuthStatus();
+                    if (!this.authenticated) {
+                        this.openLoginModal(() => this.saveEnrollChars());
+                        return;
+                    }
+
+                    this.loadingStates.cvaas = true;
+                    this.cvaasSaveMessage = '';
+                    this.cvaasSaveWarning = '';
+                    this.cvaasSaveError = '';
+
+                    try {
+                        const response = await fetch('/api/cvaas/enroll-chars', {
+                            method: 'PUT',
+                            headers: this.getCsrfHeaders(),
+                            body: JSON.stringify({
+                                enroll_chars: this.cvaasConfig.enroll_chars,
+                                csrf_token: this.csrfToken
+                            }),
+                            credentials: 'same-origin'
+                        });
+                        const data = await response.json().catch(() => ({}));
+
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.openLoginModal(() => this.saveEnrollChars());
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            this.cvaasSaveError = data.error || 'Failed to save enrollment chars';
+                            return;
+                        }
+
+                        this.cvaasSaveMessage = data.message || 'Enrollment chars saved';
+                        if (data.warning) {
+                            this.cvaasSaveWarning = data.warning;
+                        }
+                        this.cvaasConfig.enroll_chars_configured = true;
+                        await this.loadConfig();
+                    } catch (error) {
+                        this.cvaasSaveError = 'Failed to save enrollment chars: ' + error.message;
+                    } finally {
+                        this.loadingStates.cvaas = false;
                     }
                 },
 

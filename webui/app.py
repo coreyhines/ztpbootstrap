@@ -35,6 +35,7 @@ DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
 # Import security and utility modules
 try:
     from config_manager import ConfigManager
+    from cvaas_config import sync_enroll_chars_to_bootstrap, validate_enroll_chars
     from dhcp_validation import validate_cidr, validate_dhcp_config
     from rate_limiter import rate_limiter
 except ImportError as e:
@@ -44,6 +45,8 @@ except ImportError as e:
     ConfigManager = None
     validate_dhcp_config = None
     validate_cidr = None
+    validate_enroll_chars = None
+    sync_enroll_chars_to_bootstrap = None
 
 # Import DHCP modules
 try:
@@ -982,6 +985,119 @@ def get_config():
                 )
         else:
             return jsonify({"error": "Config file not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/cvaas/config", methods=["GET"])
+@require_auth
+def get_cvaas_config():
+    """Get CVaaS settings for the configuration editor."""
+    try:
+        config = _load_full_config()
+        cvaas = config.get("cvaas") or {}
+        enroll_chars = cvaas.get("enroll_chars") or ""
+        placeholder_values = {"", "YOUR_ENROLL_CHARS_HERE", "null"}
+        return jsonify(
+            {
+                "cvaas": {
+                    "address": cvaas.get("address") or "",
+                    "enroll_chars": enroll_chars,
+                    "enroll_chars_configured": enroll_chars not in placeholder_values,
+                    "proxy": cvaas.get("proxy") or "",
+                    "eos_url": cvaas.get("eos_url") or "",
+                    "ntp_server": cvaas.get("ntp_server") or "",
+                },
+                "bootstrap_exists": BOOTSTRAP_SCRIPT.exists(),
+            }
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/cvaas/enroll-chars", methods=["PUT"])
+@require_auth
+def update_cvaas_enroll_chars():
+    """Update cvaas.enroll_chars in config.yaml and sync bootstrap.py."""
+    if not validate_enroll_chars or not sync_enroll_chars_to_bootstrap:
+        return jsonify({"error": "CVaaS configuration module not available"}), 500
+
+    try:
+        data = request.get_json()
+        if not data or "enroll_chars" not in data:
+            return jsonify({"error": "Invalid request: enroll_chars required"}), 400
+
+        enroll_chars = str(data["enroll_chars"]).strip()
+        client_ip = request.remote_addr
+
+        is_valid, error_msg, warning_msg = validate_enroll_chars(enroll_chars)
+        if not is_valid:
+            log_security_event(
+                "cvaas_enroll_chars_update",
+                "failure",
+                client_ip,
+                f"validation_error={error_msg}",
+            )
+            return jsonify({"error": error_msg}), 400
+
+        config = _load_full_config()
+        cvaas = dict(config.get("cvaas") or {})
+        cvaas["enroll_chars"] = enroll_chars
+
+        if config_manager:
+            success, update_error = config_manager.update_section("cvaas", cvaas)
+            if not success:
+                log_security_event(
+                    "cvaas_enroll_chars_update",
+                    "failure",
+                    client_ip,
+                    f"config_error={update_error}",
+                )
+                return jsonify({"error": f"Failed to update configuration: {update_error}"}), 500
+        else:
+            config["cvaas"] = cvaas
+            save_ok, save_error = _save_full_config(config)
+            if not save_ok:
+                log_security_event(
+                    "cvaas_enroll_chars_update",
+                    "failure",
+                    client_ip,
+                    f"config_error={save_error}",
+                )
+                return jsonify({"error": f"Failed to update configuration: {save_error}"}), 500
+
+        sync_ok, sync_error = sync_enroll_chars_to_bootstrap(BOOTSTRAP_SCRIPT, enroll_chars)
+        if not sync_ok:
+            log_security_event(
+                "cvaas_enroll_chars_update",
+                "failure",
+                client_ip,
+                f"bootstrap_sync_error={sync_error}",
+            )
+            return (
+                jsonify(
+                    {
+                        "error": (
+                            "config.yaml was updated but bootstrap.py could not be synced: "
+                            f"{sync_error}"
+                        ),
+                        "config_updated": True,
+                        "bootstrap_synced": False,
+                    }
+                ),
+                500,
+            )
+
+        log_security_event("cvaas_enroll_chars_update", "success", client_ip, "updated")
+
+        response = {
+            "message": "Enrollment chars saved and bootstrap.py updated",
+            "enroll_chars_configured": True,
+            "bootstrap_synced": True,
+        }
+        if warning_msg:
+            response["warning"] = warning_msg
+        return jsonify(response)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
