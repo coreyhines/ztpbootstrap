@@ -46,6 +46,27 @@ network:
   # Use HTTP-only mode (insecure, not recommended for production)
   http_only: false
 
+  # Runtime ZTP segment profile (source of truth when enabled; see docs/RUNTIME_ZTP_NETWORK_SPEC.md)
+  ztp:
+    enabled: false
+    vlan_id: 5
+    parent_interface: ""
+    podman_network: ""              # default: ztp-net-<vlan_id>
+    ipv4:
+      address: ""
+      subnet: ""
+      gateway: ""
+    ipv6:
+      address: ""
+      subnet: ""
+      gateway: ""
+    macvlan_mode: bridge            # bridge | private | vepa | passthru
+    applied_at: ""
+    applied_parent: ""
+    applied_network: ""
+    status: pending                 # pending | applied | error | drift
+    last_error: ""
+
 # ============================================================================
 # CVaaS Configuration
 # ============================================================================
@@ -171,6 +192,10 @@ dhcp:
     dns_servers: []
     domain: ""
     ntp_servers: []
+    # Relay agent (giaddr) addresses that forward DHCP into this subnet.
+    # Leave empty to default to the last usable host and the gateway on a /24;
+    # set explicitly when the relaying SVI is at a different address.
+    relay_agents: []
 
   # IPv6 Configuration
   ipv6:

@@ -95,24 +95,40 @@ def validate_dhcp_range(
     Returns:
         Tuple of (is_valid, error_message)
     """
-    # Validate IP addresses
-    is_valid, error = validate_ip_address(range_start)
+    range_start = (range_start or "").strip()
+    range_end = (range_end or "").strip()
+    subnet = (subnet or "").strip()
+
+    try:
+        network = ipaddress.ip_network(subnet, strict=False)
+    except ValueError as e:
+        return False, f"Invalid subnet: {e}"
+
+    version = 6 if isinstance(network, ipaddress.IPv6Network) else 4
+
+    is_valid, error = validate_ip_address(range_start, version=version)
     if not is_valid:
         return False, f"Invalid range_start: {error}"
 
-    is_valid, error = validate_ip_address(range_end)
+    is_valid, error = validate_ip_address(range_end, version=version)
     if not is_valid:
         return False, f"Invalid range_end: {error}"
 
-    # Validate subnet
-    is_valid, error = validate_cidr(subnet)
+    is_valid, error = validate_cidr(subnet, version=version)
     if not is_valid:
         return False, f"Invalid subnet: {error}"
 
     try:
         start_ip = ipaddress.ip_address(range_start)
         end_ip = ipaddress.ip_address(range_end)
-        network = ipaddress.ip_network(subnet, strict=False)
+
+        if type(start_ip) is not type(network.network_address):
+            return (
+                False,
+                f"range_start ({range_start}) does not match subnet address family ({subnet})",
+            )
+        if type(end_ip) is not type(network.network_address):
+            return False, f"range_end ({range_end}) does not match subnet address family ({subnet})"
 
         # Check range order
         if start_ip >= end_ip:
@@ -129,10 +145,10 @@ def validate_dhcp_range(
         if range_size > max_size:
             return False, f"Range size ({range_size}) exceeds maximum ({max_size})"
 
-        # Check for reserved IPs (network address and broadcast)
+        # Check for reserved IPs (network address; broadcast is IPv4-only)
         if start_ip == network.network_address:
             return False, f"range_start cannot be network address ({network.network_address})"
-        if end_ip == network.broadcast_address:
+        if isinstance(network, ipaddress.IPv4Network) and end_ip == network.broadcast_address:
             return False, f"range_end cannot be broadcast address ({network.broadcast_address})"
 
         return True, None
@@ -155,19 +171,28 @@ def validate_gateway(gateway: str, subnet: str) -> Tuple[bool, Optional[str]]:
     if not gateway:
         return True, None  # Gateway is optional
 
-    # Validate IP address
-    is_valid, error = validate_ip_address(gateway)
+    gateway = gateway.strip()
+    subnet = subnet.strip()
+
+    try:
+        network = ipaddress.ip_network(subnet, strict=False)
+    except ValueError as e:
+        return False, f"Invalid subnet: {e}"
+
+    version = 6 if isinstance(network, ipaddress.IPv6Network) else 4
+
+    is_valid, error = validate_ip_address(gateway, version=version)
     if not is_valid:
         return False, f"Invalid gateway: {error}"
 
-    # Validate subnet
-    is_valid, error = validate_cidr(subnet)
+    is_valid, error = validate_cidr(subnet, version=version)
     if not is_valid:
         return False, f"Invalid subnet: {error}"
 
     try:
         gateway_ip = ipaddress.ip_address(gateway)
-        network = ipaddress.ip_network(subnet, strict=False)
+        if type(gateway_ip) is not type(network.network_address):
+            return False, f"Gateway ({gateway}) does not match subnet address family ({subnet})"
 
         # Check gateway is in subnet
         if gateway_ip not in network:
@@ -177,6 +202,46 @@ def validate_gateway(gateway: str, subnet: str) -> Tuple[bool, Optional[str]]:
 
     except Exception as e:
         return False, f"Gateway validation error: {str(e)}"
+
+
+def _looks_like_hostname(value: str) -> bool:
+    """True when value is clearly not an IP literal (e.g. a DNS hostname)."""
+    value = (value or "").strip()
+    if not value:
+        return False
+    try:
+        ipaddress.ip_address(value)
+        return False
+    except ValueError:
+        pass
+    # Hex letters a-f are valid in IPv6; hostname if g-z, underscore, or DNS-like label
+    if "_" in value or value.endswith("."):
+        return True
+    if re.search(r"[g-zG-Z]", value):
+        return True
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9-]*(\.[a-zA-Z0-9-]+)+$", value):
+        return True
+    return False
+
+
+def _ip_only_error(field_label: str, index: int, value: str, version: Optional[int] = None) -> str:
+    if ":" in value:
+        try:
+            ipaddress.ip_address(value)
+        except ValueError:
+            pass
+        else:
+            return f"Invalid {field_label} #{index}: '{value}'"
+    if _looks_like_hostname(value):
+        return (
+            f"{field_label} #{index} must be an IP address, not a hostname "
+            f"('{value}'). Kea DHCP options require numeric addresses."
+        )
+    if version == 4:
+        return f"Invalid {field_label} #{index}: expected IPv4 address, got '{value}'"
+    if version == 6:
+        return f"Invalid {field_label} #{index}: expected IPv6 address, got '{value}'"
+    return f"Invalid {field_label} #{index}: '{value}'"
 
 
 def validate_dns_servers(dns_servers: List[str]) -> Tuple[bool, Optional[str]]:
@@ -196,9 +261,36 @@ def validate_dns_servers(dns_servers: List[str]) -> Tuple[bool, Optional[str]]:
         return False, "DNS servers must be a list"
 
     for i, dns in enumerate(dns_servers):
-        is_valid, error = validate_ip_address(dns)
+        entry = (dns or "").strip()
+        if not entry:
+            continue
+        try:
+            ipaddress.ip_address(entry)
+        except ValueError:
+            return False, _ip_only_error("DNS server", i + 1, entry)
+
+    return True, None
+
+
+def validate_ntp_servers(ntp_servers: List[str]) -> Tuple[bool, Optional[str]]:
+    """
+    Validate NTP server addresses for Kea DHCP option 42 (IPv4 addresses only).
+    """
+    if not ntp_servers:
+        return True, None
+
+    if isinstance(ntp_servers, str):
+        ntp_servers = [s.strip() for s in ntp_servers.split(",") if s.strip()]
+
+    if not isinstance(ntp_servers, list):
+        return False, "NTP servers must be a list"
+
+    for i, ntp in enumerate(ntp_servers):
+        if not (ntp or "").strip():
+            continue
+        is_valid, error = validate_ip_address(ntp, version=4)
         if not is_valid:
-            return False, f"Invalid DNS server #{i+1}: {error}"
+            return False, _ip_only_error("NTP server", i + 1, ntp, version=4)
 
     return True, None
 
@@ -348,6 +440,11 @@ def validate_dhcp_config(dhcp_config: Dict) -> Tuple[bool, Optional[str]]:
             if not is_valid:
                 return False, f"IPv4 DNS: {error}"
 
+        if "ntp_servers" in ipv4:
+            is_valid, error = validate_ntp_servers(ipv4["ntp_servers"])
+            if not is_valid:
+                return False, f"IPv4 NTP: {error}"
+
         if "domain" in ipv4:
             is_valid, error = validate_domain_name(ipv4["domain"])
             if not is_valid:
@@ -368,6 +465,11 @@ def validate_dhcp_config(dhcp_config: Dict) -> Tuple[bool, Optional[str]]:
             )
             if not is_valid:
                 return False, f"IPv6 range: {error}"
+
+        if "gateway" in ipv6 and ipv6.get("gateway") and "subnet" in ipv6:
+            is_valid, error = validate_gateway(ipv6["gateway"], ipv6["subnet"])
+            if not is_valid:
+                return False, f"IPv6 gateway: {error}"
 
         if "dns_servers" in ipv6:
             # IPv6 DNS can be IPv4 or IPv6

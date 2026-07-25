@@ -494,6 +494,19 @@ update_pod_file() {
 
     log "Updating pod file with network configuration..."
 
+    local ztp_enabled
+    ztp_enabled=$(get_yaml_value '.network.ztp.enabled')
+    if [[ "$ztp_enabled" == "true" ]]; then
+        local sync_script="${SCRIPT_DIR}/scripts/sync-ztp-pod-quadlet.py"
+        if [[ -f "$sync_script" ]] && command -v python3 >/dev/null 2>&1; then
+            if python3 "$sync_script" "$CONFIG_FILE"; then
+                log "Updated pod file from network.ztp profile"
+                return 0
+            fi
+            warn "sync-ztp-pod-quadlet.py failed; falling back to legacy pod update"
+        fi
+    fi
+
     local host_network
     local ipv4
     local ipv6

@@ -4,9 +4,10 @@ Kea DHCP Configuration Generator
 Generates Kea JSON configuration from YAML config
 """
 
+import ipaddress
 import logging
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from dhcp_utils import detect_networking_mode, get_interfaces_for_kea
 
@@ -14,6 +15,142 @@ logger = logging.getLogger(__name__)
 
 # Kea Control Agent default port
 KEA_CTRL_AGENT_PORT = 8000
+
+# Host offset used as the default relay agent (giaddr) on a /24. Switch SVIs
+# that relay DHCP are conventionally the last usable host in the subnet.
+DEFAULT_RELAY_HOST_OFFSET = 254
+
+
+def resolve_relay_agents(ip_config: Dict, subnet: str, gateway: str) -> List[str]:
+    """
+    Determine the relay agent (giaddr) addresses to advertise for a subnet.
+
+    An explicit ``relay_agents`` list in the config always wins. Otherwise, for
+    an IPv4 /24 with a gateway configured, default to the last usable host (the
+    SVI that typically relays DHCP) plus the gateway itself. Without this, Kea
+    only selects the subnet for on-link Discovers and NAKs relayed ones with
+    "failed to select a subnet".
+
+    Kea treats ``relay.ip-addresses`` as an additional way to select the subnet,
+    so listing these addresses never narrows normal subnet selection.
+
+    Args:
+        ip_config: The ipv4 or ipv6 section of the DHCP config
+        subnet: Subnet in CIDR notation
+        gateway: Gateway address, or "" if unset
+
+    Returns:
+        Relay agent addresses, or an empty list if none apply
+    """
+    configured = ip_config.get("relay_agents") or []
+    if isinstance(configured, str):
+        configured = [part.strip() for part in configured.split(",")]
+    agents = [str(agent).strip() for agent in configured if str(agent).strip()]
+    if agents:
+        return agents
+
+    if not gateway:
+        return []
+
+    try:
+        network = ipaddress.ip_network(subnet, strict=False)
+    except ValueError:
+        logger.warning("Cannot parse subnet %r; skipping relay agent defaults", subnet)
+        return []
+
+    # Only IPv4 /24 has a safe "last usable host is the relay" convention.
+    if network.version != 4 or network.prefixlen != 24:
+        return []
+
+    defaults = [str(network.network_address + DEFAULT_RELAY_HOST_OFFSET), gateway]
+    # dict.fromkeys preserves order while dropping the duplicate when the
+    # gateway already is the relay host.
+    return list(dict.fromkeys(defaults))
+
+
+# Default subnet IDs — match generate_dhcp4/6_config "id" fields
+DEFAULT_DHCP4_SUBNET_ID = 1
+DEFAULT_DHCP6_SUBNET_ID = 1
+
+
+def dhcp_service_for_ip(ip: str) -> str:
+    """Return Kea service name for an IP address."""
+    return "dhcp6" if ":" in str(ip) else "dhcp4"
+
+
+def _normalize_mac(mac: str) -> str:
+    return str(mac).lower().replace("-", ":").strip()
+
+
+def _build_kea_subnet_reservations(dhcp_config: Dict, ip_version: int) -> List[Dict]:
+    """Build Kea subnet reservation rows from config.yaml dhcp.reservations."""
+    rows: List[Dict] = []
+    for item in dhcp_config.get("reservations") or []:
+        mac = item.get("hw-address") or item.get("hwaddr") or item.get("mac")
+        ip = item.get("ip-address") or item.get("ip") or item.get("address")
+        if not mac or not ip:
+            continue
+        ip_str = str(ip).strip()
+        is_v6 = ":" in ip_str
+        if ip_version == 4 and is_v6:
+            continue
+        if ip_version == 6 and not is_v6:
+            continue
+        entry: Dict = {"hw-address": _normalize_mac(mac), "ip-address": ip_str}
+        hostname = (item.get("hostname") or item.get("host") or "").strip()
+        if hostname:
+            entry["hostname"] = hostname
+        rows.append(entry)
+    return rows
+
+
+def _build_kea_subnet6_reservations(dhcp_config: Dict) -> List[Dict]:
+    """DHCPv6 reservations use ip-addresses (array), not ip-address."""
+    rows: List[Dict] = []
+    for item in dhcp_config.get("reservations") or []:
+        mac = item.get("hw-address") or item.get("hwaddr") or item.get("mac")
+        ip = item.get("ip-address") or item.get("ip") or item.get("address")
+        if not mac or not ip:
+            continue
+        ip_str = str(ip).strip()
+        if ":" not in ip_str:
+            continue
+        entry: Dict = {
+            "hw-address": _normalize_mac(mac),
+            "ip-addresses": [ip_str],
+        }
+        hostname = (item.get("hostname") or item.get("host") or "").strip()
+        if hostname:
+            entry["hostname"] = hostname
+        rows.append(entry)
+    return rows
+
+
+def _apply_subnet_reservations(subnet_config: Dict, dhcp_config: Dict, ip_version: int) -> None:
+    if ip_version == 6:
+        reservations = _build_kea_subnet6_reservations(dhcp_config)
+    else:
+        reservations = _build_kea_subnet_reservations(dhcp_config, ip_version=4)
+    if reservations:
+        subnet_config["reservations"] = reservations
+
+
+# Default Kea hook directory in the runtime image (RHEL/Fedora layout).
+DEFAULT_HOOK_LIBRARY_PATH = "/usr/lib64/kea/hooks"
+
+
+def _build_hooks_libraries(backend_config: Dict, backend_type: str) -> List[Dict]:
+    """Build Kea hooks-libraries list.
+
+    lease_cmds works with every backend (including memfile) and is required for
+    the Control Agent / Web UI to enumerate and manage leases. host_cmds needs a
+    database backend, so it is only loaded for PostgreSQL/MySQL.
+    """
+    hook_path = backend_config.get("hook_library_path", DEFAULT_HOOK_LIBRARY_PATH)
+    hooks = [{"library": f"{hook_path}/libdhcp_lease_cmds.so"}]
+    if backend_type in ["postgresql", "mysql"]:
+        hooks.append({"library": f"{hook_path}/libdhcp_host_cmds.so"})
+    return hooks
 
 
 def generate_kea_config(config_yaml: Dict) -> Dict:
@@ -109,10 +246,14 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     # Build subnet configuration
     # Kea requires each subnet to have a unique id
     subnet_config = {
-        "id": 1,  # Use 1 as default, can be made configurable if needed
+        "id": DEFAULT_DHCP4_SUBNET_ID,  # Use default constant
         "subnet": subnet,
         "pools": [{"pool": f"{range_start} - {range_end}"}],
     }
+
+    relay_agents = resolve_relay_agents(ipv4_config, subnet, gateway)
+    if relay_agents:
+        subnet_config["relay"] = {"ip-addresses": relay_agents}
 
     # Add gateway/router option
     if gateway and gateway.strip():
@@ -175,6 +316,8 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
                 # For now, use the first one
                 pass
 
+    _apply_subnet_reservations(subnet_config, dhcp_config, ip_version=4)
+
     # Build main DHCPv4 config
     backend_config = dhcp_config.get("backend", {})
     backend_type = backend_config.get("type", "memfile")
@@ -197,13 +340,9 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     if backend_type in ["postgresql", "mysql"]:
         config["hosts-database"] = generate_lease_database(backend_config)
 
-    # Add hooks for lease and host commands (required for Control Agent access with PG backend)
-    if backend_type in ["postgresql", "mysql"]:
-        hook_path = backend_config.get("hook_library_path", "/usr/lib/x86_64-linux-gnu/kea/hooks")
-        config["hooks-libraries"] = [
-            {"library": f"{hook_path}/libdhcp_lease_cmds.so"},
-            {"library": f"{hook_path}/libdhcp_host_cmds.so"},
-        ]
+    # Always load lease_cmds (memfile-compatible) so the Control Agent / Web UI
+    # can enumerate leases; host_cmds is added for DB backends inside the helper.
+    config["hooks-libraries"] = _build_hooks_libraries(backend_config, backend_type)
 
     # Add client classification for OUI filtering
     oui_config = dhcp_config.get("oui_filtering", {})
@@ -212,9 +351,13 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         or oui_config.get("allowed_ouis")
         or oui_config.get("blocked_ouis")
     ):
-        config["client-classes"] = generate_client_classes(oui_config, "ipv4")
-        # Add classifier to subnet
-        if oui_config.get("arista_only_mode"):
+        client_classes = generate_client_classes(oui_config, "ipv4")
+        if client_classes:
+            config["client-classes"] = client_classes
+        # Add classifier to subnet, but only if the class was actually defined
+        if oui_config.get("arista_only_mode") and any(
+            cls["name"] == "ARISTA_ONLY" for cls in client_classes
+        ):
             subnet_config["client-class"] = "ARISTA_ONLY"
 
     # Add PXE configuration
@@ -292,6 +435,10 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         "pools": [{"pool": f"{range_start} - {range_end}"}],
     }
 
+    relay_agents = resolve_relay_agents(ipv6_config, subnet, gateway)
+    if relay_agents:
+        subnet_config["relay"] = {"ip-addresses": relay_agents}
+
     # Add gateway/router option (option 3 for IPv6)
     if gateway and gateway.strip():
         if "option-data" not in subnet_config:
@@ -310,8 +457,10 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         if cleaned_dns:
             if "option-data" not in subnet_config:
                 subnet_config["option-data"] = []
-            # Kea expects DNS servers as an array
-            subnet_config["option-data"].append({"name": "dns-servers", "data": cleaned_dns})
+            # Kea JSON config expects a string, not an array, for dns-servers.
+            subnet_config["option-data"].append(
+                {"name": "dns-servers", "data": ", ".join(cleaned_dns)}
+            )
 
     # Add domain name (option 24)
     domain = ipv6_config.get("domain", "")
@@ -326,6 +475,8 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         relay_subnets = generate_relay_subnets(relay_config, "ipv6")
         if relay_subnets:
             subnet_config = relay_subnets[0]
+
+    _apply_subnet_reservations(subnet_config, dhcp_config, ip_version=6)
 
     # Build main DHCPv6 config
     backend_config = dhcp_config.get("backend", {})
@@ -354,13 +505,9 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     if backend_type in ["postgresql", "mysql"]:
         config["hosts-database"] = generate_lease_database(backend_config)
 
-    # Add hooks for lease and host commands (required for Control Agent access with PG backend)
-    if backend_type in ["postgresql", "mysql"]:
-        hook_path = backend_config.get("hook_library_path", "/usr/lib/x86_64-linux-gnu/kea/hooks")
-        config["hooks-libraries"] = [
-            {"library": f"{hook_path}/libdhcp_lease_cmds.so"},
-            {"library": f"{hook_path}/libdhcp_host_cmds.so"},
-        ]
+    # Always load lease_cmds (memfile-compatible) so the Control Agent / Web UI
+    # can enumerate leases; host_cmds is added for DB backends inside the helper.
+    config["hooks-libraries"] = _build_hooks_libraries(backend_config, backend_type)
 
     # Add client classification for OUI filtering
     oui_config = dhcp_config.get("oui_filtering", {})
@@ -369,9 +516,12 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         or oui_config.get("allowed_ouis")
         or oui_config.get("blocked_ouis")
     ):
-        config["client-classes"] = generate_client_classes(oui_config, "ipv6")
-        if oui_config.get("arista_only_mode"):
-            subnet_config["client-class"] = "ARISTA_ONLY"
+        # DHCPv6 cannot classify on hardware address; generate_client_classes
+        # returns nothing, and the subnet must not reference a class that the
+        # config does not define.
+        client_classes = generate_client_classes(oui_config, "ipv6")
+        if client_classes:
+            config["client-classes"] = client_classes
 
     # Add custom DHCP options
     options_config = dhcp_config.get("options", {})
@@ -384,9 +534,45 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     return config
 
 
+def build_oui_test(ouis: List[str]) -> str:
+    """
+    Build a Kea classification expression matching any of the given OUIs.
+
+    ``pkt4.mac`` evaluates to the raw 6-byte hardware address, so the first
+    3 bytes must be compared against a hex literal (``0x001C73``). Comparing
+    them against a quoted string compares binary bytes to ASCII text and never
+    matches, which silently rejects every client when the subnet is guarded by
+    the resulting class.
+
+    Args:
+        ouis: OUI prefixes, with or without separators (e.g. "2C:DD:E9")
+
+    Returns:
+        Kea test expression, or "" if no usable OUIs were supplied
+    """
+    tests = []
+    for oui in ouis:
+        digits = str(oui).replace(":", "").replace("-", "").replace(".", "").strip()
+        if len(digits) != 6:
+            logger.warning("Skipping malformed OUI %r (expected 6 hex digits)", oui)
+            continue
+        try:
+            int(digits, 16)
+        except ValueError:
+            logger.warning("Skipping non-hex OUI %r", oui)
+            continue
+        tests.append(f"substring(pkt4.mac,0,3) == 0x{digits.upper()}")
+
+    return " or ".join(tests)
+
+
 def generate_client_classes(oui_config: Dict, version: str) -> List[Dict]:
     """
     Generate client classification rules for OUI filtering.
+
+    Only DHCPv4 is supported: DHCPv6 has no reliable way to observe a client's
+    MAC address, and ``pkt4`` tokens are invalid in a Dhcp6 config, so a v6
+    request returns no classes rather than emitting a config Kea cannot load.
 
     Args:
         oui_config: OUI filtering configuration
@@ -395,13 +581,26 @@ def generate_client_classes(oui_config: Dict, version: str) -> List[Dict]:
     Returns:
         List of client class definitions
     """
-    classes = []
+    classes: List[Dict] = []
+
+    if version != "ipv4":
+        logger.warning(
+            "OUI filtering is not supported for %s; DHCPv6 cannot match hardware addresses",
+            version,
+        )
+        return classes
 
     # Arista-only mode
     if oui_config.get("arista_only_mode", False):
-        # Known Arista OUIs (common prefixes)
+        # Known Arista OUIs (common prefixes). The 2C:DD:E9 block covers the
+        # CCS-710P; omitting it caused Kea to NAK those switches on VLAN5.
         arista_ouis = [
             "00:1C:73",  # Arista Networks
+            "2C:DD:E9",  # Arista Networks (CCS-710P and other modern platforms)
+            "FC:BD:67",  # Arista Networks
+            "E0:FA:5B",  # Arista Networks
+            "28:99:3A",  # Arista Networks
+            "EC:8A:48",  # Arista Networks
             "00:1E:0D",  # Arista Networks
             "00:1E:0E",  # Arista Networks
             "00:1E:0F",  # Arista Networks
@@ -423,38 +622,19 @@ def generate_client_classes(oui_config: Dict, version: str) -> List[Dict]:
             "00:1E:1F",  # Arista Networks
         ]
 
-        # Build test expression for Arista OUIs
-        oui_tests = []
-        for oui in arista_ouis:
-            oui_upper = oui.upper().replace(":", "")
-            oui_lower = oui.lower().replace(":", "")
-            # Match first 6 characters of MAC address
-            oui_tests.append(
-                f"substring(pkt4.mac,0,6) == '{oui_upper}' or substring(pkt4.mac,0,6) == '{oui_lower}'"
+        test_expr = build_oui_test(arista_ouis)
+        if test_expr:
+            classes.append(
+                {
+                    "name": "ARISTA_ONLY",
+                    "test": test_expr,
+                    "option-data": [],
+                }
             )
-
-        test_expr = " or ".join(oui_tests)
-
-        classes.append(
-            {
-                "name": "ARISTA_ONLY",
-                "test": test_expr,
-                "option-data": [],
-            }
-        )
 
     # Allowed OUIs
-    allowed_ouis = oui_config.get("allowed_ouis", [])
-    if allowed_ouis:
-        oui_tests = []
-        for oui in allowed_ouis:
-            oui_upper = oui.upper().replace(":", "")
-            oui_lower = oui.lower().replace(":", "")
-            oui_tests.append(
-                f"substring(pkt4.mac,0,6) == '{oui_upper}' or substring(pkt4.mac,0,6) == '{oui_lower}'"
-            )
-
-        test_expr = " or ".join(oui_tests)
+    test_expr = build_oui_test(oui_config.get("allowed_ouis", []))
+    if test_expr:
         classes.append(
             {
                 "name": "ALLOWED_OUI",
@@ -464,17 +644,8 @@ def generate_client_classes(oui_config: Dict, version: str) -> List[Dict]:
         )
 
     # Blocked OUIs
-    blocked_ouis = oui_config.get("blocked_ouis", [])
-    if blocked_ouis:
-        oui_tests = []
-        for oui in blocked_ouis:
-            oui_upper = oui.upper().replace(":", "")
-            oui_lower = oui.lower().replace(":", "")
-            oui_tests.append(
-                f"substring(pkt4.mac,0,6) == '{oui_upper}' or substring(pkt4.mac,0,6) == '{oui_lower}'"
-            )
-
-        test_expr = " or ".join(oui_tests)
+    test_expr = build_oui_test(oui_config.get("blocked_ouis", []))
+    if test_expr:
         classes.append(
             {
                 "name": "BLOCKED_OUI",
@@ -555,18 +726,15 @@ def generate_pxe_options(pxe_config: Dict, version: str) -> List[Dict]:
     options = []
 
     if version == "ipv4":
-        # Option 66: Boot server hostname/IP
+        # Option 66: Boot server hostname/IP (use standard option name for Kea)
         boot_server_url = pxe_config.get("boot_server_url", "")
         if boot_server_url:
-            options.append({"name": "boot-server-hostname", "data": boot_server_url})
-        elif pxe_config.get("boot_file_source") == "local":
-            # Use local server IP (will be set by API)
-            options.append({"name": "boot-server-hostname", "data": "0.0.0.0"})
+            options.append({"name": "option-66", "code": 66, "data": boot_server_url})
 
         # Option 67: Boot file name
         boot_file_name = pxe_config.get("boot_file_name", "")
         if boot_file_name:
-            options.append({"name": "boot-file-name", "data": boot_file_name})
+            options.append({"name": "boot-file-name", "code": 67, "data": boot_file_name})
 
     return options
 
@@ -685,3 +853,50 @@ def generate_ctrl_agent_config() -> Dict:
             "dhcp6": {"socket-type": "unix", "socket-name": "/var/run/kea/kea-dhcp6-ctrl.sock"},
         },
     }
+
+
+# ============================================================================
+# DHCP Reservation Helpers (Bucket W4)
+# ============================================================================
+
+
+def dhcp_subnet_id_for_service(config: Dict, service: str) -> int:
+    """Return configured Kea subnet id (matches generate_dhcp4/6_config id field)."""
+    dhcp = config.get("dhcp") or {}
+    if service == "dhcp6":
+        return int(dhcp.get("ipv6_subnet_id") or DEFAULT_DHCP6_SUBNET_ID)
+    return int(dhcp.get("ipv4_subnet_id") or DEFAULT_DHCP4_SUBNET_ID)
+
+
+def find_reservation_in_config(config: Dict, mac: str) -> Optional[Dict]:
+    """Find a reservation dict in config by MAC (normalized compare)."""
+    target = _normalize_mac(mac)
+    for row in (config.get("dhcp") or {}).get("reservations") or []:
+        row_mac = row.get("hw-address") or row.get("mac") or ""
+        if _normalize_mac(str(row_mac)) == target:
+            return row
+    return None
+
+
+def build_kea_reservation_payload(
+    mac: str,
+    ip: str,
+    config: Dict,
+    hostname: Optional[str] = None,
+):
+    """
+    Build reservation-add payload for Kea host_cmds API.
+
+    Returns:
+        (reservation dict, service name)
+    """
+    service = dhcp_service_for_ip(ip)
+    reservation = {
+        "subnet-id": dhcp_subnet_id_for_service(config, service),
+        "identifier-type": "hw-address",
+        "identifier": _normalize_mac(mac),
+        "ip-address": str(ip).strip(),
+    }
+    if hostname:
+        reservation["hostname"] = str(hostname).strip()
+    return reservation, service

@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../webui"))
 try:
     from dhcp_validation import (
         PROTECTED_DHCP_OPTIONS,
+        _looks_like_hostname,
         validate_cidr,
         validate_dhcp_config,
         validate_dhcp_option,
@@ -22,10 +23,48 @@ try:
         validate_domain_name,
         validate_gateway,
         validate_ip_address,
+        validate_ntp_servers,
         validate_port,
     )
 except ImportError:
     validate_ip_address = None
+
+
+@unittest.skipIf(validate_ip_address is None, "DHCP validation not available")
+class TestHostnameDetection(unittest.TestCase):
+    """_looks_like_hostname must not flag valid IPv6 literals as hostnames."""
+
+    def test_legit_ipv6_not_hostname(self):
+        ipv6_samples = [
+            "2601:441:8483:b502::2",
+            "2601:441:8483:b502::50",
+            "2601:441:8483:b502::dead:beef",
+            "2001:db8::1",
+            "::1",
+            "fe80::1",
+            "2601:441:8483:b502:0000:0000:0000:0050",
+        ]
+        for addr in ipv6_samples:
+            with self.subTest(addr=addr):
+                self.assertFalse(
+                    _looks_like_hostname(addr),
+                    f"{addr} should not be treated as a hostname",
+                )
+
+    def test_obvious_hostnames_detected(self):
+        self.assertTrue(_looks_like_hostname("ntp10.example.com"))
+        self.assertTrue(_looks_like_hostname("router.local"))
+        self.assertTrue(_looks_like_hostname("bad_host"))
+
+    def test_ipv4_mapped_ipv6_not_hostname(self):
+        self.assertFalse(_looks_like_hostname("::ffff:192.168.1.1"))
+
+    def test_ipv6_with_dead_beef_suffix_not_hostname(self):
+        """Regression: hex-only IPv6 literals must not be rejected as hostnames."""
+        addr = "2601:441:8483:b502::dead:beef"
+        self.assertFalse(_looks_like_hostname(addr))
+        is_valid, error = validate_dns_servers([addr])
+        self.assertTrue(is_valid, error)
 
 
 @unittest.skipIf(validate_ip_address is None, "DHCP validation not available")
@@ -88,6 +127,22 @@ class TestDHCPValidation(unittest.TestCase):
         self.assertFalse(is_valid)
         self.assertIn("not in subnet", error)
 
+    def test_validate_dhcp_range_ipv6(self):
+        """Test valid IPv6 DHCP range"""
+        is_valid, error = validate_dhcp_range(
+            "2601:441:8483:b502::50",
+            "2601:441:8483:b502::100",
+            "2601:441:8483:b502::/64",
+        )
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+
+    def test_validate_gateway_ipv6(self):
+        """Test valid IPv6 gateway"""
+        is_valid, error = validate_gateway("2601:441:8483:b502::1", "2601:441:8483:b502::/64")
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+
     def test_validate_dhcp_range_too_large(self):
         """Test DHCP range that's too large"""
         is_valid, error = validate_dhcp_range(
@@ -118,7 +173,31 @@ class TestDHCPValidation(unittest.TestCase):
         """Test invalid DNS servers"""
         is_valid, error = validate_dns_servers(["not-an-ip", "8.8.8.8"])
         self.assertFalse(is_valid)
-        self.assertIn("Invalid DNS server", error)
+        self.assertIn("DNS server", error)
+
+    def test_validate_dns_servers_rejects_hostname(self):
+        """Test DNS hostnames are rejected with a clear message"""
+        is_valid, error = validate_dns_servers(["ntp10.example.com"])
+        self.assertFalse(is_valid)
+        self.assertIn("hostname", error)
+
+    def test_validate_dns_servers_accepts_ipv6(self):
+        """Test IPv6 DNS addresses are accepted"""
+        is_valid, error = validate_dns_servers(["2601:441:8483:b502::2"])
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+
+    def test_validate_ntp_servers_valid(self):
+        """Test valid NTP IPv4 addresses"""
+        is_valid, error = validate_ntp_servers(["10.0.10.11", "10.0.10.12"])
+        self.assertTrue(is_valid)
+        self.assertIsNone(error)
+
+    def test_validate_ntp_servers_rejects_hostname(self):
+        """Test NTP hostnames are rejected"""
+        is_valid, error = validate_ntp_servers(["ntp10.freeblizz.com"])
+        self.assertFalse(is_valid)
+        self.assertIn("hostname", error)
 
     def test_validate_domain_name_valid(self):
         """Test valid domain names"""
