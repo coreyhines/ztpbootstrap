@@ -1,0 +1,199 @@
+---
+# Forgejo-native CI for ztpbootstrap.
+#
+# Mirrors .github/workflows/ci.yml, which is kept for the GitHub fallback
+# repo. Differences are forced by the Forgejo runtime, not by preference:
+#
+#   * runs-on targets the `strongpod` runner; `ubuntu-latest` matches no
+#     runner on this instance.
+#   * Actions are fully qualified to data.forgejo.org. Forgejo resolves bare
+#     `owner/repo@ref` against its own action host, where anchore/sbom-action,
+#     gitleaks/gitleaks-action, trufflesecurity/trufflehog and
+#     dependency-check/Dependency-Check_Action do not exist.
+#   * Those four actions are replaced by their underlying tools, invoked
+#     directly (see scripts/secret-scan.sh).
+#   * No upload-artifact steps: that action is known to fail against this
+#     Forgejo instance, so reports are written to the job log instead.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - feature/*
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  secret-scan:
+    name: Secret Scanning
+    runs-on: strongpod
+    container:
+      image: docker.io/library/python:3.12-bookworm
+    timeout-minutes: 15
+    env:
+      GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
+    steps:
+      # actions/checkout is a Node action; the plain Python image has
+      # neither git nor node.
+      - name: Install git and node
+        run: apt-get update && apt-get install -y --no-install-recommends git nodejs
+
+      - uses: https://data.forgejo.org/actions/checkout@v6
+        with:
+          # gitleaks scans history, so the full clone is required.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Mask scanner credentials
+        run: |
+          if [ -n "${GITGUARDIAN_API_KEY:-}" ]; then
+            printf '::add-mask::%s\n' "${GITGUARDIAN_API_KEY}"
+          fi
+
+      - name: Install scanners
+        run: |
+          set -euo pipefail
+          pip install --quiet ggshield
+          GITLEAKS_VERSION=8.28.0
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      - name: Run secret scanners
+        run: ./scripts/secret-scan.sh ci
+
+  lint:
+    name: Code Quality Checks
+    runs-on: strongpod
+    container:
+      image: docker.io/library/python:3.12-bookworm
+    timeout-minutes: 15
+    steps:
+      - name: Install git and node
+        run: apt-get update && apt-get install -y --no-install-recommends git nodejs
+
+      - uses: https://data.forgejo.org/actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install lint tooling
+        run: |
+          apt-get install -y --no-install-recommends shellcheck
+          pip install --quiet black isort ruff yamllint
+
+      - name: Run shellcheck
+        run: |
+          shellcheck -S error ./*.sh || true
+          shellcheck -S error dev/scripts/*.sh dev/tests/*.sh 2>/dev/null || true
+
+      - name: Run yamllint
+        run: |
+          yamllint ./*.yaml ./*.yml config.yaml.template dev/tests/*.yaml 2>/dev/null \
+            || echo "No YAML files to lint"
+
+      - name: Check Python formatting with black
+        run: |
+          black --check bootstrap.py
+          black --check webui/ tests/unit/
+
+      # Reports ~384 pre-existing findings across webui/ and fails on main as
+      # well as on branches. Left non-blocking so the rest of the pipeline
+      # gives usable signal; flip to a hard gate once the backlog is cleared.
+      - name: Run ruff (webui + tests)
+        continue-on-error: true
+        run: ruff check webui/ tests/unit/
+
+      - name: Check Python imports with isort
+        run: |
+          isort --check-only bootstrap.py \
+            || echo "Python import sorting check (run isort to auto-fix)"
+
+      - name: Run container security checks
+        run: |
+          chmod +x dev/scripts/security-check-container-access.sh
+          ./dev/scripts/security-check-container-access.sh
+
+  dependency-scan:
+    name: Dependency Scanning
+    runs-on: strongpod
+    container:
+      image: docker.io/library/python:3.12-bookworm
+    timeout-minutes: 15
+    steps:
+      - name: Install git and node
+        run: apt-get update && apt-get install -y --no-install-recommends git nodejs
+
+      - uses: https://data.forgejo.org/actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # Replaces dependency-check/Dependency-Check_Action. pip-audit covers
+      # the Python dependencies that actually carry CVE exposure here, and is
+      # already the tool scripts/security-scan.sh uses.
+      - name: Audit Python dependencies
+        run: |
+          pip install --quiet pip-audit
+          pip-audit -r webui/requirements.txt
+
+  sbom:
+    name: Generate SBOM
+    runs-on: strongpod
+    container:
+      image: docker.io/library/python:3.12-bookworm
+    timeout-minutes: 15
+    steps:
+      - name: Install git and node
+        run: apt-get update && apt-get install -y --no-install-recommends git nodejs curl
+
+      - uses: https://data.forgejo.org/actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # Replaces anchore/sbom-action, which wraps this same binary.
+      - name: Generate SBOM with Syft
+        run: |
+          set -euo pipefail
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+          syft scan dir:. -o cyclonedx-json=sbom.cyclonedx.json
+          echo "SBOM component count: $(grep -c '"bom-ref"' sbom.cyclonedx.json || echo 0)"
+
+  test:
+    name: Run Tests
+    needs: [secret-scan, lint]
+    # Host execution, not a container: these tests drive podman on the
+    # runner host.
+    runs-on: strongpod
+    timeout-minutes: 30
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Verify host tooling
+        run: |
+          set -euo pipefail
+          for tool in podman python3 curl openssl; do
+            if ! command -v "$tool" >/dev/null 2>&1; then
+              printf '::error::%s is not installed on the strongpod runner\n' "$tool"
+              exit 1
+            fi
+          done
+          podman --version
+          python3 --version
+
+      - name: Run Python unit tests
+        run: |
+          cd tests/unit
+          python3 -m unittest discover -s . -p "test_*.py"
+
+      - name: Make test scripts executable
+        run: |
+          chmod +x dev/tests/ci-test.sh
+          chmod +x dev/tests/integration-test.sh
+
+      - name: Run CI test suite
+        run: ./dev/tests/ci-test.sh
