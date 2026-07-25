@@ -192,6 +192,10 @@ dhcp:
     dns_servers: []
     domain: ""
     ntp_servers: []
+    # Relay agent (giaddr) addresses that forward DHCP into this subnet.
+    # Leave empty to default to the last usable host and the gateway on a /24;
+    # set explicitly when the relaying SVI is at a different address.
+    relay_agents: []
 
   # IPv6 Configuration
   ipv6:

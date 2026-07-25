@@ -13,6 +13,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "webui"))
 
 from dhcp_config import (
+    build_oui_test,
     configure_giaddr_matching,
     generate_client_classes,
     generate_ctrl_agent_config,
@@ -24,6 +25,7 @@ from dhcp_config import (
     generate_lease_database,
     generate_pxe_options,
     generate_relay_subnets,
+    resolve_relay_agents,
 )
 
 
@@ -213,6 +215,93 @@ class TestDHCPConfig(unittest.TestCase):
         classes = generate_client_classes(oui_config, "ipv4")
         self.assertEqual(len(classes), 1)
         self.assertEqual(classes[0]["name"], "ALLOWED_OUI")
+
+    def test_generate_client_classes_covers_modern_arista_ouis(self):
+        """CCS-710P and other modern Arista OUIs must be in ARISTA_ONLY"""
+        classes = generate_client_classes({"arista_only_mode": True}, "ipv4")
+        test_expr = classes[0]["test"]
+        for oui in ["2CDDE9", "FCBD67", "E0FA5B", "28993A", "EC8A48", "001C73"]:
+            self.assertIn(f"0x{oui}", test_expr, f"{oui} missing from ARISTA_ONLY")
+
+    def test_oui_test_compares_binary_mac_to_hex_literal(self):
+        """
+        pkt4.mac is binary, so OUIs must be compared against an unquoted hex
+        literal over 3 bytes. A quoted 6-char string never matches any client.
+        """
+        expr = build_oui_test(["2C:DD:E9"])
+        self.assertEqual(expr, "substring(pkt4.mac,0,3) == 0x2CDDE9")
+        self.assertNotIn("'", expr)
+
+    def test_oui_test_accepts_separator_variants(self):
+        """OUIs may be written with colons, dashes, or bare hex"""
+        for oui in ["2C:DD:E9", "2c-dd-e9", "2cdde9"]:
+            self.assertEqual(build_oui_test([oui]), "substring(pkt4.mac,0,3) == 0x2CDDE9")
+
+    def test_oui_test_skips_malformed_entries(self):
+        """Malformed OUIs are dropped rather than emitted as broken expressions"""
+        self.assertEqual(build_oui_test(["zz:zz:zz", "00:1C"]), "")
+        self.assertEqual(
+            build_oui_test(["00:1C", "2C:DD:E9"]), "substring(pkt4.mac,0,3) == 0x2CDDE9"
+        )
+
+    def test_generate_client_classes_ipv6_returns_nothing(self):
+        """DHCPv6 cannot match hardware addresses, so no pkt4 classes are emitted"""
+        classes = generate_client_classes({"arista_only_mode": True}, "ipv6")
+        self.assertEqual(classes, [])
+
+    def test_relay_agents_default_for_slash_24(self):
+        """A /24 with a gateway defaults to the last usable host plus gateway"""
+        agents = resolve_relay_agents({}, "10.0.5.0/24", "10.0.5.1")
+        self.assertEqual(agents, ["10.0.5.254", "10.0.5.1"])
+
+    def test_relay_agents_explicit_config_wins(self):
+        """An explicit relay_agents list overrides the /24 default"""
+        agents = resolve_relay_agents(
+            {"relay_agents": ["10.0.5.254", "10.0.5.253"]}, "10.0.5.0/24", "10.0.5.1"
+        )
+        self.assertEqual(agents, ["10.0.5.254", "10.0.5.253"])
+
+    def test_relay_agents_deduplicates_gateway(self):
+        """A gateway that is already the relay host is not listed twice"""
+        agents = resolve_relay_agents({}, "10.0.5.0/24", "10.0.5.254")
+        self.assertEqual(agents, ["10.0.5.254"])
+
+    def test_relay_agents_skipped_without_gateway_or_slash_24(self):
+        """No defaults are invented for other prefix lengths or missing gateways"""
+        self.assertEqual(resolve_relay_agents({}, "10.0.5.0/24", ""), [])
+        self.assertEqual(resolve_relay_agents({}, "10.0.0.0/16", "10.0.0.1"), [])
+        self.assertEqual(resolve_relay_agents({}, "2001:db8::/64", "2001:db8::1"), [])
+        self.assertEqual(resolve_relay_agents({}, "not-a-subnet", "10.0.5.1"), [])
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp4_config_sets_relay_addresses(self, mock_interfaces, mock_networking):
+        """Generated DHCPv4 subnet carries relay addresses so relayed Discovers match"""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+        config = generate_dhcp4_config(self.minimal_config["dhcp"], "macvlan", self.minimal_config)
+        self.assertEqual(config["subnet4"][0]["relay"]["ip-addresses"], ["10.0.0.254", "10.0.0.1"])
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp6_config_uses_ipv6_section(self, mock_interfaces, mock_networking):
+        """DHCPv6 generation reads its own config section and adds no v4 relay defaults"""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+        config = generate_dhcp6_config(self.minimal_config["dhcp"], "macvlan", self.minimal_config)
+        self.assertNotIn("relay", config["subnet6"][0])
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp6_config_omits_oui_class(self, mock_interfaces, mock_networking):
+        """arista_only_mode must not guard a v6 subnet with an undefined class"""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+        dhcp = dict(self.minimal_config["dhcp"])
+        dhcp["oui_filtering"] = {"arista_only_mode": True, "allowed_ouis": [], "blocked_ouis": []}
+        config = generate_dhcp6_config(dhcp, "macvlan", self.minimal_config)
+        self.assertNotIn("client-classes", config)
+        self.assertNotIn("client-class", config["subnet6"][0])
 
     @patch("dhcp_config.detect_networking_mode")
     @patch("dhcp_config.get_interfaces_for_kea")
