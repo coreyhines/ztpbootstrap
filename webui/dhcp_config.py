@@ -4,6 +4,7 @@ Kea DHCP Configuration Generator
 Generates Kea JSON configuration from YAML config
 """
 
+import ipaddress
 import logging
 import os
 from typing import Dict, List
@@ -14,6 +15,57 @@ logger = logging.getLogger(__name__)
 
 # Kea Control Agent default port
 KEA_CTRL_AGENT_PORT = 8000
+
+# Host offset used as the default relay agent (giaddr) on a /24. Switch SVIs
+# that relay DHCP are conventionally the last usable host in the subnet.
+DEFAULT_RELAY_HOST_OFFSET = 254
+
+
+def resolve_relay_agents(ip_config: Dict, subnet: str, gateway: str) -> List[str]:
+    """
+    Determine the relay agent (giaddr) addresses to advertise for a subnet.
+
+    An explicit ``relay_agents`` list in the config always wins. Otherwise, for
+    an IPv4 /24 with a gateway configured, default to the last usable host (the
+    SVI that typically relays DHCP) plus the gateway itself. Without this, Kea
+    only selects the subnet for on-link Discovers and NAKs relayed ones with
+    "failed to select a subnet".
+
+    Kea treats ``relay.ip-addresses`` as an additional way to select the subnet,
+    so listing these addresses never narrows normal subnet selection.
+
+    Args:
+        ip_config: The ipv4 or ipv6 section of the DHCP config
+        subnet: Subnet in CIDR notation
+        gateway: Gateway address, or "" if unset
+
+    Returns:
+        Relay agent addresses, or an empty list if none apply
+    """
+    configured = ip_config.get("relay_agents") or []
+    if isinstance(configured, str):
+        configured = [part.strip() for part in configured.split(",")]
+    agents = [str(agent).strip() for agent in configured if str(agent).strip()]
+    if agents:
+        return agents
+
+    if not gateway:
+        return []
+
+    try:
+        network = ipaddress.ip_network(subnet, strict=False)
+    except ValueError:
+        logger.warning("Cannot parse subnet %r; skipping relay agent defaults", subnet)
+        return []
+
+    # Only IPv4 /24 has a safe "last usable host is the relay" convention.
+    if network.version != 4 or network.prefixlen != 24:
+        return []
+
+    defaults = [str(network.network_address + DEFAULT_RELAY_HOST_OFFSET), gateway]
+    # dict.fromkeys preserves order while dropping the duplicate when the
+    # gateway already is the relay host.
+    return list(dict.fromkeys(defaults))
 
 
 def generate_kea_config(config_yaml: Dict) -> Dict:
@@ -114,6 +166,10 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         "pools": [{"pool": f"{range_start} - {range_end}"}],
     }
 
+    relay_agents = resolve_relay_agents(ipv4_config, subnet, gateway)
+    if relay_agents:
+        subnet_config["relay"] = {"ip-addresses": relay_agents}
+
     # Add gateway/router option
     if gateway and gateway.strip():
         if "option-data" not in subnet_config:
@@ -212,9 +268,13 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         or oui_config.get("allowed_ouis")
         or oui_config.get("blocked_ouis")
     ):
-        config["client-classes"] = generate_client_classes(oui_config, "ipv4")
-        # Add classifier to subnet
-        if oui_config.get("arista_only_mode"):
+        client_classes = generate_client_classes(oui_config, "ipv4")
+        if client_classes:
+            config["client-classes"] = client_classes
+        # Add classifier to subnet, but only if the class was actually defined
+        if oui_config.get("arista_only_mode") and any(
+            cls["name"] == "ARISTA_ONLY" for cls in client_classes
+        ):
             subnet_config["client-class"] = "ARISTA_ONLY"
 
     # Add PXE configuration
@@ -291,6 +351,10 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         "subnet": subnet,
         "pools": [{"pool": f"{range_start} - {range_end}"}],
     }
+
+    relay_agents = resolve_relay_agents(ipv6_config, subnet, gateway)
+    if relay_agents:
+        subnet_config["relay"] = {"ip-addresses": relay_agents}
 
     # Add gateway/router option (option 3 for IPv6)
     if gateway and gateway.strip():
@@ -369,9 +433,12 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         or oui_config.get("allowed_ouis")
         or oui_config.get("blocked_ouis")
     ):
-        config["client-classes"] = generate_client_classes(oui_config, "ipv6")
-        if oui_config.get("arista_only_mode"):
-            subnet_config["client-class"] = "ARISTA_ONLY"
+        # DHCPv6 cannot classify on hardware address; generate_client_classes
+        # returns nothing, and the subnet must not reference a class that the
+        # config does not define.
+        client_classes = generate_client_classes(oui_config, "ipv6")
+        if client_classes:
+            config["client-classes"] = client_classes
 
     # Add custom DHCP options
     options_config = dhcp_config.get("options", {})
@@ -384,9 +451,45 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     return config
 
 
+def build_oui_test(ouis: List[str]) -> str:
+    """
+    Build a Kea classification expression matching any of the given OUIs.
+
+    ``pkt4.mac`` evaluates to the raw 6-byte hardware address, so the first
+    3 bytes must be compared against a hex literal (``0x001C73``). Comparing
+    them against a quoted string compares binary bytes to ASCII text and never
+    matches, which silently rejects every client when the subnet is guarded by
+    the resulting class.
+
+    Args:
+        ouis: OUI prefixes, with or without separators (e.g. "2C:DD:E9")
+
+    Returns:
+        Kea test expression, or "" if no usable OUIs were supplied
+    """
+    tests = []
+    for oui in ouis:
+        digits = str(oui).replace(":", "").replace("-", "").replace(".", "").strip()
+        if len(digits) != 6:
+            logger.warning("Skipping malformed OUI %r (expected 6 hex digits)", oui)
+            continue
+        try:
+            int(digits, 16)
+        except ValueError:
+            logger.warning("Skipping non-hex OUI %r", oui)
+            continue
+        tests.append(f"substring(pkt4.mac,0,3) == 0x{digits.upper()}")
+
+    return " or ".join(tests)
+
+
 def generate_client_classes(oui_config: Dict, version: str) -> List[Dict]:
     """
     Generate client classification rules for OUI filtering.
+
+    Only DHCPv4 is supported: DHCPv6 has no reliable way to observe a client's
+    MAC address, and ``pkt4`` tokens are invalid in a Dhcp6 config, so a v6
+    request returns no classes rather than emitting a config Kea cannot load.
 
     Args:
         oui_config: OUI filtering configuration
@@ -395,13 +498,26 @@ def generate_client_classes(oui_config: Dict, version: str) -> List[Dict]:
     Returns:
         List of client class definitions
     """
-    classes = []
+    classes: List[Dict] = []
+
+    if version != "ipv4":
+        logger.warning(
+            "OUI filtering is not supported for %s; DHCPv6 cannot match hardware addresses",
+            version,
+        )
+        return classes
 
     # Arista-only mode
     if oui_config.get("arista_only_mode", False):
-        # Known Arista OUIs (common prefixes)
+        # Known Arista OUIs (common prefixes). The 2C:DD:E9 block covers the
+        # CCS-710P; omitting it caused Kea to NAK those switches on VLAN5.
         arista_ouis = [
             "00:1C:73",  # Arista Networks
+            "2C:DD:E9",  # Arista Networks (CCS-710P and other modern platforms)
+            "FC:BD:67",  # Arista Networks
+            "E0:FA:5B",  # Arista Networks
+            "28:99:3A",  # Arista Networks
+            "EC:8A:48",  # Arista Networks
             "00:1E:0D",  # Arista Networks
             "00:1E:0E",  # Arista Networks
             "00:1E:0F",  # Arista Networks
@@ -423,38 +539,19 @@ def generate_client_classes(oui_config: Dict, version: str) -> List[Dict]:
             "00:1E:1F",  # Arista Networks
         ]
 
-        # Build test expression for Arista OUIs
-        oui_tests = []
-        for oui in arista_ouis:
-            oui_upper = oui.upper().replace(":", "")
-            oui_lower = oui.lower().replace(":", "")
-            # Match first 6 characters of MAC address
-            oui_tests.append(
-                f"substring(pkt4.mac,0,6) == '{oui_upper}' or substring(pkt4.mac,0,6) == '{oui_lower}'"
+        test_expr = build_oui_test(arista_ouis)
+        if test_expr:
+            classes.append(
+                {
+                    "name": "ARISTA_ONLY",
+                    "test": test_expr,
+                    "option-data": [],
+                }
             )
-
-        test_expr = " or ".join(oui_tests)
-
-        classes.append(
-            {
-                "name": "ARISTA_ONLY",
-                "test": test_expr,
-                "option-data": [],
-            }
-        )
 
     # Allowed OUIs
-    allowed_ouis = oui_config.get("allowed_ouis", [])
-    if allowed_ouis:
-        oui_tests = []
-        for oui in allowed_ouis:
-            oui_upper = oui.upper().replace(":", "")
-            oui_lower = oui.lower().replace(":", "")
-            oui_tests.append(
-                f"substring(pkt4.mac,0,6) == '{oui_upper}' or substring(pkt4.mac,0,6) == '{oui_lower}'"
-            )
-
-        test_expr = " or ".join(oui_tests)
+    test_expr = build_oui_test(oui_config.get("allowed_ouis", []))
+    if test_expr:
         classes.append(
             {
                 "name": "ALLOWED_OUI",
@@ -464,17 +561,8 @@ def generate_client_classes(oui_config: Dict, version: str) -> List[Dict]:
         )
 
     # Blocked OUIs
-    blocked_ouis = oui_config.get("blocked_ouis", [])
-    if blocked_ouis:
-        oui_tests = []
-        for oui in blocked_ouis:
-            oui_upper = oui.upper().replace(":", "")
-            oui_lower = oui.lower().replace(":", "")
-            oui_tests.append(
-                f"substring(pkt4.mac,0,6) == '{oui_upper}' or substring(pkt4.mac,0,6) == '{oui_lower}'"
-            )
-
-        test_expr = " or ".join(oui_tests)
+    test_expr = build_oui_test(oui_config.get("blocked_ouis", []))
+    if test_expr:
         classes.append(
             {
                 "name": "BLOCKED_OUI",
