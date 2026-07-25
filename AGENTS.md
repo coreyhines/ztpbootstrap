@@ -34,6 +34,10 @@ The dashboard will be available at `http://localhost:5000/`. Use the **DHCP Serv
 - Integration tests require Podman and are in `tests/integration/test_dhcp_api.bats`.
 - See `docs/DHCP_TESTING.md` and `docs/DHCP_IMPLEMENTATION_PLAN.md` for full setup.
 
+### Runtime ZTP network
+
+Production deployments attach the pod to a ZTP VLAN via Podman macvlan from the **ZTP Network** Web UI tab. Feature design: `docs/RUNTIME_ZTP_NETWORK_SPEC.md`. Host VLAN, firewall, and migration steps (not automated by the UI): `docs/ZTP_NETWORK_HOST_SETUP.md`.
+
 ### Lint, test, format
 
 Standard commands are in the `Makefile` — run `make help` for the full list. Key commands:
@@ -57,3 +61,23 @@ Standard commands are in the `Makefile` — run `make help` for the full list. K
 - **Podman, not Docker**: This project uses Podman exclusively. Do not use Docker commands.
 - **Integration tests** require a running Podman pod (not available in typical cloud agent environments). Unit tests and CI tests work without Podman.
 - **`~/.local/bin` must be on PATH** for pip-installed tools (black, isort, flask). The update script handles this.
+
+### Parallel Buckets (mandatory for multi-bucket work)
+
+This repo uses the [parallel-buckets](~/code/parallel-buckets) skill. Overlay: `parallel-buckets.local.yaml`.
+
+**Coordinator rules — no exceptions:**
+
+1. **Bucketize → post schedule table → STOP** until the user approves in a follow-up message.
+2. **On approval:** run probes before each wave:
+   ```bash
+   export PARALLEL_BUCKETS_HOME=~/code/parallel-buckets
+   uv run python $PARALLEL_BUCKETS_HOME/scripts/resolve_bucket_route.py --status-only
+   uv run python $PARALLEL_BUCKETS_HOME/scripts/recommend_bucket_owner.py --profile <id> --tier sonnet
+   ```
+3. **Execute via assigned backend** — Ollama: `farm_ollama_bucket.sh` in a git worktree; Claude: `claude -p`; Cursor: Task subagent. **Do not** implement bucket-owned files inline unless farm/subagent failed twice or reroute is documented in chat.
+4. **Session report** after every execute pass: planned vs resolved backend, sub-agent id or farm log path, commits. Save to `docs/research/<feature>-session-*.md`.
+
+Trackers live under `docs/research/*-buckets.md`. See `docs/research/WEBUI_P0_G6-buckets.md` for WebUI P0 example.
+
+**Farm wrapper:** `scripts/farm-bucket.sh` (uses `uv run --directory $PARALLEL_BUCKETS_HOME` — required because upstream `farm_ollama_bucket.sh` runs `uv` from the worktree and misses `python-dotenv`).

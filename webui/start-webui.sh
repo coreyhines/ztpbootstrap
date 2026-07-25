@@ -16,6 +16,12 @@ elif ! getent hosts pypi.org >/dev/null 2>&1; then
     echo "DNS configured: $(cat /etc/resolv.conf)"
 fi
 
+# Ensure ip(8) exists for ZTP Network parent discovery (Fedora base image is minimal)
+if ! command -v ip >/dev/null 2>&1; then
+    echo "Installing iproute for network discovery..."
+    dnf install -y iproute >/dev/null 2>&1 || true
+fi
+
 # Change to app directory (mounted at /app)
 cd /app || {
     echo "Error: /app directory not found"

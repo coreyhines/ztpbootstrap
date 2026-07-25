@@ -27,6 +27,8 @@ security-reports/
 .DS_Store
 .vscode/
 .idea/
+.local/
+.playwright-mcp/
 
 # Python cache
 __pycache__/

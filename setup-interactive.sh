@@ -725,6 +725,131 @@ _get_podman_network_subnet() {
     return 1
 }
 
+_get_podman_network_subnet_family() {
+    local network_name="$1"
+    local family="${2:-4}"
+    local podman_cmd="${3:-}"
+    local inspect_json=""
+
+    if [[ -z "$podman_cmd" ]]; then
+        podman_cmd=$(_podman_for_network "$network_name")
+    fi
+    inspect_json=$($podman_cmd network inspect "$network_name" 2>/dev/null || echo "")
+    if [[ -z "$inspect_json" ]]; then
+        return 1
+    fi
+
+    printf '%s' "$inspect_json" | python3 - "$family" <<'PY'
+import ipaddress
+import json
+import sys
+
+family = int(sys.argv[1])
+try:
+    payload = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+net = payload[0] if isinstance(payload, list) and payload else payload
+for subnet in net.get("Subnets") or []:
+    cidr = (subnet or {}).get("Subnet", "")
+    if not cidr:
+        continue
+    try:
+        if ipaddress.ip_network(cidr, strict=False).version == family:
+            print(cidr)
+            raise SystemExit(0)
+    except ValueError:
+        continue
+raise SystemExit(1)
+PY
+}
+
+_get_podman_network_gateway_family() {
+    local network_name="$1"
+    local family="${2:-4}"
+    local podman_cmd="${3:-}"
+    local inspect_json=""
+
+    if [[ -z "$podman_cmd" ]]; then
+        podman_cmd=$(_podman_for_network "$network_name")
+    fi
+    inspect_json=$($podman_cmd network inspect "$network_name" 2>/dev/null || echo "")
+    if [[ -z "$inspect_json" ]]; then
+        return 1
+    fi
+
+    printf '%s' "$inspect_json" | python3 - "$family" <<'PY'
+import ipaddress
+import json
+import sys
+
+family = int(sys.argv[1])
+try:
+    payload = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+net = payload[0] if isinstance(payload, list) and payload else payload
+for subnet in net.get("Subnets") or []:
+    entry = subnet or {}
+    cidr = entry.get("Subnet", "")
+    gateway = entry.get("Gateway", "")
+    if not cidr or not gateway:
+        continue
+    try:
+        if ipaddress.ip_network(cidr, strict=False).version == family:
+            print(gateway)
+            raise SystemExit(0)
+    except ValueError:
+        continue
+raise SystemExit(1)
+PY
+}
+
+_get_podman_network_option() {
+    local network_name="$1"
+    local option_name="$2"
+    local podman_cmd="${3:-}"
+    local value=""
+
+    if [[ -z "$podman_cmd" ]]; then
+        podman_cmd=$(_podman_for_network "$network_name")
+    fi
+
+    value=$($podman_cmd network inspect "$network_name" --format "{{index .Options \"$option_name\"}}" 2>/dev/null || echo "")
+    if [[ -n "$value" ]] && [[ "$value" != "<no value>" ]] && [[ "$value" != "null" ]]; then
+        echo "$value"
+        return 0
+    fi
+    return 1
+}
+
+_derive_vlan_id() {
+    local network_name="${1:-}"
+    local parent_interface="${2:-}"
+    local candidate=""
+
+    if [[ "$network_name" =~ ^ztp-net-([0-9]+)$ ]]; then
+        echo "${BASH_REMATCH[1]}"
+        return 0
+    fi
+    if [[ "$network_name" =~ ^net-([0-9]+)$ ]]; then
+        echo "${BASH_REMATCH[1]}"
+        return 0
+    fi
+    if [[ "$network_name" =~ vlan[-_]?([0-9]+)$ ]]; then
+        echo "${BASH_REMATCH[1]}"
+        return 0
+    fi
+
+    candidate="${parent_interface##*.}"
+    if [[ "$candidate" =~ ^[0-9]+$ ]]; then
+        echo "$candidate"
+        return 0
+    fi
+
+    return 1
+}
+
 _ip_in_subnet() {
     local ip="$1"
     local subnet="$2"
@@ -4240,6 +4365,34 @@ generate_yaml_config() {
     ADMIN_PASSWORD_HASH="${ADMIN_PASSWORD_HASH:-}"
     SESSION_TIMEOUT="${SESSION_TIMEOUT:-3600}"
     SESSION_SECRET="${SESSION_SECRET:-}"
+    ZTP_ENABLED="false"
+    ZTP_VLAN_ID="null"
+    ZTP_PARENT_INTERFACE=""
+    ZTP_PODMAN_NETWORK=""
+    ZTP_MACVLAN_MODE="bridge"
+    ZTP_IPV4_ADDRESS="${IPV4:-}"
+    ZTP_IPV4_SUBNET=""
+    ZTP_IPV4_GATEWAY=""
+    ZTP_IPV6_ADDRESS="${IPV6:-}"
+    ZTP_IPV6_SUBNET=""
+    ZTP_IPV6_GATEWAY=""
+
+    # Seed network.ztp for macvlan installs from setup prompts and live podman data.
+    if [[ "${HOST_NETWORK:-false}" != "true" ]] && [[ -n "${NETWORK:-}" ]]; then
+        ZTP_ENABLED="true"
+        ZTP_PODMAN_NETWORK="$NETWORK"
+        if _podman_network_exists "$NETWORK"; then
+            local ztp_podman_cmd
+            ztp_podman_cmd=$(_podman_for_network "$NETWORK")
+            ZTP_PARENT_INTERFACE=$(_get_podman_network_option "$NETWORK" "parent" "$ztp_podman_cmd" || echo "")
+            ZTP_MACVLAN_MODE=$(_get_podman_network_option "$NETWORK" "mode" "$ztp_podman_cmd" || echo "bridge")
+            ZTP_IPV4_SUBNET=$(_get_podman_network_subnet_family "$NETWORK" 4 "$ztp_podman_cmd" || echo "")
+            ZTP_IPV4_GATEWAY=$(_get_podman_network_gateway_family "$NETWORK" 4 "$ztp_podman_cmd" || echo "")
+            ZTP_IPV6_SUBNET=$(_get_podman_network_subnet_family "$NETWORK" 6 "$ztp_podman_cmd" || echo "")
+            ZTP_IPV6_GATEWAY=$(_get_podman_network_gateway_family "$NETWORK" 6 "$ztp_podman_cmd" || echo "")
+        fi
+        ZTP_VLAN_ID=$(_derive_vlan_id "$ZTP_PODMAN_NETWORK" "$ZTP_PARENT_INTERFACE" || echo "null")
+    fi
 
     cat > "$CONFIG_FILE" << EOF
 # Arista ZTP Bootstrap Service Configuration
@@ -4267,6 +4420,25 @@ network:
   https_port: $HTTPS_PORT
   http_port: $HTTP_PORT
   http_only: $HTTP_ONLY
+  ztp:
+    enabled: $ZTP_ENABLED
+    vlan_id: $ZTP_VLAN_ID
+    parent_interface: "$ZTP_PARENT_INTERFACE"
+    podman_network: "$ZTP_PODMAN_NETWORK"
+    ipv4:
+      address: "$ZTP_IPV4_ADDRESS"
+      subnet: "$ZTP_IPV4_SUBNET"
+      gateway: "$ZTP_IPV4_GATEWAY"
+    ipv6:
+      address: "$ZTP_IPV6_ADDRESS"
+      subnet: "$ZTP_IPV6_SUBNET"
+      gateway: "$ZTP_IPV6_GATEWAY"
+    macvlan_mode: "$ZTP_MACVLAN_MODE"
+    applied_at: ""
+    applied_parent: ""
+    applied_network: ""
+    status: pending
+    last_error: ""
 
 # ============================================================================
 # CVaaS Configuration (enroll_chars used by bootstrap.py - Apache 2.0, Arista)

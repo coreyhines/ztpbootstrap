@@ -20,6 +20,7 @@ from dhcp_utils import (
     detect_networking_mode,
     detect_subnet,
     get_interfaces_for_kea,
+    subnet_defaults_from_cidr,
     validate_dhcp_range,
 )
 
@@ -195,6 +196,25 @@ class TestDHCPUtils(unittest.TestCase):
         # Should return valid IPv6 addresses
         self.assertIn("2001:db8::", range_start)
         self.assertIn("2001:db8::", range_end)
+
+    def test_subnet_defaults_from_cidr_ipv4(self):
+        """Suggest gateway and range from an IPv4 CIDR."""
+        defaults = subnet_defaults_from_cidr("10.0.5.0/24")
+        self.assertEqual(defaults["subnet"], "10.0.5.0/24")
+        self.assertEqual(defaults["gateway"], "10.0.5.1")
+        self.assertTrue(defaults["range_start"])
+        self.assertTrue(defaults["range_end"])
+
+    def test_subnet_defaults_from_cidr_no_range(self):
+        """include_range=False omits range suggestions."""
+        defaults = subnet_defaults_from_cidr("10.0.5.0/24", include_range=False)
+        self.assertEqual(defaults["gateway"], "10.0.5.1")
+        self.assertNotIn("range_start", defaults)
+
+    def test_subnet_defaults_from_cidr_invalid(self):
+        """Invalid subnet returns None values without raising."""
+        defaults = subnet_defaults_from_cidr("not-a-subnet")
+        self.assertIsNone(defaults["gateway"])
 
     def test_calculate_default_range_no_gateway(self):
         """Test default range calculation without gateway"""

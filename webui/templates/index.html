@@ -4,7 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ZTP Bootstrap Service - Dashboard</title>
-    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <!-- ui-build: 20260622-login-fix18 -->
+    <script>
+        // Strip leaked passwords from old cached HTML before Alpine loads.
+        (function () {
+            if (window.location.search && window.location.search.indexOf('loginPassword') !== -1) {
+                window.history.replaceState(null, document.title, window.location.pathname);
+            }
+        })();
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js" defer></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Prism.js for YAML syntax highlighting -->
     <link id="prism-theme" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
@@ -12,8 +21,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
     <style>
         [x-cloak] { display: none !important; }
-        /* Ensure login modal is hidden by default */
-        .login-modal-hidden { display: none !important; }
+        /* Login modal hidden until Alpine opens it */
+        [data-login-modal] { display: none; }
         /* Custom styling for YAML in config */
         pre[class*="language-"] {
             margin: 0;
@@ -34,7 +43,7 @@
     </style>
 </head>
 <body class="bg-gray-50">
-    <div x-data="dashboard()" x-init="init()" x-cloak class="min-h-screen">
+    <div x-data="dashboard()" x-init="init()" class="min-h-screen">
         <!-- Header -->
         <header class="bg-white shadow-sm">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2 flex justify-between items-center">
@@ -42,6 +51,19 @@
                     <h1 class="text-xl font-bold text-gray-900">ZTP Bootstrap Service</h1>
                     <p class="text-xs text-gray-500">Configuration and Monitoring Dashboard</p>
                 </div>
+                <!-- Auth status (always visible) -->
+                <div class="flex items-center gap-3">
+                    <button x-show="!authenticated"
+                            type="button"
+                            @click="openLoginModal()"
+                            class="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md">
+                        Sign in
+                    </button>
+                    <span x-show="authenticated"
+                          class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-green-800 bg-green-100 rounded-full">
+                        <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+                        Signed in
+                    </span>
                 <!-- Profile Dropdown -->
                 <div class="relative" x-data="{ showProfileMenu: false }" @click.away="showProfileMenu = false">
                     <button @click="showProfileMenu = !showProfileMenu"
@@ -62,9 +84,21 @@
                         <div class="py-2">
                             <!-- Session Info -->
                             <div class="px-4 py-2 border-b border-gray-200">
-                                <p class="text-xs text-gray-500">Session expires:</p>
-                                <p class="text-sm font-medium text-gray-900" x-text="authExpiresAt ? new Date(authExpiresAt * 1000).toLocaleString() : 'Unknown'"></p>
+                                <p class="text-xs text-gray-500" x-show="authenticated">Session expires:</p>
+                                <p class="text-xs text-gray-500" x-show="!authenticated">Status:</p>
+                                <p class="text-sm font-medium text-gray-900"
+                                   x-show="authenticated"
+                                   x-text="authExpiresAt ? new Date(authExpiresAt * 1000).toLocaleString() : 'Unknown'"></p>
+                                <p class="text-sm font-medium text-orange-700" x-show="!authenticated">Not signed in</p>
                             </div>
+                            <button x-show="!authenticated"
+                                    @click="showProfileMenu = false; openLoginModal()"
+                                    class="w-full text-left px-4 py-2 text-sm text-blue-700 hover:bg-gray-100 flex items-center space-x-2">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+                                </svg>
+                                <span>Sign in</span>
+                            </button>
                             <!-- Change Password -->
                             <button @click="triggerChangePassword(); showProfileMenu = false"
                                     class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2">
@@ -84,6 +118,7 @@
                         </div>
                     </div>
                 </div>
+                </div>
             </div>
         </header>
 
@@ -98,7 +133,12 @@
                                 class="px-6 py-4 border-b-2 font-medium text-sm">
                             ZTP Bootstrap Service
                         </button>
-                        <button @click="activeApplication = 'dhcp'"
+                        <button @click="openLoginModal(() => activeApplication = 'ztp-network')"
+                                :class="activeApplication === 'ztp-network' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                                class="px-6 py-4 border-b-2 font-medium text-sm">
+                            ZTP Network
+                        </button>
+                        <button @click="openLoginModal(() => activeApplication = 'dhcp')"
                                 :class="activeApplication === 'dhcp' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
                                 class="px-6 py-4 border-b-2 font-medium text-sm">
                             DHCP Server
@@ -185,8 +225,151 @@
 
             </div>
 
+            <!-- Auth wall for protected tabs -->
+            <div x-show="(activeApplication === 'ztp-network' || activeApplication === 'dhcp') && !authenticated"
+                 class="bg-white rounded-lg shadow-sm p-12 mb-4 text-center border border-gray-200">
+                <div class="text-gray-400 mb-4">
+                    <svg class="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                    </svg>
+                </div>
+                <h3 class="text-lg font-medium text-gray-900 mb-2">Authentication required</h3>
+                <p class="text-sm text-gray-500 mb-6">Sign in to access network and DHCP configuration.</p>
+                <button @click="openLoginModal()" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium">Sign In</button>
+            </div>
+
+            <!-- ZTP Network Status Cards -->
+            <div x-show="activeApplication === 'ztp-network' && authenticated" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+                <div class="bg-white rounded-lg shadow-sm p-4 border-l-4"
+                     :class="networkStatus.status === 'applied' && !networkStatus.drift ? 'border-green-500' : (networkStatus.status === 'error' ? 'border-red-500' : 'border-yellow-500')">
+                    <p class="text-xs font-medium text-gray-600 mb-0.5">Apply Status</p>
+                    <p class="text-2xl font-bold capitalize"
+                       :class="networkStatus.status === 'applied' && !networkStatus.drift ? 'text-green-600' : (networkStatus.status === 'error' ? 'text-red-600' : 'text-yellow-600')"
+                       x-text="networkStatus.drift ? 'drift' : (networkStatus.status || 'pending')"></p>
+                    <p class="text-xs text-gray-500 mt-0.5" x-text="networkForm.enabled ? 'Macvlan ZTP mode' : 'Disabled / legacy'"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-4 border-l-4 border-blue-500">
+                    <p class="text-xs font-medium text-gray-600 mb-0.5">Pod Network</p>
+                    <p class="text-lg font-bold text-blue-600 truncate" x-text="networkStatus.effective?.podman_network || '—'"></p>
+                    <p class="text-xs text-gray-500 mt-0.5" x-text="networkStatus.effective?.ipv4_address || 'No IPv4'"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-4 border-l-4"
+                     :class="networkStatus.quadlet?.exists ? 'border-green-500' : 'border-gray-300'">
+                    <p class="text-xs font-medium text-gray-600 mb-0.5">Parent Interface</p>
+                    <p class="text-lg font-bold text-gray-900" x-text="networkForm.parent_interface || '—'"></p>
+                    <p class="text-xs text-gray-500 mt-0.5">Quadlet: <span x-text="networkStatus.quadlet?.network || '—'"></span></p>
+                </div>
+            </div>
+
+            <!-- ZTP Network Panel -->
+            <div x-show="activeApplication === 'ztp-network' && authenticated" class="bg-white rounded-lg shadow-sm p-6 mb-4">
+                <div x-show="networkStatus.drift" class="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                    <p class="text-sm font-medium text-yellow-900">Configuration drift detected</p>
+                    <ul class="mt-2 text-sm text-yellow-800 list-disc list-inside">
+                        <template x-for="item in networkStatus.drift_items || []" :key="item">
+                            <li x-text="item"></li>
+                        </template>
+                    </ul>
+                </div>
+                <div x-show="networkForm.last_error || networkStatus.ztp?.last_error" class="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-sm font-medium text-red-900">Last error</p>
+                    <p class="text-sm text-red-700 mt-1" x-text="networkForm.last_error || networkStatus.ztp?.last_error"></p>
+                </div>
+                <div x-show="dhcpSubnetMismatch()" class="mb-4 p-4 bg-orange-50 border border-orange-200 rounded-md">
+                    <p class="text-sm text-orange-800">DHCP subnet does not match ZTP network profile. Align subnets before enabling Kea on the ZTP VLAN.
+                        <button type="button" @click="activeApplication = 'dhcp'; activeDhcpTab = 'config'" class="underline text-orange-900 ml-1">Fix in DHCP Server →</button>
+                    </p>
+                </div>
+                <div class="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-md">
+                    <p class="text-sm font-medium text-gray-900 mb-2">Prerequisites (host operator)</p>
+                    <ul class="text-sm text-gray-600 list-disc list-inside space-y-1">
+                        <li>Parent VLAN subinterface exists and is oper-up (e.g. enp7s0.5)</li>
+                        <li>Switch port carries the ZTP VLAN</li>
+                        <li>Pod IP is free on the segment</li>
+                        <li>UDP 67/68 and TCP 443 allowed to pod IP from ZTP VLAN</li>
+                    </ul>
+                </div>
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-900">ZTP Network Profile</h2>
+                        <p class="text-sm text-gray-600">Configure macvlan segment for the entire ztpbootstrap pod</p>
+                    </div>
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="checkbox" x-model="networkForm.enabled" class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600 relative"></div>
+                        <span class="ml-3 text-sm text-gray-700">Enable ZTP macvlan</span>
+                    </label>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">VLAN ID</label>
+                        <input type="number" min="1" max="4094" x-model.number="networkForm.vlan_id" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Parent interface</label>
+                        <select x-model="networkForm.parent_interface" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                            <option value="">Select parent…</option>
+                            <template x-for="parent in networkParents" :key="parent.name">
+                                <option :value="parent.name" x-text="`${parent.name} (${parent.operstate}${parent.ipv4 ? ', ' + parent.ipv4 : ''})`"></option>
+                            </template>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Podman network name</label>
+                        <input type="text" x-model="networkForm.podman_network" placeholder="ztp-net-5" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Macvlan mode</label>
+                        <select x-model="networkForm.macvlan_mode" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                            <option value="bridge">bridge</option>
+                            <option value="private">private</option>
+                            <option value="vepa">vepa</option>
+                            <option value="passthru">passthru</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Pod IPv4</label>
+                        <input type="text" x-model="networkForm.ipv4.address" placeholder="10.0.5.10" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">IPv4 subnet (CIDR)</label>
+                        <div class="flex gap-2">
+                            <input type="text" x-model="networkForm.ipv4.subnet" placeholder="10.0.5.0/24" class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
+                            <button @click="autoDetectNetwork()" class="px-3 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Auto</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">IPv4 gateway</label>
+                        <input type="text" x-model="networkForm.ipv4.gateway" placeholder="10.0.5.1" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Pod IPv6 (optional)</label>
+                        <input type="text" x-model="networkForm.ipv6.address" placeholder="2601:441:8483:b505::10" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">IPv6 subnet (CIDR)</label>
+                        <input type="text" x-model="networkForm.ipv6.subnet" placeholder="2601:441:8483:b505::/64" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">IPv6 gateway</label>
+                        <input type="text" x-model="networkForm.ipv6.gateway" placeholder="2601:441:8483:b505::1" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                    </div>
+                </div>
+                <div x-show="networkValidation.errors.length" class="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+                    <template x-for="err in networkValidation.errors" :key="err">
+                        <p class="text-sm text-red-700" x-text="err"></p>
+                    </template>
+                </div>
+                <div class="flex flex-wrap gap-3">
+                    <button @click="validateNetwork()" :disabled="loadingStates.network" class="px-4 py-2 bg-gray-100 text-gray-800 rounded-md hover:bg-gray-200 text-sm">Validate</button>
+                    <button @click="saveNetwork()" :disabled="loadingStates.network" class="px-4 py-2 bg-blue-100 text-blue-800 rounded-md hover:bg-blue-200 text-sm">Save</button>
+                    <button @click="applyNetwork()" :disabled="loadingStates.network" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm">Apply &amp; restart</button>
+                    <button @click="restartNetworkStack()" :disabled="loadingStates.network" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm">Restart only</button>
+                </div>
+            </div>
+
             <!-- DHCP Server Status Cards -->
-            <div x-show="activeApplication === 'dhcp'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
+            <div x-show="activeApplication === 'dhcp' && authenticated" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
                 <!-- DHCP Service Status -->
                 <div class="bg-white rounded-lg shadow-sm p-4 border-l-4 relative"
                      :class="!dhcpStatus.enabled ? 'border-gray-300' : (dhcpStatus.container && dhcpStatus.container.container_running && dhcpStatus.container.service_active) ? 'border-green-500' : 'border-yellow-500'">
@@ -264,6 +447,52 @@
                 </div>
             </div>
 
+            <!-- DHCP Instrumentation Summary -->
+            <div x-show="activeApplication === 'dhcp' && authenticated" class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
+                    <p class="text-xs font-medium text-gray-500 mb-1">Active Leases</p>
+                    <p class="text-2xl font-bold text-gray-900" x-text="dhcpSummary.leases?.total ?? '—'"></p>
+                    <p class="text-xs text-gray-500 mt-1"
+                       x-text="`${dhcpSummary.leases?.ipv4 ?? 0} IPv4 / ${dhcpSummary.leases?.ipv6 ?? 0} IPv6`"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
+                    <p class="text-xs font-medium text-gray-500 mb-1">Reservations</p>
+                    <p class="text-2xl font-bold text-gray-900" x-text="dhcpSummary.reservations?.total ?? '—'"></p>
+                    <p class="text-xs text-gray-500 mt-1"
+                       x-text="`${dhcpSummary.reservations?.active_matches ?? 0} active / ${dhcpSummary.reservations?.unique_hosts ?? 0} hosts`"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
+                    <p class="text-xs font-medium text-gray-500 mb-1">Pool Used</p>
+                    <p class="text-2xl font-bold"
+                       :class="(dhcpSummary.pool?.ipv4?.percent ?? 0) >= 80 ? 'text-amber-600' : 'text-gray-900'"
+                       x-text="dhcpSummary.pool?.ipv4?.total ? `${dhcpSummary.pool.ipv4.percent}%` : '—'"></p>
+                    <p class="text-xs text-gray-500 mt-1"
+                       x-text="dhcpSummary.pool?.ipv4?.total ? `${dhcpSummary.pool.ipv4.used} of ${dhcpSummary.pool.ipv4.total} dynamic` : 'No pool configured'"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
+                    <p class="text-xs font-medium text-gray-500 mb-1">Reservation Drift</p>
+                    <p class="text-2xl font-bold"
+                       :class="(dhcpSummary.reservations?.drift_count ?? 0) > 0 ? 'text-amber-600' : 'text-green-600'"
+                       x-text="dhcpSummary.reservations?.drift_count ?? '—'"></p>
+                    <p class="text-xs text-gray-500 mt-1">Reserved MAC on pool IP</p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
+                    <p class="text-xs font-medium text-gray-500 mb-1">Kea API</p>
+                    <p class="text-2xl font-bold"
+                       :class="dhcpSummary.kea?.reachable ? 'text-green-600' : 'text-red-600'"
+                       x-text="dhcpSummary.kea?.reachable ? 'OK' : 'Down'"></p>
+                    <p class="text-xs text-gray-500 mt-1"
+                       x-text="dhcpSummary.kea?.reachable ? `${dhcpSummary.kea.lease_cmds_loaded ? 'lease_cmds' : 'no lease_cmds'}${dhcpSummary.kea.latency_ms != null ? `, ${dhcpSummary.kea.latency_ms} ms` : ''}` : (dhcpSummary.kea?.error || 'Unreachable')"></p>
+                </div>
+                <div class="bg-white rounded-lg shadow-sm p-3 border border-gray-100">
+                    <p class="text-xs font-medium text-gray-500 mb-1">Last Lease</p>
+                    <p class="text-2xl font-bold text-gray-900" x-text="formatRelativeTime(dhcpSummary.last_activity?.timestamp)"></p>
+                    <p class="text-xs text-gray-500 mt-1 truncate"
+                       :title="dhcpSummary.last_activity ? `${dhcpSummary.last_activity.hostname || dhcpSummary.last_activity.mac} ${dhcpSummary.last_activity.ip}` : ''"
+                       x-text="dhcpSummary.last_activity ? `${dhcpSummary.last_activity.hostname || dhcpSummary.last_activity.mac} ${dhcpSummary.last_activity.ip}` : 'No recent activity'"></p>
+                </div>
+            </div>
+
             <!-- Application-Specific Content Area -->
             <!-- ZTP Bootstrap: Device Connections -->
             <div x-show="activeApplication === 'ztpbootstrap'" class="bg-white rounded-lg shadow-sm p-4 mb-4">
@@ -328,13 +557,13 @@
             </div>
 
             <!-- DHCP: Active Leases (in same position as Device Connections) -->
-            <div x-show="activeApplication === 'dhcp'" class="bg-white rounded-lg shadow-sm p-4 mb-4">
+            <div x-show="activeApplication === 'dhcp' && authenticated" class="bg-white rounded-lg shadow-sm p-4 mb-4">
                 <div class="flex items-center justify-between mb-3">
                     <div>
                         <h2 class="text-base font-semibold text-gray-900 mb-1">Active Leases</h2>
                         <p class="text-xs text-gray-500">Current DHCP leases and reservations</p>
                     </div>
-                    <button @click="loadDhcpLeases()" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Refresh</button>
+                    <button @click="loadDhcpLeases(); loadDhcpSummary();" class="px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Refresh</button>
                 </div>
                 <div class="overflow-x-auto">
                     <table class="min-w-full divide-y divide-gray-200">
@@ -353,7 +582,11 @@
                                     <td class="px-4 py-3 text-sm text-gray-900" x-text="lease.mac"></td>
                                     <td class="px-4 py-3 text-sm text-gray-900" x-text="lease.ip"></td>
                                     <td class="px-4 py-3 text-sm text-gray-500" x-text="lease.type"></td>
-                                    <td class="px-4 py-3 text-sm text-gray-500" x-text="lease.state"></td>
+                                    <td class="px-4 py-3 text-sm">
+                                        <span class="px-2 py-0.5 rounded text-xs font-medium"
+                                              :class="lease.state === 'active' ? 'bg-green-50 text-green-700' : (lease.state === 'expired' ? 'bg-gray-50 text-gray-600' : 'bg-amber-50 text-amber-700')"
+                                              x-text="formatLeaseState(lease.state)"></span>
+                                    </td>
                                     <td class="px-4 py-3 text-sm">
                                         <button @click="createReservationFromLease(lease)" class="text-blue-600 hover:text-blue-800 mr-3">Reserve</button>
                                         <button @click="deleteDhcpLease(lease.mac)" class="text-red-600 hover:text-red-800">Delete</button>
@@ -557,6 +790,61 @@
                         </div>
                     </div>
 
+                    <div class="mb-6 bg-white rounded-lg border border-gray-200 p-4">
+                        <h3 class="text-base font-semibold text-gray-900 mb-1">CVaaS Enrollment</h3>
+                        <p class="text-sm text-gray-600 mb-4">
+                            Paste the enrollment value from the CVaaS Device Registration page.
+                            Saving updates <code class="text-xs bg-gray-100 px-1 rounded">config.yaml</code>
+                            and syncs <code class="text-xs bg-gray-100 px-1 rounded">bootstrap.py</code> immediately.
+                        </p>
+
+                        <div class="space-y-3 max-w-3xl">
+                            <div>
+                                <label for="enroll-chars-input" class="block text-sm font-medium text-gray-700 mb-1">
+                                    Enrollment chars
+                                </label>
+                                <div class="flex gap-2">
+                                    <input id="enroll-chars-input"
+                                           :type="showEnrollChars ? 'text' : 'password'"
+                                           x-model="cvaasConfig.enroll_chars"
+                                           autocomplete="off"
+                                           spellcheck="false"
+                                           placeholder="Paste enrollment JWT from CVaaS"
+                                           class="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                    <button type="button"
+                                            @click="showEnrollChars = !showEnrollChars"
+                                            class="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+                                            x-text="showEnrollChars ? 'Hide' : 'Show'"></button>
+                                </div>
+                                <p class="mt-1 text-xs text-gray-500" x-show="cvaasConfig.address">
+                                    CVaaS address: <span class="font-mono" x-text="cvaasConfig.address"></span>
+                                </p>
+                            </div>
+
+                            <div class="flex items-center gap-3 flex-wrap">
+                                <button type="button"
+                                        @click="saveEnrollChars()"
+                                        :disabled="loadingStates.cvaas || !cvaasConfig.enroll_chars"
+                                        class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium disabled:opacity-50">
+                                    <span x-show="!loadingStates.cvaas">Save enrollment chars</span>
+                                    <span x-show="loadingStates.cvaas">Saving...</span>
+                                </button>
+                                <span x-show="cvaasConfig.enroll_chars_configured"
+                                      class="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-green-50 text-green-700 border border-green-200">
+                                    Configured
+                                </span>
+                                <span x-show="!cvaasConfig.enroll_chars_configured"
+                                      class="inline-flex items-center px-2 py-1 text-xs font-medium rounded bg-amber-50 text-amber-800 border border-amber-200">
+                                    Not configured
+                                </span>
+                            </div>
+
+                            <div x-show="cvaasSaveMessage" class="text-sm text-green-700" x-text="cvaasSaveMessage"></div>
+                            <div x-show="cvaasSaveWarning" class="text-sm text-amber-700" x-text="cvaasSaveWarning"></div>
+                            <div x-show="cvaasSaveError" class="text-sm text-red-600" x-text="cvaasSaveError"></div>
+                        </div>
+                    </div>
+
                     <div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
                         <div x-show="config.error" class="text-red-600" x-text="config.error"></div>
                         <div x-show="config.raw && !config.error" class="overflow-x-auto overflow-y-auto max-h-[600px]">
@@ -661,7 +949,7 @@
             </div>
 
             <!-- DHCP Server Tabs -->
-            <div x-show="activeApplication === 'dhcp'" class="bg-white rounded-lg shadow-sm">
+            <div x-show="activeApplication === 'dhcp' && authenticated" class="bg-white rounded-lg shadow-sm">
                 <div class="border-b border-gray-200">
                     <nav class="flex -mb-px">
                         <button @click="activeDhcpTab = 'config'"
@@ -690,7 +978,7 @@
                 <!-- DHCP Configuration Tab -->
                 <div x-show="activeDhcpTab === 'config'" class="p-6">
                     <!-- DHCP Status Banner -->
-                    <div x-show="dhcpStatus.networking_mode === 'host'" class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
+                    <div x-show="dhcpStatus.networking_mode === 'host' && !(networkStatus.ztp?.enabled || networkForm.enabled)" class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-md">
                         <div class="flex items-start">
                             <svg class="w-5 h-5 text-blue-600 mt-0.5 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -700,6 +988,15 @@
                                 <p class="text-sm text-blue-700 mt-1">DHCP server will bind directly to host interfaces. Ensure no other DHCP server is running on ports 67/68 (IPv4) or 547/548 (IPv6).</p>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- ZTP / DHCP subnet mismatch -->
+                    <div x-show="dhcpSubnetMismatch()" class="mb-4 p-4 bg-orange-50 border border-orange-200 rounded-md">
+                        <p class="text-sm text-orange-900 font-medium">DHCP subnet mismatch</p>
+                        <p class="text-sm text-orange-800 mt-1">
+                            DHCP: <span x-text="dhcpConfig.ipv4.subnet || '—'"></span> · ZTP: <span x-text="networkForm.ipv4.subnet || '—'"></span>.
+                            <button type="button" @click="activeApplication = 'ztp-network'" class="underline text-orange-900 ml-1">Fix in ZTP Network →</button>
+                        </p>
                     </div>
 
                     <!-- Port Conflict Warning -->
@@ -716,6 +1013,24 @@
                                     Please stop other DHCP servers before enabling.
                                 </p>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- DHCP Action Warning Banner -->
+                    <div x-show="dhcpActionBanner.show" class="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                        <div class="flex items-start">
+                            <svg class="w-5 h-5 text-yellow-600 mt-0.5 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                            </svg>
+                            <div class="flex-1">
+                                <p class="text-sm font-medium text-yellow-900" x-text="dhcpActionBanner.message"></p>
+                                <p x-show="dhcpActionBanner.detail" class="text-sm text-yellow-700 mt-1 font-mono break-all" x-text="dhcpActionBanner.detail"></p>
+                            </div>
+                            <button @click="dhcpActionBanner.show = false" class="ml-3 text-yellow-600 hover:text-yellow-800 flex-shrink-0">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                                </svg>
+                            </button>
                         </div>
                     </div>
 
@@ -1133,7 +1448,6 @@
                                  x-html="highlightSearch(formatLogsWithMarks(reverseLogLines(logs)))"></pre>
                         </div>
                     </div>
-                </div>
 
                 <!-- DHCP Status Tab -->
                 <div x-show="activeDhcpTab === 'status'" class="p-6">
@@ -1254,68 +1568,7 @@
                         </div>
                     </div>
                 </div>
-
-                <!-- DHCP Logs Tab -->
-                <div x-show="activeDhcpTab === 'logs'" class="p-6">
-                        <div class="mb-4 flex items-center justify-between flex-wrap gap-4">
-                            <div>
-                                <h2 class="text-lg font-semibold text-gray-900 mb-2">DHCP Server Logs</h2>
-                                <p class="text-sm text-gray-600">View logs from Kea DHCP server</p>
-                            </div>
-                            <div class="flex items-center space-x-1.5 flex-wrap">
-                                <div class="relative group">
-                                    <input type="text"
-                                           x-model="logSearchTerm"
-                                           @input="highlightLogs()"
-                                           placeholder="Search..."
-                                           class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 w-32"
-                                           title="Search logs">
-                                    <button x-show="logSearchTerm"
-                                            @click="logSearchTerm = ''; highlightLogs()"
-                                            class="absolute right-1 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                        </svg>
-                                    </button>
-                                </div>
-                                <div class="relative group">
-                                    <select x-model="logLines" @change="loadLogs()" class="px-2 py-1.5 border border-gray-300 rounded text-xs focus:outline-none focus:ring-blue-500 focus:border-blue-500 pr-6" title="Number of lines">
-                                        <option value="50">50</option>
-                                        <option value="100">100</option>
-                                        <option value="200">200</option>
-                                        <option value="500">500</option>
-                                    </select>
-                                </div>
-                                <button @click="markLogs()" class="px-2.5 py-1.5 bg-blue-500 text-white rounded hover:bg-blue-600 text-xs font-medium transition-colors" title="Mark current position in logs">
-                                    Mark
-                                </button>
-                                <div class="relative group">
-                                    <label class="inline-flex items-center cursor-pointer" title="Auto-refresh logs">
-                                        <input type="checkbox" x-model="autoRefreshEnabled" @change="toggleAutoRefresh()" class="sr-only peer">
-                                        <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                                    </label>
-                                </div>
-                                <div x-show="logNewEntriesIndicator" class="flex items-center space-x-1 px-1.5 py-0.5 bg-green-100 text-green-800 rounded text-xs font-semibold animate-pulse">
-                                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    <span>New entries</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 max-h-96 overflow-y-auto" x-ref="logsContainer">
-                            <div class="text-xs text-gray-400 mb-2 font-semibold flex items-center justify-between">
-                                <span>DHCP Logs</span>
-                                <span x-show="logNewEntriesIndicator" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-500 text-white animate-pulse">
-                                    New entries
-                                </span>
-                            </div>
-                            <pre class="text-sm font-mono overflow-x-auto whitespace-pre-wrap text-green-400"
-                                 x-html="highlightSearch(formatLogsWithMarks(reverseLogLines(logs)))"></pre>
-                        </div>
-                    </div>
-                </div>
+            </div>
         </main>
 
         <!-- Script Viewer Modal -->
@@ -1437,22 +1690,16 @@
         </template>
 
         <!-- Login Modal -->
-        <div x-show="showLoginModal"
-             x-transition:enter="transition ease-out duration-300"
-             x-transition:enter-start="opacity-0"
-             x-transition:enter-end="opacity-100"
-             x-transition:leave="transition ease-in duration-200"
-             x-transition:leave-start="opacity-100"
-             x-transition:leave-end="opacity-0"
-             @keydown.escape.window="if(showLoginModal) { showLoginModal = false; loginPassword = ''; loginError = ''; }"
+        <div data-login-modal
              class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
-             @click.self="showLoginModal = false; loginPassword = ''; loginError = ''">
-            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white"
+             @keydown.escape.window="closeLoginModal()"
+             @click.self="closeLoginModal()">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white z-[60]"
                  @click.stop>
                 <div class="mt-3">
                     <div class="flex items-center justify-between mb-4">
                         <h3 class="text-lg font-medium text-gray-900">Authentication Required</h3>
-                        <button type="button" @click="showLoginModal = false; loginPassword = ''; loginError = ''"
+                        <button type="button" @click="closeLoginModal()"
                                 class="text-gray-400 hover:text-gray-600">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -1464,28 +1711,28 @@
                         Please enter the admin password to perform this action.
                     </p>
 
-                    <form @submit.prevent="login()">
+                    <form id="login-form" action="javascript:void(0)" method="post" novalidate
+                          onsubmit="if (window.ztpSubmitLogin) { window.ztpSubmitLogin(event); } return false;">
                         <div class="mb-4">
-                            <label for="loginPassword" class="block text-sm font-medium text-gray-700 mb-2">
+                            <label for="login-password-input" class="block text-sm font-medium text-gray-700 mb-2">
                                 Password
                             </label>
                             <input
                                 type="password"
-                                id="loginPassword"
+                                id="login-password-input"
+                                name="password"
                                 x-model="loginPassword"
                                 x-ref="passwordInput"
                                 autocomplete="current-password"
-                                @keyup.escape="showLoginModal = false; loginPassword = ''; loginError = ''"
+                                @input="loginPassword = $event.target.value"
+                                @paste="$nextTick(() => { loginPassword = $refs.passwordInput.value })"
                                 class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
                                 placeholder="Enter admin password"
-                                :disabled="loginLoading"
-                                required
                             />
                         </div>
 
-                        <!-- Error message - only show when there's an error -->
                         <div x-show="loginError && loginError.length > 0"
-                             x-transition
+                             x-cloak
                              class="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
                             <p class="text-sm text-red-800" x-text="loginError"></p>
                         </div>
@@ -1493,20 +1740,16 @@
                         <div class="flex items-center justify-end gap-3">
                             <button
                                 type="button"
-                                @click="showLoginModal = false; loginPassword = ''; loginError = ''"
-                                :disabled="loginLoading"
-                                class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md disabled:opacity-50">
+                                @click="closeLoginModal()"
+                                class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md">
                                 Cancel
                             </button>
                             <button
+                                id="login-submit-btn"
                                 type="submit"
-                                :disabled="loginLoading || !loginPassword"
-                                class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md disabled:opacity-50 flex items-center gap-2">
-                                <svg x-show="loginLoading" x-cloak class="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                <span x-text="loginLoading ? 'Logging in...' : 'Login'"></span>
+                                class="px-4 py-2 min-w-[5.5rem] text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md cursor-pointer disabled:opacity-50"
+                                :disabled="loginLoading">
+                                Login
                             </button>
                         </div>
                     </form>
@@ -1518,7 +1761,10 @@
     <script>
         function dashboard() {
             return {
-                activeApplication: localStorage.getItem('ztpbootstrap-activeApplication') || 'ztpbootstrap', // 'ztpbootstrap' or 'dhcp'
+                activeApplication: (() => {
+                    const stored = localStorage.getItem('ztpbootstrap-activeApplication');
+                    return ['ztpbootstrap', 'ztp-network', 'dhcp'].includes(stored) ? stored : 'ztpbootstrap';
+                })(),
                 activeTab: 'scripts',
                 status: {
                     container_running: false,
@@ -1529,6 +1775,15 @@
                 scripts: [],
                 backups: [],
                 config: {},
+                cvaasConfig: {
+                    enroll_chars: '',
+                    address: '',
+                    enroll_chars_configured: false
+                },
+                showEnrollChars: false,
+                cvaasSaveMessage: '',
+                cvaasSaveWarning: '',
+                cvaasSaveError: '',
                 logs: 'Loading...',
                 logsNginx: '',
                 logsWebUI: '',
@@ -1572,11 +1827,35 @@
                     scripts: false,
                     backups: false,
                     config: false,
+                    cvaas: false,
                     logs: false,
                     deviceConnections: false,
                     status: false,
-                    dhcp: false
+                    dhcp: false,
+                    network: false
                 },
+                networkForm: {
+                    enabled: false,
+                    vlan_id: null,
+                    parent_interface: '',
+                    podman_network: '',
+                    macvlan_mode: 'bridge',
+                    ipv4: { address: '', subnet: '', gateway: '' },
+                    ipv6: { address: '', subnet: '', gateway: '' },
+                    last_error: ''
+                },
+                networkStatus: {
+                    status: 'pending',
+                    drift: false,
+                    drift_items: [],
+                    subnet_mismatch: false,
+                    effective: {},
+                    quadlet: {},
+                    ztp: {}
+                },
+                networkParents: [],
+                networkValidation: { errors: [], warnings: [] },
+                networkPollInterval: null,
                 // DHCP state
                 dhcpConfig: {
                     enabled: false,
@@ -1614,6 +1893,7 @@
                 },
                 dhcpLeases: [],
                 dhcpReservations: [],
+                dhcpSummary: {},
                 activeDhcpTab: localStorage.getItem('ztpbootstrap-activeDhcpTab') || 'config', // 'config', 'reservations', 'status', or 'logs'
                 // Reservation form state
                 showReservationForm: false,
@@ -1626,8 +1906,99 @@
                 // OUI filtering form state
                 newAllowedOui: '',
                 newBlockedOui: '',
+                dhcpActionBanner: { show: false, message: '', detail: '' },
+
+                bindLoginFormHandlers() {
+                    window.ztpSubmitLogin = (event) => {
+                        if (event) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                        }
+                        this.login();
+                        return false;
+                    };
+                },
+
+                syncLoginModalVisibility() {
+                    const el = document.querySelector('[data-login-modal]');
+                    if (!el) {
+                        return;
+                    }
+                    const visible = this.showLoginModal && !this.authenticated;
+                    el.style.display = visible ? 'block' : 'none';
+                },
+
+                closeLoginModal() {
+                    this.showLoginModal = false;
+                    this.loginPassword = '';
+                    this.loginError = '';
+                    this.loginLoading = false;
+                    this.syncLoginModalVisibility();
+                },
+
+                openLoginModal(pendingAction = null) {
+                    if (this.authenticated) {
+                        if (pendingAction) {
+                            pendingAction();
+                        }
+                        return;
+                    }
+                    this.pendingAction = pendingAction;
+                    this.loginPassword = '';
+                    this.loginError = '';
+                    this.loginLoading = false;
+                    this.showLoginModal = true;
+                    this.bindLoginFormHandlers();
+                    this.syncLoginModalVisibility();
+                    this.$nextTick(() => {
+                        const input = document.getElementById('login-password-input');
+                        if (input) {
+                            input.focus();
+                        }
+                    });
+                },
+
+                loginPasswordFromDom() {
+                    const el = document.getElementById('login-password-input');
+                    const domValue = el && typeof el.value === 'string' ? el.value : '';
+                    if (domValue && domValue !== this.loginPassword) {
+                        this.loginPassword = domValue;
+                    }
+                    return this.loginPassword || domValue;
+                },
+
+                resetLoginLoadingSoon() {
+                    if (this._loginLoadingTimer) {
+                        clearTimeout(this._loginLoadingTimer);
+                    }
+                    this._loginLoadingTimer = setTimeout(() => {
+                        if (this.loginLoading) {
+                            this.loginLoading = false;
+                            const btn = document.getElementById('login-submit-btn');
+                            if (btn) {
+                                btn.textContent = 'Login';
+                            }
+                        }
+                    }, 15000);
+                },
 
                 async init() {
+                    if (window.location.search && window.location.search.includes('loginPassword')) {
+                        window.history.replaceState({}, document.title, window.location.pathname);
+                    }
+                    this.bindLoginFormHandlers();
+
+                    this.$watch('authenticated', (isAuthed) => {
+                        if (isAuthed) {
+                            this.closeLoginModal();
+                        } else {
+                            this.syncLoginModalVisibility();
+                        }
+                    });
+                    this.$watch('showLoginModal', () => {
+                        this.syncLoginModalVisibility();
+                    });
+
                     // Initialize modal states - ensure all modals start hidden
                     this.showLoginModal = false;
                     this.showScriptModal = false;
@@ -1656,9 +2027,17 @@
                             this.loadDhcpStatus();
                             this.loadDhcpConfig();
                             this.loadDhcpLeases();
+                            this.loadDhcpSummary();
+                            this.loadNetworkStatus();
+                        } else if (newApp === 'ztp-network') {
+                            this.loadNetworkStatus();
+                            this.loadNetworkParents();
+                            this.startNetworkPolling();
+                        } else {
+                            this.stopNetworkPolling();
                         }
                         // Ensure modal stays hidden when switching applications
-                        this.showLoginModal = false;
+                        this.closeLoginModal();
                     });
 
                     // Watch for tab changes to start/stop auto-refresh
@@ -1697,32 +2076,8 @@
                         }
                     });
 
-                    // Watch for DHCP tab changes
-                    this.$watch('activeDhcpTab', (newTab) => {
-                        // Save to localStorage for persistence across refreshes
-                        localStorage.setItem('ztpbootstrap-activeDhcpTab', newTab);
-                        if (newTab === 'logs') {
-                            // Set log source to DHCP and start auto-refresh when entering DHCP logs tab (only if enabled)
-                            this.logSource = 'dhcp';
-                            this.loadLogs();
-                            if (this.autoRefreshEnabled) {
-                                this.startAutoRefresh();
-                            }
-                        } else {
-                            // Stop auto-refresh when leaving DHCP logs tab
-                            this.stopAutoRefresh();
-                        }
-                        if (newTab === 'status') {
-                            // Load leases when entering status tab
-                            this.loadDhcpLeases();
-                        }
-                        if (newTab === 'reservations') {
-                            // Load reservations when entering reservations tab
-                            this.loadDhcpReservations();
-                        }
-                    });
                     // Ensure modal is hidden on initial load
-                    this.showLoginModal = false;
+                    this.closeLoginModal();
 
                     // File input change handler is bound via x-on:change directive
                     // No need for explicit addEventListener since we authenticate before opening file picker
@@ -1765,6 +2120,12 @@
                         await this.loadDhcpStatus();
                         await this.loadDhcpConfig();
                         await this.loadDhcpLeases();
+                        await this.loadDhcpSummary();
+                        await this.loadNetworkStatus();
+                    } else if (this.activeApplication === 'ztp-network') {
+                        await this.loadNetworkStatus();
+                        await this.loadNetworkParents();
+                        this.startNetworkPolling();
                     }
                     await this.loadLogs();
 
@@ -1788,6 +2149,7 @@
                             this.loadDhcpStatus();
                             if (this.activeDhcpTab === 'status') {
                                 this.loadDhcpLeases();
+                                this.loadDhcpSummary();
                             }
                         }
                         // Only refresh logs if currently on a logs tab AND auto-refresh is enabled
@@ -1834,125 +2196,70 @@
                 },
 
                 async login() {
-                    console.log('=== LOGIN FUNCTION CALLED ===');
-                    console.log('loginLoading before:', this.loginLoading);
-                    console.log('loginPassword length:', this.loginPassword ? this.loginPassword.length : 0);
+                    if (this.loginLoading) {
+                        return;
+                    }
+
+                    const password = this.loginPasswordFromDom();
+                    if (!password) {
+                        this.loginError = 'Password is required';
+                        return;
+                    }
 
                     this.loginLoading = true;
                     this.loginError = '';
+                    this.resetLoginLoadingSoon();
+                    const submitBtn = document.getElementById('login-submit-btn');
+                    if (submitBtn) {
+                        submitBtn.textContent = 'Logging in...';
+                    }
 
-                    console.log('Login attempt started, password length:', this.loginPassword.length);
-                    console.log('Login password value:', this.loginPassword ? '***' : 'empty');
-                    console.log('loginLoading after setting to true:', this.loginLoading);
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
 
                     try {
-                        const loginUrl = '/api/auth/login';
-                        const loginPayload = { password: this.loginPassword };
-                        console.log('Sending login request to:', loginUrl);
-                        console.log('Request payload keys:', Object.keys(loginPayload));
-
-                        const response = await fetch(loginUrl, {
+                        const response = await fetch('/api/auth/login', {
                             method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify(loginPayload),
-                            credentials: 'same-origin'
-                        }).catch(fetchError => {
-                            console.error('Fetch error:', fetchError);
-                            throw fetchError;
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ password: password }),
+                            credentials: 'same-origin',
+                            signal: controller.signal
                         });
 
-                        console.log('Login response received, status:', response.status, response.statusText);
-                        console.log('Response headers:', Object.fromEntries(response.headers.entries()));
-
-                        // Check for Set-Cookie header
-                        const setCookieHeader = response.headers.get('Set-Cookie');
-                        if (setCookieHeader) {
-                            console.log('Set-Cookie header received:', setCookieHeader);
-                        } else {
-                            console.warn('WARNING: No Set-Cookie header in login response!');
-                        }
-
                         let data;
-                        try {
-                            const responseText = await response.text();
-                            console.log('Response text length:', responseText.length);
-                            console.log('Response text preview:', responseText.substring(0, 200));
-
-                            if (!responseText) {
-                                throw new Error('Empty response from server');
-                            }
-
-                            data = JSON.parse(responseText);
-                            console.log('Login response data:', data);
-                        } catch (jsonError) {
-                            console.error('Failed to parse JSON response:', jsonError);
-                            console.error('Response status:', response.status);
-                            const text = await response.text().catch(() => 'Could not read response');
-                            console.error('Response text:', text);
-                            this.loginError = 'Invalid response from server. Please try again.';
-                            this.loginLoading = false;
-                            return;
+                        const responseText = await response.text();
+                        if (!responseText) {
+                            throw new Error('Empty response from server');
                         }
+                        data = JSON.parse(responseText);
 
                         if (response.ok && data.success) {
-                            // Update authentication state first
                             this.authenticated = true;
                             this.authExpiresAt = data.expires_at;
                             this.csrfToken = data.csrf_token || null;
-                            console.log('Login successful, authenticated:', this.authenticated);
+                            this.closeLoginModal();
 
-                            // Store pending action before clearing modal
+                            await this.loadDhcpStatus();
+                            if (this.activeApplication === 'dhcp') {
+                                await this.loadDhcpConfig();
+                                await this.loadDhcpLeases();
+                                await this.loadDhcpSummary();
+                            } else if (this.activeApplication === 'ztp-network') {
+                                await this.loadNetworkStatus();
+                            }
+
                             const pendingAction = this.pendingAction;
                             this.pendingAction = null;
 
-                            // Hide modal and clear form immediately - do this FIRST
-                            this.showLoginModal = false;
-                            this.loginPassword = '';
-                            this.loginError = '';
-
-                            // Force Alpine.js to process the modal hide
-                            await this.$nextTick();
-
-                            // Verify modal is actually hidden
-                            if (this.showLoginModal) {
-                                console.warn('Modal still showing after hide attempt, forcing again');
-                                this.showLoginModal = false;
-                                await this.$nextTick();
-                            }
-
-                            console.log('Modal should be hidden now, showLoginModal:', this.showLoginModal);
-
-                            // Small delay to ensure browser processes the session cookie
-                            await new Promise(resolve => setTimeout(resolve, 200));
-
-                            // Verify authentication status after login to confirm cookie was set
-                            console.log('Verifying authentication after login...');
-                            await this.checkAuthStatus();
-                            console.log('After login verification, authenticated:', this.authenticated);
-
-                            if (!this.authenticated) {
-                                console.error('WARNING: Authentication failed after login! Cookie may not have been set.');
-                                this.loginError = 'Login succeeded but session not established. Please try again.';
-                                this.loginLoading = false;
-                                return;
-                            }
-
-                            // Execute pending action if any (now that we're authenticated)
                             if (pendingAction) {
                                 try {
-                                    console.log('Executing pending action after login');
                                     await pendingAction();
-                                    console.log('Pending action completed');
                                 } catch (error) {
                                     console.error('Error executing pending action:', error);
                                     alert('Action failed: ' + error.message);
-                                    // Don't re-show modal if action fails
                                 }
                             }
                         } else {
-                            // Handle specific error codes
                             if (data.code === 'RATE_LIMITED') {
                                 const remaining = data.remaining_time || 0;
                                 const minutes = Math.ceil(remaining / 60);
@@ -1961,15 +2268,26 @@
                                 this.loginError = data.error || 'Login failed. Please check your password.';
                             }
                             this.loginPassword = '';
-                            // Don't close modal on error - let user try again or cancel
                         }
                     } catch (error) {
                         console.error('Login error:', error);
-                        this.loginError = 'Login failed. Please try again. Error: ' + (error.message || 'Unknown error');
+                        if (error.name === 'AbortError') {
+                            this.loginError = 'Login timed out. Please try again.';
+                        } else {
+                            this.loginError = 'Login failed. Please try again.';
+                        }
                         this.loginPassword = '';
-                        // Don't close modal on error - let user try again or cancel
                     } finally {
+                        clearTimeout(timeoutId);
+                        if (this._loginLoadingTimer) {
+                            clearTimeout(this._loginLoadingTimer);
+                            this._loginLoadingTimer = null;
+                        }
                         this.loginLoading = false;
+                        const btn = document.getElementById('login-submit-btn');
+                        if (btn) {
+                            btn.textContent = 'Login';
+                        }
                     }
                 },
 
@@ -2058,38 +2376,14 @@
                 },
 
                 async requireAuth(action) {
-                    console.log('requireAuth called, current authenticated state:', this.authenticated);
-                    // Only check auth status if we're not already authenticated
-                    // This prevents unnecessary API calls and race conditions after login
                     if (!this.authenticated) {
                         await this.checkAuthStatus();
-                        console.log('After checkAuthStatus, authenticated:', this.authenticated);
                     }
 
-                    // Double-check authentication status
                     if (!this.authenticated) {
-                        console.log('User not authenticated, showing login modal');
-                        this.pendingAction = action;
-                        // Reset modal state before showing
-                        this.loginPassword = '';
-                        this.loginError = '';
-                        this.loginLoading = false;
-                        // Show the modal
-                        this.showLoginModal = true;
-                        console.log('Set showLoginModal to true');
-                        // Focus the password input after modal is shown
-                        await this.$nextTick();
-                        const input = document.getElementById('loginPassword');
-                        if (input) {
-                            input.focus();
-                            console.log('Focused password input');
-                        }
-                        // Return early to prevent action from executing
-                        console.log('requireAuth returning early (not authenticated)');
+                        this.openLoginModal(action);
                         return;
                     }
-                    // User is authenticated, execute the action
-                    console.log('User authenticated, executing action');
                     return await action();
                 },
 
@@ -2490,6 +2784,7 @@
                         console.log('Config API response:', data);
                         // Update config object for Alpine.js reactivity
                         this.config = data;
+                        await this.loadCvaasConfig();
                         // Highlight syntax after config loads, then apply search highlighting if needed
                         this.$nextTick(() => {
                             if (window.Prism && this.$refs.yamlCode) {
@@ -2506,6 +2801,87 @@
                         console.error('Failed to load config:', error);
                     } finally {
                         this.loadingStates.config = false;
+                    }
+                },
+
+                async loadCvaasConfig() {
+                    if (!this.authenticated) {
+                        return;
+                    }
+                    this.loadingStates.cvaas = true;
+                    this.cvaasSaveMessage = '';
+                    this.cvaasSaveWarning = '';
+                    this.cvaasSaveError = '';
+                    try {
+                        const response = await fetch('/api/cvaas/config', {
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            return;
+                        }
+                        if (!response.ok) {
+                            return;
+                        }
+                        const data = await response.json();
+                        const cvaas = data.cvaas || {};
+                        this.cvaasConfig = {
+                            enroll_chars: cvaas.enroll_chars || '',
+                            address: cvaas.address || '',
+                            enroll_chars_configured: !!cvaas.enroll_chars_configured
+                        };
+                    } catch (error) {
+                        console.error('Failed to load CVaaS config:', error);
+                    } finally {
+                        this.loadingStates.cvaas = false;
+                    }
+                },
+
+                async saveEnrollChars() {
+                    await this.checkAuthStatus();
+                    if (!this.authenticated) {
+                        this.openLoginModal(() => this.saveEnrollChars());
+                        return;
+                    }
+
+                    this.loadingStates.cvaas = true;
+                    this.cvaasSaveMessage = '';
+                    this.cvaasSaveWarning = '';
+                    this.cvaasSaveError = '';
+
+                    try {
+                        const response = await fetch('/api/cvaas/enroll-chars', {
+                            method: 'PUT',
+                            headers: this.getCsrfHeaders(),
+                            body: JSON.stringify({
+                                enroll_chars: this.cvaasConfig.enroll_chars,
+                                csrf_token: this.csrfToken
+                            }),
+                            credentials: 'same-origin'
+                        });
+                        const data = await response.json().catch(() => ({}));
+
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.openLoginModal(() => this.saveEnrollChars());
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            this.cvaasSaveError = data.error || 'Failed to save enrollment chars';
+                            return;
+                        }
+
+                        this.cvaasSaveMessage = data.message || 'Enrollment chars saved';
+                        if (data.warning) {
+                            this.cvaasSaveWarning = data.warning;
+                        }
+                        this.cvaasConfig.enroll_chars_configured = true;
+                        await this.loadConfig();
+                    } catch (error) {
+                        this.cvaasSaveError = 'Failed to save enrollment chars: ' + error.message;
+                    } finally {
+                        this.loadingStates.cvaas = false;
                     }
                 },
 
@@ -2841,6 +3217,26 @@
                     return Math.round(seconds / 3600) + 'h';
                 },
 
+                formatRelativeTime(timestamp) {
+                    if (!timestamp) return '—';
+                    const seconds = Math.floor(Date.now() / 1000) - Number(timestamp);
+                    if (seconds < 0) return 'just now';
+                    if (seconds < 60) return `${seconds}s ago`;
+                    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+                    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+                    return `${Math.floor(seconds / 86400)}d ago`;
+                },
+
+                formatLeaseState(state) {
+                    const labels = {
+                        active: 'Active',
+                        expired: 'Expired',
+                        reclaimed: 'Reclaimed',
+                        unknown: 'Unknown',
+                    };
+                    return labels[state] || (state != null ? String(state) : 'Unknown');
+                },
+
                 getDeviceIcon(userAgent, bootstrapDownloaded) {
                     // Handle empty or missing user agent
                     if (!userAgent || userAgent.trim() === '' || userAgent === '-') {
@@ -3073,6 +3469,226 @@
                     }
                 },
 
+                // ZTP Network Functions
+                dhcpSubnetMismatch() {
+                    if (this.networkStatus.subnet_mismatch) {
+                        return true;
+                    }
+                    const ztpSubnet = this.networkForm.ipv4?.subnet;
+                    const dhcpSubnet = this.dhcpConfig.ipv4?.subnet;
+                    return !!(this.dhcpConfig.enabled && ztpSubnet && dhcpSubnet && ztpSubnet !== dhcpSubnet);
+                },
+
+                syncNetworkFormFromStatus() {
+                    const ztp = this.networkStatus.ztp || {};
+                    this.networkForm = {
+                        enabled: !!ztp.enabled,
+                        vlan_id: ztp.vlan_id ?? null,
+                        parent_interface: ztp.parent_interface || '',
+                        podman_network: ztp.podman_network || '',
+                        macvlan_mode: ztp.macvlan_mode || 'bridge',
+                        ipv4: {
+                            address: ztp.ipv4?.address || '',
+                            subnet: ztp.ipv4?.subnet || '',
+                            gateway: ztp.ipv4?.gateway || ''
+                        },
+                        ipv6: {
+                            address: ztp.ipv6?.address || '',
+                            subnet: ztp.ipv6?.subnet || '',
+                            gateway: ztp.ipv6?.gateway || ''
+                        },
+                        last_error: ztp.last_error || ''
+                    };
+                },
+
+                async loadNetworkStatus() {
+                    this.loadingStates.network = true;
+                    try {
+                        const response = await fetch('/api/network/status', { credentials: 'same-origin' });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            return;
+                        }
+                        if (response.ok) {
+                            this.networkStatus = await response.json();
+                            this.syncNetworkFormFromStatus();
+                        }
+                    } catch (error) {
+                        console.error('Failed to load network status:', error);
+                    } finally {
+                        this.loadingStates.network = false;
+                    }
+                },
+
+                async loadNetworkParents() {
+                    try {
+                        const response = await fetch('/api/network/parents', { credentials: 'same-origin' });
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.networkParents = data.parents || [];
+                        }
+                    } catch (error) {
+                        console.error('Failed to load network parents:', error);
+                    }
+                },
+
+                startNetworkPolling() {
+                    this.stopNetworkPolling();
+                    this.networkPollInterval = setInterval(() => {
+                        if (this.activeApplication === 'ztp-network') {
+                            this.loadNetworkStatus();
+                        }
+                    }, 30000);
+                },
+
+                stopNetworkPolling() {
+                    if (this.networkPollInterval) {
+                        clearInterval(this.networkPollInterval);
+                        this.networkPollInterval = null;
+                    }
+                },
+
+                networkPayload() {
+                    return {
+                        ztp: {
+                            enabled: this.networkForm.enabled,
+                            vlan_id: this.networkForm.vlan_id,
+                            parent_interface: this.networkForm.parent_interface,
+                            podman_network: this.networkForm.podman_network,
+                            macvlan_mode: this.networkForm.macvlan_mode,
+                            ipv4: { ...this.networkForm.ipv4 },
+                            ipv6: { ...this.networkForm.ipv6 }
+                        }
+                    };
+                },
+
+                async ensureAuthForNetwork(action) {
+                    await this.checkAuthStatus();
+                    if (!this.authenticated) {
+                        this.pendingAction = action;
+                        this.showLoginModal = true;
+                        await this.$nextTick();
+                        return false;
+                    }
+                    return true;
+                },
+
+                async validateNetwork() {
+                    if (!await this.ensureAuthForNetwork(() => this.validateNetwork())) return;
+                    this.loadingStates.network = true;
+                    try {
+                        const response = await fetch('/api/network/validate', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: this.getCsrfHeaders(),
+                            body: JSON.stringify(this.networkPayload())
+                        });
+                        const data = await response.json();
+                        this.networkValidation = {
+                            errors: data.errors || (data.error ? [data.error] : []),
+                            warnings: data.warnings || []
+                        };
+                        if (!response.ok) {
+                            alert('Validation failed: ' + (data.error || this.networkValidation.errors.join('; ')));
+                        } else if (data.valid) {
+                            alert('Validation passed' + (data.warnings?.length ? ' (with warnings)' : ''));
+                        }
+                    } catch (error) {
+                        alert('Validation error: ' + error.message);
+                    } finally {
+                        this.loadingStates.network = false;
+                    }
+                },
+
+                async saveNetwork() {
+                    if (!await this.ensureAuthForNetwork(() => this.saveNetwork())) return;
+                    this.loadingStates.network = true;
+                    try {
+                        const response = await fetch('/api/network/ztp', {
+                            method: 'PUT',
+                            credentials: 'same-origin',
+                            headers: this.getCsrfHeaders(),
+                            body: JSON.stringify(this.networkPayload())
+                        });
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.error || 'Save failed');
+                        await this.loadNetworkStatus();
+                        alert('ZTP network profile saved');
+                    } catch (error) {
+                        alert('Save failed: ' + error.message);
+                    } finally {
+                        this.loadingStates.network = false;
+                    }
+                },
+
+                async applyNetwork() {
+                    if (!await this.ensureAuthForNetwork(() => this.applyNetwork())) return;
+                    if (!confirm('Apply network changes and restart the ztpbootstrap pod?')) return;
+                    this.loadingStates.network = true;
+                    try {
+                        const response = await fetch('/api/network/apply', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: this.getCsrfHeaders(),
+                            body: JSON.stringify(this.networkPayload())
+                        });
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.error || 'Apply failed');
+                        await this.loadNetworkStatus();
+                        alert('Network applied and stack restarted');
+                    } catch (error) {
+                        alert('Apply failed: ' + error.message);
+                        await this.loadNetworkStatus();
+                    } finally {
+                        this.loadingStates.network = false;
+                    }
+                },
+
+                async restartNetworkStack() {
+                    if (!await this.ensureAuthForNetwork(() => this.restartNetworkStack())) return;
+                    if (!confirm('Restart the ztpbootstrap stack?')) return;
+                    this.loadingStates.network = true;
+                    try {
+                        const response = await fetch('/api/network/restart', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: this.getCsrfHeaders(),
+                            body: JSON.stringify({})
+                        });
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.error || 'Restart failed');
+                        await this.loadNetworkStatus();
+                        alert('Stack restart requested');
+                    } catch (error) {
+                        alert('Restart failed: ' + error.message);
+                    } finally {
+                        this.loadingStates.network = false;
+                    }
+                },
+
+                async autoDetectNetwork() {
+                    if (!this.networkForm.parent_interface) {
+                        alert('Select a parent interface first');
+                        return;
+                    }
+                    try {
+                        const response = await fetch('/api/network/auto-detect', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            headers: this.getCsrfHeaders(),
+                            body: JSON.stringify({ parent_interface: this.networkForm.parent_interface })
+                        });
+                        const data = await response.json();
+                        if (data.ipv4) {
+                            if (data.ipv4.subnet) this.networkForm.ipv4.subnet = data.ipv4.subnet;
+                            if (data.ipv4.gateway) this.networkForm.ipv4.gateway = data.ipv4.gateway;
+                            if (data.ipv4.address) this.networkForm.ipv4.address = data.ipv4.address;
+                        }
+                    } catch (error) {
+                        alert('Auto-detect failed: ' + error.message);
+                    }
+                },
+
                 // DHCP Functions
                 async loadDhcpConfig() {
                     this.loadingStates.dhcp = true;
@@ -3100,6 +3716,15 @@
                                 if (this.dhcpConfig.ipv4 && this.dhcpConfig.ipv4.ntp_servers) {
                                     // Clean trailing periods/commas and join
                                     this.dhcpConfig.ipv4.ntp_servers_str = this.dhcpConfig.ipv4.ntp_servers
+                                        .map(s => String(s).replace(/[.,\s]+$/, '').trim())
+                                        .filter(s => s)
+                                        .join(', ');
+                                }
+                                if (!this.dhcpConfig.ipv6) {
+                                    this.dhcpConfig.ipv6 = { dns_servers_str: '' };
+                                }
+                                if (this.dhcpConfig.ipv6 && this.dhcpConfig.ipv6.dns_servers) {
+                                    this.dhcpConfig.ipv6.dns_servers_str = this.dhcpConfig.ipv6.dns_servers
                                         .map(s => String(s).replace(/[.,\s]+$/, '').trim())
                                         .filter(s => s)
                                         .join(', ');
@@ -3148,13 +3773,9 @@
                     // Check authentication first
                     await this.checkAuthStatus();
                     if (!this.authenticated) {
-                        console.log('Not authenticated for toggleDhcp, showing login modal');
-                        this.pendingAction = () => this.toggleDhcp();
-                        this.showLoginModal = true;
-                        await this.$nextTick();
-                        // Revert the toggle since we didn't actually change it
                         this.dhcpConfig.enabled = !this.dhcpConfig.enabled;
                         this.loadingStates.dhcp = false;
+                        this.openLoginModal(() => this.toggleDhcp());
                         return;
                     }
 
@@ -3179,19 +3800,25 @@
                             credentials: 'same-origin'
                         });
                         if (response.status === 401) {
-                            console.log('Received 401 in toggleDhcp, showing login modal');
                             this.authenticated = false;
                             await this.checkAuthStatus();
-                            this.pendingAction = () => this.toggleDhcp();
-                            this.showLoginModal = true;
-                            await this.$nextTick();
-                            // Revert the toggle since we didn't actually change it
                             this.dhcpConfig.enabled = !this.dhcpConfig.enabled;
                             this.dhcpStatus.enabled = this.dhcpConfig.enabled;
-                            // Alpine.js is automatically reactive, no need for force update
+                            this.openLoginModal(() => this.toggleDhcp());
+                            return;
+                        }
+                        if (response.status === 502 || response.status === 504) {
+                            this.dhcpShowActionBanner(
+                                'Gateway timeout — operation may still be in progress. Checking status...',
+                                ''
+                            );
+                            await this.loadDhcpStatus();
+                            setTimeout(() => this.loadDhcpStatus(), 3000);
+                            setTimeout(() => this.loadDhcpStatus(), 8000);
                             return;
                         }
                         if (response.ok) {
+                            const data = await response.json();
                             // Immediately update the status to reflect the toggle change
                             this.dhcpStatus.enabled = this.dhcpConfig.enabled;
                             // Alpine.js is automatically reactive, no need for force update
@@ -3202,6 +3829,7 @@
                             if (this.dhcpConfig.enabled) {
                                 await this.loadDhcpConfig();
                             }
+                            this.applyDhcpToggleResult(data, !wasEnabled);
                         } else {
                             // Try to parse JSON error response, but handle non-JSON responses gracefully
                             let errorMessage = 'Unknown error';
@@ -3229,23 +3857,42 @@
                     }
                 },
 
+                dhcpShowActionBanner(message, detail) {
+                    this.dhcpActionBanner = { show: true, message, detail: detail || '' };
+                },
+
+                applyDhcpToggleResult(data, wasEnabling) {
+                    if (!data) return;
+                    if (data.manual_start_required) {
+                        const cmd = data.temp_file_location
+                            ? `sudo cp ${data.temp_file_location} /etc/containers/systemd/ztpbootstrap/ztpbootstrap-dhcp.container && sudo systemctl daemon-reload && sudo systemctl start ztpbootstrap-dhcp.service`
+                            : 'sudo systemctl daemon-reload && sudo systemctl start ztpbootstrap-dhcp.service';
+                        this.dhcpShowActionBanner(
+                            'DHCP enabled in configuration but requires manual start on the host:',
+                            cmd
+                        );
+                        return;
+                    }
+                    if (data.warning) {
+                        if (!wasEnabling) {
+                            this.dhcpPartialDisable(data);
+                        } else {
+                            this.dhcpShowActionBanner(data.warning, '');
+                        }
+                    }
+                },
+
+                dhcpPartialDisable(data) {
+                    this.dhcpShowActionBanner(
+                        'DHCP disabled in configuration but the container may still be running.',
+                        data.warning || 'Check service status and stop the container manually if needed.'
+                    );
+                },
+
                 async saveDhcpConfig() {
-                    // Check authentication first
                     await this.checkAuthStatus();
-                    console.log('saveDhcpConfig: authenticated =', this.authenticated, 'showLoginModal =', this.showLoginModal);
                     if (!this.authenticated) {
-                        console.log('Not authenticated, showing login modal');
-                        this.pendingAction = () => this.saveDhcpConfig();
-                        this.showLoginModal = true;
-                        console.log('Set showLoginModal to true, current value:', this.showLoginModal);
-                        await this.$nextTick();
-                        console.log('After $nextTick, showLoginModal:', this.showLoginModal);
-                        // Force a re-render by toggling
-                        this.showLoginModal = false;
-                        await this.$nextTick();
-                        this.showLoginModal = true;
-                        await this.$nextTick();
-                        console.log('Login modal should be visible now, showLoginModal:', this.showLoginModal);
+                        this.openLoginModal(() => this.saveDhcpConfig());
                         return;
                     }
 
@@ -3260,6 +3907,29 @@
                         }
                         if (!config.ipv6) {
                             config.ipv6 = {};
+                        }
+
+                        // Validate string fields BEFORE converting to arrays
+                        const dnsError = this.validateDhcpServerList(
+                            config.ipv4?.dns_servers_str, 'IPv4 DNS server'
+                        );
+                        if (dnsError) {
+                            alert(dnsError);
+                            return;
+                        }
+                        const ntpError = this.validateDhcpServerList(
+                            config.ipv4?.ntp_servers_str, 'NTP server', 4
+                        );
+                        if (ntpError) {
+                            alert(ntpError);
+                            return;
+                        }
+                        const ipv6DnsError = this.validateDhcpServerList(
+                            config.ipv6?.dns_servers_str, 'IPv6 DNS server'
+                        );
+                        if (ipv6DnsError) {
+                            alert(ipv6DnsError);
+                            return;
                         }
 
                         // Convert IPv4 string fields to arrays
@@ -3278,10 +3948,10 @@
                             delete config.ipv6.dns_servers_str;
                         }
 
-                        const headers = {'Content-Type': 'application/json'};
-                        if (this.csrfToken) {
-                            headers['X-CSRF-Token'] = this.csrfToken;
-                        }
+                        // enabled is controlled by /api/dhcp/enable|disable — never via config save
+                        delete config.enabled;
+
+                        const headers = this.getCsrfHeaders();
                         const response = await fetch('/api/dhcp/config', {
                             method: 'PUT',
                             headers: headers,
@@ -3289,13 +3959,9 @@
                             credentials: 'same-origin'
                         });
                         if (response.status === 401) {
-                            console.log('Received 401, showing login modal');
                             this.authenticated = false;
                             await this.checkAuthStatus();
-                            this.pendingAction = () => this.saveDhcpConfig();
-                            this.showLoginModal = true;
-                            await this.$nextTick();
-                            console.log('Login modal should be visible after 401, showLoginModal:', this.showLoginModal);
+                            this.openLoginModal(() => this.saveDhcpConfig());
                             return;
                         }
                         if (response.ok) {
@@ -3323,7 +3989,7 @@
                             : {ipv6_address: this.dhcpConfig.ipv6.subnet || '2001:db8::10'};
                         const response = await fetch('/api/dhcp/config/auto-detect', {
                             method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
+                            headers: this.getCsrfHeaders(),
                             body: JSON.stringify(requestBody),
                             credentials: 'same-origin'
                         });
@@ -3356,7 +4022,7 @@
                     try {
                         const response = await fetch('/api/dhcp/config/auto-detect', {
                             method: 'POST',
-                            headers: {'Content-Type': 'application/json'},
+                            headers: this.getCsrfHeaders(),
                             body: JSON.stringify({}),
                             credentials: 'same-origin'
                         });
@@ -3398,24 +4064,43 @@
                     }
                 },
 
+                async loadDhcpSummary() {
+                    try {
+                        const response = await fetch('/api/dhcp/summary', {
+                            credentials: 'same-origin'
+                        });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.dhcpSummary = {};
+                            return;
+                        }
+                        if (response.ok) {
+                            this.dhcpSummary = await response.json();
+                        } else {
+                            const errorText = await response.text();
+                            console.error('Failed to load DHCP summary:', response.status, errorText);
+                        }
+                    } catch (error) {
+                        console.error('Failed to load DHCP summary:', error);
+                    }
+                },
+
                 async deleteDhcpLease(mac) {
                     if (!confirm('Are you sure you want to delete this lease?')) {
                         return;
                     }
                     try {
-                        const headers = {};
-                        if (this.csrfToken) {
-                            headers['X-CSRF-Token'] = this.csrfToken;
-                        }
-                        const response = await fetch(`/api/dhcp/leases/${mac}`, {
+                        const response = await fetch(`/api/dhcp/leases/${encodeURIComponent(mac)}`, {
                             method: 'DELETE',
-                            headers: headers,
+                            headers: this.getCsrfHeaders(),
                             credentials: 'same-origin'
                         });
                         if (response.ok) {
                             await this.loadDhcpLeases();
+                            await this.loadDhcpSummary();
                         } else {
-                            alert('Failed to delete lease');
+                            const data = await response.json().catch(() => ({}));
+                            alert('Failed to delete lease: ' + (data.error || `HTTP ${response.status}`));
                         }
                     } catch (error) {
                         console.error('Failed to delete lease:', error);
@@ -3465,6 +4150,11 @@
                         return;
                     }
 
+                    if (!this.validateIpAddress(this.newReservation.ip)) {
+                        this.reservationError = 'Invalid IP address. Use a valid IPv4 or IPv6 address.';
+                        return;
+                    }
+
                     try {
                         const headers = {'Content-Type': 'application/json'};
                         if (this.csrfToken) {
@@ -3487,6 +4177,7 @@
                             this.newReservation = {mac: '', ip: '', hostname: ''};
                             this.showReservationForm = false;
                             await this.loadDhcpReservations();
+                            await this.loadDhcpSummary();
                         } else {
                             const data = await response.json();
                             this.reservationError = data.error || 'Failed to add reservation';
@@ -3529,6 +4220,7 @@
                         if (response.ok) {
                             alert('Reservation deleted successfully');
                             await this.loadDhcpReservations();
+                            await this.loadDhcpSummary();
                         } else {
                             alert('Failed to delete reservation');
                         }
@@ -3552,6 +4244,50 @@
                 validateMacAddress(mac) {
                     // Validate MAC format XX:XX:XX:XX:XX:XX
                     return /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(mac);
+                },
+
+                looksLikeHostname(value) {
+                    const v = String(value || '').trim();
+                    if (!v) return false;
+                    if (/^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$/.test(v)) {
+                        return false;
+                    }
+                    if (/^[0-9a-fA-F:.]+$/.test(v) && v.includes(':')) {
+                        return false;
+                    }
+                    if (v.includes('_') || v.endsWith('.')) return true;
+                    if (/[g-zG-Z]/.test(v)) return true;
+                    return /^[a-zA-Z][a-zA-Z0-9-]*(\.[a-zA-Z0-9-]+)+$/.test(v);
+                },
+
+                validateIpAddress(value) {
+                    const v = String(value || '').trim();
+                    if (!v || this.looksLikeHostname(v)) return false;
+                    if (v.includes(':')) {
+                        return /^[0-9a-fA-F:.]+$/.test(v) && v.includes(':');
+                    }
+                    return /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$/.test(v);
+                },
+
+                validateDhcpServerList(value, label, version = null) {
+                    if (!value) return '';
+                    const entries = String(value).split(',').map(s => s.trim()).filter(Boolean);
+                    for (let i = 0; i < entries.length; i++) {
+                        const entry = entries[i];
+                        if (this.looksLikeHostname(entry)) {
+                            return `${label} #${i + 1} must be an IP address, not a hostname ('${entry}').`;
+                        }
+                        if (!this.validateIpAddress(entry)) {
+                            if (version === 4 && entry.includes(':')) {
+                                return `${label} #${i + 1} must be IPv4, got '${entry}'.`;
+                            }
+                            return `Invalid ${label} #${i + 1}: '${entry}'.`;
+                        }
+                        if (version === 4 && entry.includes(':')) {
+                            return `${label} #${i + 1} must be IPv4, got '${entry}'.`;
+                        }
+                    }
+                    return '';
                 },
 
                 // OUI Filtering Management
