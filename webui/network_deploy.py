@@ -19,7 +19,6 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from network_config import (
     get_ztp_profile,
-    merge_ztp_update,
     resolve_effective_network,
     sync_legacy_network_fields,
     utc_now_iso,
@@ -104,7 +103,9 @@ def restore_network_backup(backup_path: Path) -> bool:
 
 
 def ensure_podman_network(profile: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
-    effective = resolve_effective_network({"network": {"ztp": profile}, "container": {"host_network": False}})
+    effective = resolve_effective_network(
+        {"network": {"ztp": profile}, "container": {"host_network": False}}
+    )
     if not effective.get("podman_network"):
         return False, "podman_network name is required"
 
@@ -160,7 +161,10 @@ def ensure_podman_network(profile: Dict[str, Any]) -> Tuple[bool, Optional[str]]
 
     result = _run_podman(cmd, timeout=90)
     if result.returncode != 0:
-        return False, result.stderr.strip() or result.stdout.strip() or "podman network create failed"
+        return (
+            False,
+            result.stderr.strip() or result.stdout.strip() or "podman network create failed",
+        )
     return True, None
 
 
@@ -182,7 +186,9 @@ def remove_stale_network(name: str, ztp_only: bool = True) -> Tuple[bool, Option
 
 
 def render_pod_quadlet_content(profile: Dict[str, Any]) -> str:
-    effective = resolve_effective_network({"network": {"ztp": profile}, "container": {"host_network": False}})
+    effective = resolve_effective_network(
+        {"network": {"ztp": profile}, "container": {"host_network": False}}
+    )
     if profile.get("enabled") is False:
         lines = [
             "[Unit]",
@@ -364,7 +370,11 @@ def apply_ztp_network(
                 if not ok:
                     raise RuntimeError(err or "Failed to create podman network")
 
-            if plan.get("update_quadlet") or plan.get("create_network") or plan.get("replace_network"):
+            if (
+                plan.get("update_quadlet")
+                or plan.get("create_network")
+                or plan.get("replace_network")
+            ):
                 ok, err = sync_pod_quadlet(ztp)
                 if not ok:
                     raise RuntimeError(err or "Failed to sync pod quadlet")
@@ -417,7 +427,11 @@ def get_network_status(config: Dict[str, Any]) -> Dict[str, Any]:
             drift_items.append(
                 f"quadlet Network={quadlet.get('network')} expected {desired_network}"
             )
-        if quadlet.get("ipv4") and effective.get("ipv4_address") and quadlet.get("ipv4") != effective.get("ipv4_address"):
+        if (
+            quadlet.get("ipv4")
+            and effective.get("ipv4_address")
+            and quadlet.get("ipv4") != effective.get("ipv4_address")
+        ):
             drift_items.append("quadlet IP differs from config")
         if podman_info is None and desired_network:
             drift_items.append(f"podman network {desired_network} does not exist")
@@ -428,7 +442,10 @@ def get_network_status(config: Dict[str, Any]) -> Dict[str, Any]:
     dhcp_subnet = ((config.get("dhcp") or {}).get("ipv4") or {}).get("subnet") or ""
     ztp_subnet = (ztp.get("ipv4") or {}).get("subnet") or ""
     subnet_mismatch = bool(
-        dhcp_subnet and ztp_subnet and dhcp_subnet != ztp_subnet and (config.get("dhcp") or {}).get("enabled")
+        dhcp_subnet
+        and ztp_subnet
+        and dhcp_subnet != ztp_subnet
+        and (config.get("dhcp") or {}).get("enabled")
     )
 
     status = ztp.get("status") or "pending"

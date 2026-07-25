@@ -180,8 +180,6 @@ def _dedupe_leases_by_mac(leases: List[Dict]) -> List[Dict]:
 
 def _read_memfile_leases(service: str) -> List[Dict]:
     import csv
-    import os
-    from pathlib import Path
 
     lease_file = None
     for path in _lease_file_candidates(service):

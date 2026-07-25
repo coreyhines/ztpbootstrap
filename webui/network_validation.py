@@ -203,22 +203,20 @@ def plan_network_changes(
     for network_name in plan["remove_networks"]:
         info = inspect_podman_network(network_name)
         if info and info.get("container_count", 0) > 0:
-            foreign = [
-                c for c in info.get("containers") or [] if not c.startswith("ztpbootstrap")
-            ]
+            foreign = [c for c in info.get("containers") or [] if not c.startswith("ztpbootstrap")]
             if foreign or info.get("container_count", 0) > 3:
                 plan["warnings"].append(
                     f"Refusing to remove shared network {network_name}: "
                     f"{info.get('container_count')} container(s) attached"
                 )
-                plan["remove_networks"] = [
-                    n for n in plan["remove_networks"] if n != network_name
-                ]
+                plan["remove_networks"] = [n for n in plan["remove_networks"] if n != network_name]
 
     return plan
 
 
-def validate_ztp_profile_dict(ztp_data: Dict[str, Any], full_config: Optional[Dict[str, Any]] = None) -> Tuple[bool, Optional[str]]:
+def validate_ztp_profile_dict(
+    ztp_data: Dict[str, Any], full_config: Optional[Dict[str, Any]] = None
+) -> Tuple[bool, Optional[str]]:
     """Validate a ZTP profile update against a config dict."""
     config = dict(full_config or {})
     network = dict(config.get("network") or {})

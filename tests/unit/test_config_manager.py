@@ -4,11 +4,11 @@ Unit tests for ConfigManager class
 Tests thread-safe configuration file management
 """
 
+import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
-import sys
-import os
 
 # Add webui directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../webui"))

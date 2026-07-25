@@ -50,7 +50,7 @@ class TestCheckDhcpContainerStatusFields(unittest.TestCase):
             "dhcp6_running": False,
         }
 
-        from dhcp_deploy import check_dhcp_container_status, DHCP_CONTAINER_NAME
+        from dhcp_deploy import DHCP_CONTAINER_NAME, check_dhcp_container_status
 
         with patch("dhcp_deploy.DHCP_CONTAINER_NAME", DHCP_CONTAINER_NAME):
             status = check_dhcp_container_status()

@@ -2,7 +2,6 @@
 """Unit tests for DHCP reservation routes and Kea payload builders."""
 
 import importlib.util
-import json
 import os
 import sys
 import tempfile
