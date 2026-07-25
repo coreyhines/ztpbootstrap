@@ -82,7 +82,10 @@ jobs:
       - name: Install lint tooling
         run: |
           apt-get install -y --no-install-recommends shellcheck
-          pip install --quiet black isort ruff yamllint
+          # ruff is pinned: its default rule set widened in 0.16.0 and would
+          # otherwise change the gate without a code change. Rules are
+          # selected explicitly in pyproject.toml.
+          pip install --quiet black isort yamllint 'ruff==0.16.*'
 
       - name: Run shellcheck
         run: |
@@ -99,11 +102,7 @@ jobs:
           black --check bootstrap.py
           black --check webui/ tests/unit/
 
-      # Reports ~384 pre-existing findings across webui/ and fails on main as
-      # well as on branches. Left non-blocking so the rest of the pipeline
-      # gives usable signal; flip to a hard gate once the backlog is cleared.
       - name: Run ruff (webui + tests)
-        continue-on-error: true
         run: ruff check webui/ tests/unit/
 
       - name: Check Python imports with isort

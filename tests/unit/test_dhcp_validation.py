@@ -4,25 +4,25 @@ Unit tests for DHCP validation module
 Tests input validation for DHCP configuration
 """
 
-import unittest
-import sys
 import os
+import sys
+import unittest
 
 # Add webui directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../webui"))
 
 try:
     from dhcp_validation import (
-        validate_ip_address,
+        PROTECTED_DHCP_OPTIONS,
         validate_cidr,
+        validate_dhcp_config,
+        validate_dhcp_option,
         validate_dhcp_range,
-        validate_gateway,
         validate_dns_servers,
         validate_domain_name,
+        validate_gateway,
+        validate_ip_address,
         validate_port,
-        validate_dhcp_option,
-        validate_dhcp_config,
-        PROTECTED_DHCP_OPTIONS,
     )
 except ImportError:
     validate_ip_address = None

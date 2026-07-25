@@ -38,6 +38,7 @@ def get_kea_image() -> str:
 
     return DEFAULT_KEA_IMAGE
 
+
 # Cache for socket permission warnings (to avoid spam)
 _socket_warning_logged = False
 

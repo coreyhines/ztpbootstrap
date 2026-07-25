@@ -138,7 +138,10 @@ jobs:
 
       - name: Install Python linting tools
         run: |
-          pip3 install black isort ruff
+          # ruff is pinned: its default rule set widened in 0.16.0 and would
+          # otherwise change the gate without a code change. Rules are
+          # selected explicitly in pyproject.toml.
+          pip3 install black isort 'ruff==0.16.*'
 
       - name: Run shellcheck
         run: |
