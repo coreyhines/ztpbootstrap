@@ -143,6 +143,35 @@ class TestDHCPConfig(unittest.TestCase):
 
     @patch("dhcp_config.detect_networking_mode")
     @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp4_config_memfile_loads_lease_cmds(self, mock_interfaces, mock_networking):
+        """Memfile must load lease_cmds so the Control Agent/Web UI can list leases."""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+
+        dhcp_config = self.minimal_config["dhcp"]
+        result = generate_dhcp4_config(dhcp_config, "macvlan", self.minimal_config)
+
+        libraries = [h["library"] for h in result.get("hooks-libraries", [])]
+        self.assertTrue(any("libdhcp_lease_cmds.so" in lib for lib in libraries))
+        self.assertFalse(any("libdhcp_host_cmds.so" in lib for lib in libraries))
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp4_config_postgres_loads_host_cmds(self, mock_interfaces, mock_networking):
+        """PostgreSQL backend loads both lease_cmds and host_cmds."""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+
+        config = self.minimal_config.copy()
+        config["dhcp"] = {**self.minimal_config["dhcp"], "backend": {"type": "postgresql"}}
+        result = generate_dhcp4_config(config["dhcp"], "macvlan", config)
+
+        libraries = [h["library"] for h in result.get("hooks-libraries", [])]
+        self.assertTrue(any("libdhcp_lease_cmds.so" in lib for lib in libraries))
+        self.assertTrue(any("libdhcp_host_cmds.so" in lib for lib in libraries))
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
     def test_generate_dhcp4_config_with_dns(self, mock_interfaces, mock_networking):
         """Test DHCPv4 configuration with DNS servers"""
         mock_networking.return_value = "macvlan"
@@ -198,7 +227,7 @@ class TestDHCPConfig(unittest.TestCase):
         options = generate_pxe_options(pxe_config, "ipv4")
         self.assertGreater(len(options), 0)
         # Check for boot server option (66)
-        boot_server = [opt for opt in options if opt.get("name") == "boot-server-hostname"]
+        boot_server = [opt for opt in options if opt.get("code") == 66]
         self.assertGreater(len(boot_server), 0)
 
     @patch("dhcp_config.detect_networking_mode")
@@ -293,6 +322,61 @@ class TestDHCPConfig(unittest.TestCase):
         self.assertIn("client-classes", result)
         self.assertEqual(len(result["client-classes"]), 1)
         self.assertEqual(result["client-classes"][0]["name"], "ARISTA_ONLY")
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp4_config_embeds_reservations(self, mock_interfaces, mock_networking):
+        """Memfile Kea serves static hosts from subnet reservations in generated JSON."""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+
+        config = self.minimal_config.copy()
+        config["dhcp"]["reservations"] = [
+            {
+                "hw-address": "00:1C:73-AA-BB-CC",
+                "ip-address": "10.0.5.50",
+                "hostname": "spine1",
+            },
+            {
+                "hw-address": "00:1c:73:aa:bb:cc",
+                "ip-address": "2601:441:8483:b505::50",
+                "hostname": "spine1-v6",
+            },
+        ]
+
+        result = generate_dhcp4_config(config["dhcp"], "macvlan", config)
+        reservations = result["subnet4"][0]["reservations"]
+        self.assertEqual(len(reservations), 1)
+        self.assertEqual(reservations[0]["hw-address"], "00:1c:73:aa:bb:cc")
+        self.assertEqual(reservations[0]["ip-address"], "10.0.5.50")
+        self.assertEqual(reservations[0]["hostname"], "spine1")
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp6_config_embeds_reservations(self, mock_interfaces, mock_networking):
+        """DHCPv6 reservations use ip-addresses arrays in generated Kea JSON."""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+
+        config = self.minimal_config.copy()
+        config["dhcp"]["ipv6"] = {
+            "subnet": "2601:441:8483:b505::/64",
+            "range_start": "2601:441:8483:b505::220",
+            "range_end": "2601:441:8483:b505::230",
+            "gateway": "2601:441:8483:b505::1",
+        }
+        config["dhcp"]["reservations"] = [
+            {
+                "hw-address": "00:1c:73:aa:bb:cc",
+                "ip-address": "2601:441:8483:b505::50",
+                "hostname": "spine1-v6",
+            }
+        ]
+
+        result = generate_dhcp6_config(config["dhcp"], "macvlan", config)
+        reservations = result["subnet6"][0]["reservations"]
+        self.assertEqual(len(reservations), 1)
+        self.assertEqual(reservations[0]["ip-addresses"], ["2601:441:8483:b505::50"])
 
     def test_generate_dhcp_options(self):
         """Test DHCP options generation"""

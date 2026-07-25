@@ -29,6 +29,77 @@ def _normalize_mac(mac: str) -> str:
     return str(mac).lower().replace("-", ":").strip()
 
 
+def _build_kea_subnet_reservations(dhcp_config: Dict, ip_version: int) -> List[Dict]:
+    """Build Kea subnet reservation rows from config.yaml dhcp.reservations."""
+    rows: List[Dict] = []
+    for item in dhcp_config.get("reservations") or []:
+        mac = item.get("hw-address") or item.get("hwaddr") or item.get("mac")
+        ip = item.get("ip-address") or item.get("ip") or item.get("address")
+        if not mac or not ip:
+            continue
+        ip_str = str(ip).strip()
+        is_v6 = ":" in ip_str
+        if ip_version == 4 and is_v6:
+            continue
+        if ip_version == 6 and not is_v6:
+            continue
+        entry: Dict = {"hw-address": _normalize_mac(mac), "ip-address": ip_str}
+        hostname = (item.get("hostname") or item.get("host") or "").strip()
+        if hostname:
+            entry["hostname"] = hostname
+        rows.append(entry)
+    return rows
+
+
+def _build_kea_subnet6_reservations(dhcp_config: Dict) -> List[Dict]:
+    """DHCPv6 reservations use ip-addresses (array), not ip-address."""
+    rows: List[Dict] = []
+    for item in dhcp_config.get("reservations") or []:
+        mac = item.get("hw-address") or item.get("hwaddr") or item.get("mac")
+        ip = item.get("ip-address") or item.get("ip") or item.get("address")
+        if not mac or not ip:
+            continue
+        ip_str = str(ip).strip()
+        if ":" not in ip_str:
+            continue
+        entry: Dict = {
+            "hw-address": _normalize_mac(mac),
+            "ip-addresses": [ip_str],
+        }
+        hostname = (item.get("hostname") or item.get("host") or "").strip()
+        if hostname:
+            entry["hostname"] = hostname
+        rows.append(entry)
+    return rows
+
+
+def _apply_subnet_reservations(subnet_config: Dict, dhcp_config: Dict, ip_version: int) -> None:
+    if ip_version == 6:
+        reservations = _build_kea_subnet6_reservations(dhcp_config)
+    else:
+        reservations = _build_kea_subnet_reservations(dhcp_config, ip_version=4)
+    if reservations:
+        subnet_config["reservations"] = reservations
+
+
+# Default Kea hook directory in the runtime image (RHEL/Fedora layout).
+DEFAULT_HOOK_LIBRARY_PATH = "/usr/lib64/kea/hooks"
+
+
+def _build_hooks_libraries(backend_config: Dict, backend_type: str) -> List[Dict]:
+    """Build Kea hooks-libraries list.
+
+    lease_cmds works with every backend (including memfile) and is required for
+    the Control Agent / Web UI to enumerate and manage leases. host_cmds needs a
+    database backend, so it is only loaded for PostgreSQL/MySQL.
+    """
+    hook_path = backend_config.get("hook_library_path", DEFAULT_HOOK_LIBRARY_PATH)
+    hooks = [{"library": f"{hook_path}/libdhcp_lease_cmds.so"}]
+    if backend_type in ["postgresql", "mysql"]:
+        hooks.append({"library": f"{hook_path}/libdhcp_host_cmds.so"})
+    return hooks
+
+
 def generate_kea_config(config_yaml: Dict) -> Dict:
     """
     Main config generator - creates complete Kea configuration.
@@ -188,6 +259,8 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
                 # For now, use the first one
                 pass
 
+    _apply_subnet_reservations(subnet_config, dhcp_config, ip_version=4)
+
     # Build main DHCPv4 config
     backend_config = dhcp_config.get("backend", {})
     backend_type = backend_config.get("type", "memfile")
@@ -210,13 +283,9 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     if backend_type in ["postgresql", "mysql"]:
         config["hosts-database"] = generate_lease_database(backend_config)
 
-    # Add hooks for lease and host commands (required for Control Agent access with PG backend)
-    if backend_type in ["postgresql", "mysql"]:
-        hook_path = backend_config.get("hook_library_path", "/usr/lib/x86_64-linux-gnu/kea/hooks")
-        config["hooks-libraries"] = [
-            {"library": f"{hook_path}/libdhcp_lease_cmds.so"},
-            {"library": f"{hook_path}/libdhcp_host_cmds.so"},
-        ]
+    # Always load lease_cmds (memfile-compatible) so the Control Agent / Web UI
+    # can enumerate leases; host_cmds is added for DB backends inside the helper.
+    config["hooks-libraries"] = _build_hooks_libraries(backend_config, backend_type)
 
     # Add client classification for OUI filtering
     oui_config = dhcp_config.get("oui_filtering", {})
@@ -323,8 +392,10 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         if cleaned_dns:
             if "option-data" not in subnet_config:
                 subnet_config["option-data"] = []
-            # Kea expects DNS servers as an array
-            subnet_config["option-data"].append({"name": "dns-servers", "data": cleaned_dns})
+            # Kea JSON config expects a string, not an array, for dns-servers.
+            subnet_config["option-data"].append(
+                {"name": "dns-servers", "data": ", ".join(cleaned_dns)}
+            )
 
     # Add domain name (option 24)
     domain = ipv6_config.get("domain", "")
@@ -339,6 +410,8 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         relay_subnets = generate_relay_subnets(relay_config, "ipv6")
         if relay_subnets:
             subnet_config = relay_subnets[0]
+
+    _apply_subnet_reservations(subnet_config, dhcp_config, ip_version=6)
 
     # Build main DHCPv6 config
     backend_config = dhcp_config.get("backend", {})
@@ -367,13 +440,9 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     if backend_type in ["postgresql", "mysql"]:
         config["hosts-database"] = generate_lease_database(backend_config)
 
-    # Add hooks for lease and host commands (required for Control Agent access with PG backend)
-    if backend_type in ["postgresql", "mysql"]:
-        hook_path = backend_config.get("hook_library_path", "/usr/lib/x86_64-linux-gnu/kea/hooks")
-        config["hooks-libraries"] = [
-            {"library": f"{hook_path}/libdhcp_lease_cmds.so"},
-            {"library": f"{hook_path}/libdhcp_host_cmds.so"},
-        ]
+    # Always load lease_cmds (memfile-compatible) so the Control Agent / Web UI
+    # can enumerate leases; host_cmds is added for DB backends inside the helper.
+    config["hooks-libraries"] = _build_hooks_libraries(backend_config, backend_type)
 
     # Add client classification for OUI filtering
     oui_config = dhcp_config.get("oui_filtering", {})
@@ -568,18 +637,15 @@ def generate_pxe_options(pxe_config: Dict, version: str) -> List[Dict]:
     options = []
 
     if version == "ipv4":
-        # Option 66: Boot server hostname/IP
+        # Option 66: Boot server hostname/IP (use standard option name for Kea)
         boot_server_url = pxe_config.get("boot_server_url", "")
         if boot_server_url:
-            options.append({"name": "boot-server-hostname", "data": boot_server_url})
-        elif pxe_config.get("boot_file_source") == "local":
-            # Use local server IP (will be set by API)
-            options.append({"name": "boot-server-hostname", "data": "0.0.0.0"})
+            options.append({"name": "option-66", "code": 66, "data": boot_server_url})
 
         # Option 67: Boot file name
         boot_file_name = pxe_config.get("boot_file_name", "")
         if boot_file_name:
-            options.append({"name": "boot-file-name", "data": boot_file_name})
+            options.append({"name": "boot-file-name", "code": 67, "data": boot_file_name})
 
     return options
 

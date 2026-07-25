@@ -399,6 +399,48 @@ def delete_all_leases_for_mac(mac: str, service: str = "dhcp4") -> bool:
     return any_ok
 
 
+def probe_lease_api_health(service: str = "dhcp4") -> Dict:
+    """
+    Check Kea Control Agent reachability and lease_cmds hook availability.
+
+    Returns:
+        Dict with reachable, lease_cmds_loaded, latency_ms, and optional error.
+    """
+    import time
+
+    result: Dict = {
+        "reachable": False,
+        "lease_cmds_loaded": False,
+        "latency_ms": None,
+        "error": None,
+    }
+    command = "lease4-get-all" if service == "dhcp4" else "lease6-get-all"
+    try:
+        start = time.time()
+        response = kea_request(command, service)
+        result["latency_ms"] = int((time.time() - start) * 1000)
+        if response.get("result") in (0, 3):
+            result["reachable"] = True
+        else:
+            result["error"] = response.get("text") or f"Kea result {response.get('result')}"
+    except Exception as exc:
+        result["error"] = str(exc)
+
+    try:
+        cfg_response = kea_request("config-get", service)
+        if cfg_response.get("result") == 0:
+            key = "Dhcp4" if service == "dhcp4" else "Dhcp6"
+            hooks = cfg_response.get("arguments", {}).get(key, {}).get("hooks-libraries", [])
+            result["lease_cmds_loaded"] = any(
+                "libdhcp_lease_cmds" in str(hook.get("library", "")) for hook in hooks
+            )
+    except Exception as exc:
+        if not result["error"]:
+            result["error"] = str(exc)
+
+    return result
+
+
 def get_statistics(service: str = "dhcp4") -> Dict:
     """
     Get DHCP server statistics.
