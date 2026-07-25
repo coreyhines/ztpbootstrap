@@ -10,6 +10,9 @@ import subprocess
 import time
 from pathlib import Path
 from typing import Any, Dict, List
+from urllib.parse import urlparse
+
+from kea_client import get_kea_ctrl_agent_url
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,7 @@ def get_kea_image() -> str:
                 return line.split("=", 1)[1].strip().strip('"').strip("'")
 
     return DEFAULT_KEA_IMAGE
+
 
 # Cache for socket permission warnings (to avoid spam)
 _socket_warning_logged = False
@@ -528,7 +532,7 @@ def start_dhcp_container() -> bool:
         for i in range(12):  # Check every 5 seconds for up to 60 seconds
             time.sleep(5)
             status = check_dhcp_container_status()
-            if status.get("container_running", False) or status.get("service_active", False):
+            if status.get("container_running") and status.get("dhcp4_running"):
                 logger.info(f"DHCP container verified running after {i * 5} seconds")
                 return True
             logger.debug(f"Waiting for container to start... ({i * 5}s)")
@@ -696,6 +700,61 @@ def remove_dhcp_container() -> bool:
         return False
 
 
+def _kea_ctrl_agent_host_port() -> tuple:
+    """Parse host and port from get_kea_ctrl_agent_url() for socket probes."""
+    parsed = urlparse(get_kea_ctrl_agent_url())
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 8000
+    return host, port
+
+
+def _kea_daemon_responding(service: str) -> bool:
+    """True when Kea Control Agent answers status-get for dhcp4/dhcp6."""
+    try:
+        import requests
+
+        response = requests.post(
+            get_kea_ctrl_agent_url(),
+            json={"command": "status-get", "service": [service]},
+            timeout=2,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if isinstance(payload, list) and payload:
+            payload = payload[0]
+        return payload.get("result") == 0
+    except Exception as e:
+        logger.debug(f"Kea status-get failed for {service}: {e}")
+        return False
+
+
+def _kea_daemons_in_container() -> Dict[str, bool]:
+    """Return whether kea-dhcp4/dhcp6 processes are running in the DHCP container."""
+    result = {"dhcp4_running": False, "dhcp6_running": False}
+    try:
+        podman_cmd = get_podman_cmd()
+        top_result = subprocess.run(
+            podman_cmd + ["top", DHCP_CONTAINER_NAME, "comm"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if top_result.returncode != 0:
+            return result
+        output = top_result.stdout.lower()
+        result["dhcp4_running"] = "kea-dhcp4" in output
+        result["dhcp6_running"] = "kea-dhcp6" in output
+    except Exception as e:
+        logger.debug(f"Could not inspect Kea daemons: {e}")
+
+    # podman top can fail from the webui container even while Kea is healthy
+    if not result["dhcp4_running"]:
+        result["dhcp4_running"] = _kea_daemon_responding("dhcp4")
+    if not result["dhcp6_running"]:
+        result["dhcp6_running"] = _kea_daemon_responding("dhcp6")
+    return result
+
+
 def check_dhcp_container_status() -> Dict[str, Any]:
     """
     Get container status.
@@ -711,6 +770,8 @@ def check_dhcp_container_status() -> Dict[str, Any]:
         "exists": False,
         "service_active": False,
         "container_running": False,
+        "dhcp4_running": False,
+        "dhcp6_running": False,
         "service_status": "unknown",
     }
 
@@ -783,9 +844,10 @@ def check_dhcp_container_status() -> Dict[str, Any]:
             try:
                 import socket
 
+                ctrl_host, ctrl_port = _kea_ctrl_agent_host_port()
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(1)
-                result_check = sock.connect_ex(("127.0.0.1", 8000))
+                result_check = sock.connect_ex((ctrl_host, ctrl_port))
                 sock.close()
                 if result_check == 0:
                     # Port is open, so Kea is running
@@ -814,6 +876,17 @@ def check_dhcp_container_status() -> Dict[str, Any]:
                 # If we can't check directly (e.g., we're in a container), assume False
                 # but this is okay - the file will show as existing once the service starts
                 result["exists"] = False
+
+        daemon_status = _kea_daemons_in_container()
+        result.update(daemon_status)
+        if result["dhcp4_running"] and not result["container_running"]:
+            result["container_running"] = True
+            result["service_active"] = True
+            result["service_status"] = "active"
+        elif result["container_running"] and not result["dhcp4_running"]:
+            result["service_status"] = "degraded"
+        elif result["dhcp4_running"]:
+            result["service_status"] = "active"
 
     except Exception as e:
         logger.warning(f"Failed to check DHCP container status: {e}")

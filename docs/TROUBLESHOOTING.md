@@ -8,6 +8,7 @@ Common issues and solutions for the Arista ZTP Bootstrap Service.
 - [Container Issues](#container-issues)
 - [Network Connectivity](#network-connectivity)
 - [SSL Certificate Problems](#ssl-certificate-problems)
+- [External Reverse Proxy Timeout Issues](#external-reverse-proxy-timeout-issues)
 - [Bootstrap Script Issues](#bootstrap-script-issues)
 - [Device Enrollment Failures](#device-enrollment-failures)
 - [Configuration Problems](#configuration-problems)
@@ -149,7 +150,7 @@ dig ztpboot.example.com
 
 # Check firewall
 sudo iptables -L -n
-sudo firewall-cmd --list-all  # firewalld
+sudo firewall-cmd --list-all   # firewalld
 ```
 
 ### Solutions
@@ -210,13 +211,13 @@ ip addr show
 
 ```bash
 # Check certificate validity
-openssl x509 -in /opt/containerdata/certs/wild/fullchain.pem -text -noout
+openssl x09 -in /opt/containerdata/certs/wild/fullchain.pem -text -noout
 
 # Check expiration
-openssl x509 -in /opt/containerdata/certs/wild/fullchain.pem -noout -dates
+openssl x09 -in /opt/containerdata/certs/wild/fullchain.pem -noout -dates
 
 # Verify certificate matches domain
-openssl x509 -in /opt/containerdata/certs/wild/fullchain.pem -text -noout | grep -A 1 "Subject Alternative Name"
+openssl x09 -in /opt/containerdata/certs/wild/fullchain.pem -text -noout | grep -A 1 "Subject Alternative Name"
 
 # Test certificate
 openssl s_client -connect ztpboot.example.com:443 -servername ztpboot.example.com < /dev/null
@@ -249,11 +250,81 @@ sudo systemctl restart ztpbootstrap
 **Issue: Certificate chain incomplete**
 ```bash
 # Verify full chain
-openssl x509 -in /opt/containerdata/certs/wild/fullchain.pem -text -noout | grep -c "BEGIN CERTIFICATE"
+openssl x09 -in /opt/containerdata/certs/wild/fullchain.pem -text -noout | grep -c "BEGIN CERTIFICATE"
 # Should show 2 or more certificates (leaf + chain)
 
 # If missing, download intermediate certificates
 # and append to fullchain.pem
+```
+
+## External Reverse Proxy Timeout Issues
+
+### Symptoms
+- DHCP enable/disable operations timeout before completing
+- Network apply/restart operations fail with proxy timeout error
+- Web UI shows "Gateway Timeout" or "504 Gateway Time-out" for long-running API calls
+- Operations work locally but fail when accessed through a reverse proxy
+
+### Diagnosis
+
+```bash
+# Test directly (bypasses external proxy)
+curl -k https://127.0.0.1:443/api/dhcp/enable
+curl -k https://127.0.0.1:443/api/network/apply
+
+# Check nginx error logs for upstream timeout
+tail -f /var/log/nginx/ztpbootstrap_error.log | grep -i "upstream timed out"
+```
+
+### Solutions
+
+**Issue: External reverse proxy has too-short timeout**
+
+When placing this service behind an external reverse proxy (e.g., HAProxy, Apache, AWS ALB, NGINX), the proxy's timeout settings must be configured to allow at least **120 seconds** for the following API paths:
+
+- `/api/dhcp/enable`
+- `/api/dhcp/disable`
+- `/api/network/apply`
+- `/api/network/restart`
+
+These operations can take longer than the default proxy timeout because they involve configuration deployment and validation.
+
+**Configure your external reverse proxy with these minimum timeouts for those paths:**
+
+```nginx
+# Example: HAProxy or NGINX upstream config
+location ~ ^/api/(dhcp/(enable|disable)|network/(apply|restart))$ {
+    proxy_read_timeout 120s;
+    proxy_send_timeout 120s;
+    proxy_connect_timeout 10s;
+}
+```
+
+**AWS ALB / Application Load Balancer:**
+```json
+{
+    "ConnectionSettings": {
+        "IdleTimeoutSeconds": 120
+    }
+}
+```
+
+**Apache mod_proxy:**
+```apache
+ProxyTimeout 120
+# Or per-location:
+<LocationMatch "^/api/(dhcp/(enable|disable)|network/(apply|restart))$">
+    ProxyTimeout 120
+</LocationMatch>
+```
+
+**Issue: Operations complete but client gives up too early**
+
+If operations appear to hang but are actually running, ensure your client tools also have appropriate timeout settings. For example, with curl:
+
+```bash
+# Increase curl timeout (connect + total)
+curl --connect-timeout 10 --max-time 120 -k https://ztpboot.example.com/api/dhcp/enable
 ```
 
 ## Bootstrap Script Issues
@@ -494,26 +565,26 @@ tar -czf ztpbootstrap-diagnostics.tar.gz -C /tmp ztpbootstrap-diagnostics
 ### Best Practices
 
 1. **Regular Monitoring**
-   - Set up health checks
-   - Monitor certificate expiration
-   - Check logs regularly
+    - Set up health checks
+    - Monitor certificate expiration
+    - Check logs regularly
 
 2. **Backup Configuration**
-   - Keep backups of config.yaml
-   - Document custom configurations
-   - Version control configuration files
+    - Keep backups of config.yaml
+    - Document custom configurations
+    - Version control configuration files
 
 3. **Test Before Production**
-   - Use integration tests
-   - Test in lab environment first
-   - Verify with test devices
+    - Use integration tests
+    - Test in lab environment first
+    - Verify with test devices
 
 4. **Keep Updated**
-   - Update dependencies regularly
-   - Renew certificates before expiration
-   - Review security updates
+    - Update dependencies regularly
+    - Renew certificates before expiration
+    - Review security updates
 
 5. **Documentation**
-   - Document custom configurations
-   - Keep network diagrams
-   - Maintain change logs
+    - Document custom configurations
+    - Keep network diagrams
+    - Maintain change logs

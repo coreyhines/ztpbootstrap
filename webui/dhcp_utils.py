@@ -338,6 +338,50 @@ def calculate_default_range(
         return ("", "")
 
 
+def subnet_defaults_from_cidr(
+    subnet: str, include_range: bool = True, pod_ip: Optional[str] = None
+) -> Dict[str, Optional[str]]:
+    """Suggest DHCP defaults (gateway, optional range) from a subnet CIDR.
+
+    The gateway suggestion is the first usable host in the subnet. When
+    ``include_range`` is set, a default range is calculated that excludes the
+    gateway, the optional ``pod_ip``, and the network/broadcast addresses.
+
+    Args:
+        subnet: Subnet in CIDR notation (e.g. "10.0.5.0/24").
+        include_range: Whether to also suggest range_start/range_end.
+        pod_ip: Optional pod IP to keep out of the suggested range.
+
+    Returns:
+        Dict with "subnet", "gateway", and (when requested) "range_start"
+        and "range_end". Values are None when they cannot be derived.
+    """
+    result: Dict[str, Optional[str]] = {
+        "subnet": subnet,
+        "gateway": None,
+    }
+    if include_range:
+        result["range_start"] = None
+        result["range_end"] = None
+
+    try:
+        network = ipaddress.ip_network(subnet, strict=False)
+    except ValueError as e:
+        logger.error(f"Invalid subnet for defaults: {subnet}: {e}")
+        return result
+
+    # First usable host is the conventional gateway suggestion.
+    gateway = str(network.network_address + 1)
+    result["gateway"] = gateway
+
+    if include_range:
+        range_start, range_end = calculate_default_range(subnet, gateway=gateway, pod_ip=pod_ip)
+        result["range_start"] = range_start or None
+        result["range_end"] = range_end or None
+
+    return result
+
+
 def check_dhcp_port_conflicts() -> Dict[str, bool]:
     """
     Check if ports 67/68 (IPv4) or 547/548 (IPv6) are already in use.
