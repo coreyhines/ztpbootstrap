@@ -195,7 +195,7 @@ def inspect_podman_network(name: str) -> Optional[Dict[str, Any]]:
             "container_count": len(container_names),
             "containers": container_names,
         }
-    except (json.JSONDecodeError, subprocess.TimeoutExpired) as exc:
+    except (json.JSONDecodeError, subprocess.TimeoutExpired, FileNotFoundError) as exc:
         logger.warning(f"Failed to inspect podman network {name}: {exc}")
         return None
 

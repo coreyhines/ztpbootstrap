@@ -12,7 +12,8 @@ from network_deploy import get_network_status, render_pod_quadlet_content
 
 
 class TestNetworkDeploy(unittest.TestCase):
-    def test_render_macvlan_quadlet(self):
+    @patch("network_deploy.resolve_ipv6_for_network", side_effect=lambda ipv6, _net: ipv6)
+    def test_render_macvlan_quadlet(self, _resolve_ipv6):
         profile = {
             "enabled": True,
             "vlan_id": 5,
