@@ -40,22 +40,19 @@ run_ggshield_pre_commit() {
 }
 
 sanitize_gitguardian_api_key() {
-  # Forgejo/Gitea secrets are often pasted with a trailing newline; httpx then
-  # rejects Authorization: Token <key> with "Invalid leading whitespace...".
+  # Forgejo secrets often include CR/LF or a pasted "Token " prefix; httpx then
+  # rejects Authorization: Token <key>. Strip all whitespace and a Token prefix.
   local key="${GITGUARDIAN_API_KEY:-}"
-  key="${key#"${key%%[![:space:]]*}"}"
-  key="${key%"${key##*[![:space:]]}"}"
-  if [[ "${key}" == \"*\" && "${key}" == *\" ]]; then
-    key="${key:1:${#key}-2}"
-  elif [[ "${key}" == \'*\' && "${key}" == *\' ]]; then
-    key="${key:1:${#key}-2}"
+  key="${key//[[:space:]]/}"
+  key="${key#\"}"
+  key="${key%\"}"
+  key="${key#\'}"
+  key="${key%\'}"
+  if [[ "${key}" == [Tt][Oo][Kk][Ee][Nn]* ]]; then
+    key="${key:5}"
   fi
   if [[ -z "${key}" ]]; then
     printf 'error: GITGUARDIAN_API_KEY is required for CI secret scanning.\n' >&2
-    return 1
-  fi
-  if [[ "${key}" =~ [[:space:]] ]]; then
-    printf 'error: GITGUARDIAN_API_KEY contains whitespace after trim; re-paste the secret without quotes or newlines.\n' >&2
     return 1
   fi
   export GITGUARDIAN_API_KEY="${key}"
