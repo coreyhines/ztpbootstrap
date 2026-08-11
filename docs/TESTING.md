@@ -116,7 +116,10 @@ Tests Failed: 0
 
 ## Running Tests in CI/CD
 
-### GitHub Actions Example
+### Forgejo Actions Example
+
+CI lives under `.forgejo/workflows/` (GitHub Actions are not used; see
+[FORGEJO_GITHUB_MIRROR.md](FORGEJO_GITHUB_MIRROR.md)). Example shape:
 
 ```yaml
 name: Test ZTP Bootstrap Service

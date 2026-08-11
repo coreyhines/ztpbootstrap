@@ -19,6 +19,8 @@ cd ztpbootstrap
 ./setup-interactive.sh
 ```
 
+> Development happens on Forgejo; GitHub mirrors `main` and release tags after CI. See [FORGEJO_GITHUB_MIRROR.md](FORGEJO_GITHUB_MIRROR.md).
+
 When the interactive setup asks:
 - **Network mode**: choose **host** (no macvlan needed)
 - **Protocol**: choose **HTTP-only** (no certs needed)

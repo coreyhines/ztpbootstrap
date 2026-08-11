@@ -258,7 +258,10 @@ curl http://localhost:8080/api/dhcp/status
 
 ## CI/CD Integration
 
-### GitHub Actions Example
+### Forgejo Actions Example
+
+(Historical example shape; live CI is under `.forgejo/workflows/` — see
+[FORGEJO_GITHUB_MIRROR.md](FORGEJO_GITHUB_MIRROR.md).)
 
 ```yaml
 name: DHCP Automated Tests

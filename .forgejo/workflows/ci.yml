@@ -1,16 +1,17 @@
 ---
 # Forgejo-native CI for ztpbootstrap.
 #
-# Mirrors .github/workflows/ci.yml, which is kept for the GitHub fallback
-# repo. Differences are forced by the Forgejo runtime, not by preference:
+# GitHub is a public mirror face only (main + v* tags). It does not run CI.
+# See docs/FORGEJO_GITHUB_MIRROR.md.
 #
+# publish-github is gated on jobs in THIS file only. The separate
+# dhcp-integration-test workflow does not block the public mirror.
+#
+# Runtime notes for this Forgejo instance:
 #   * runs-on targets the `strongpod` runner; `ubuntu-latest` matches no
 #     runner on this instance.
-#   * Actions are fully qualified to data.forgejo.org. Forgejo resolves bare
-#     `owner/repo@ref` against its own action host, where anchore/sbom-action,
-#     gitleaks/gitleaks-action, trufflesecurity/trufflehog and
-#     dependency-check/Dependency-Check_Action do not exist.
-#   * Those four actions are replaced by their underlying tools, invoked
+#   * Actions are fully qualified to data.forgejo.org.
+#   * Secret scanners / SBOM / dependency audit invoke underlying tools
 #     directly (see scripts/secret-scan.sh).
 #   * No upload-artifact steps: that action is known to fail against this
 #     Forgejo instance, so reports are written to the job log instead.
@@ -22,6 +23,8 @@ on:
       - main
       - develop
       - feature/*
+    tags:
+      - "v*"
   pull_request:
   workflow_dispatch:
 
@@ -196,3 +199,51 @@ jobs:
 
       - name: Run CI test suite
         run: ./dev/tests/ci-test.sh
+
+  publish-github:
+    name: Publish main/tags to GitHub
+    needs: [secret-scan, lint, dependency-scan, sbom, test]
+    if: >
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: strongpod
+    container:
+      image: docker.io/library/python:3.12-bookworm
+    timeout-minutes: 15
+    env:
+      MIRROR_GITHUB_TOKEN: ${{ secrets.MIRROR_GITHUB_TOKEN }}
+    steps:
+      - name: Install git
+        run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates
+
+      - uses: https://data.forgejo.org/actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Mask mirror token
+        run: |
+          if [ -n "${MIRROR_GITHUB_TOKEN:-}" ]; then
+            printf '::add-mask::%s\n' "${MIRROR_GITHUB_TOKEN}"
+          fi
+
+      - name: Publish to GitHub
+        env:
+          # Prefer context over env GITHUB_REF_TYPE (not reliably exported).
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/publish-github-mirror.sh
+          case "${REF}" in
+            refs/tags/v*)
+              ./scripts/publish-github-mirror.sh --tag "${REF_NAME}"
+              ;;
+            refs/heads/main)
+              ./scripts/publish-github-mirror.sh
+              ;;
+            *)
+              printf 'error: publish-github if: matched unexpected ref %s\n' "${REF}" >&2
+              exit 1
+              ;;
+          esac

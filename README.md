@@ -38,6 +38,10 @@ cd ztpbootstrap
 # sudo ./setup.sh               # non-interactive; uses ztpbootstrap.env
 ```
 
+Public clones use GitHub. Development, merge requests, issues, and CI run on
+[Forgejo](https://forgejo.freeblizz.com/coreyhines/ztpbootstrap)
+([mirror policy](docs/FORGEJO_GITHUB_MIRROR.md)).
+
 After install:
 
 ```bash
@@ -142,7 +146,7 @@ See [AGENTS.md](AGENTS.md) for agent/CI development notes.
 
 ## Support
 
-- **This project:** [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) · [GitHub Issues](https://github.com/coreyhines/ztpbootstrap/issues)
+- **This project:** [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) · [Forgejo](https://forgejo.freeblizz.com/coreyhines/ztpbootstrap) ([mirror policy](docs/FORGEJO_GITHUB_MIRROR.md))
 - **Arista ZTP / CVaaS:** [Arista documentation](https://www.arista.com/en/support/documentation)
 
 ## License

@@ -241,7 +241,7 @@ The container requires these capabilities:
 
 ## Integration Testing
 
-The CI workflow `.github/workflows/dhcp-integration-test.yml` performs automated integration testing:
+The Forgejo CI workflow `.forgejo/workflows/dhcp-integration-test.yml` performs automated integration testing:
 
 1. **Creates isolated test network** - Dual-stack Podman bridge network:
    - IPv4: `192.168.100.0/24`
@@ -262,10 +262,8 @@ The CI workflow `.github/workflows/dhcp-integration-test.yml` performs automated
 To run the integration tests locally:
 
 ```bash
-# The test workflow runs automatically on push to feature/dhcp-implementation branch
-git push origin feature/dhcp-implementation
-
-# Or run manually in GitHub Actions UI
+# The DHCP integration workflow runs on Forgejo Actions (see .forgejo/workflows/)
+# Or dispatch the workflow from the Forgejo Actions UI
 ```
 
 For local testing without CI:

@@ -9,7 +9,7 @@ This document describes what tests run during CI and which ones you can run loca
 ### 1. Security Checks
 - **Gitleaks** - Secret detection in git history
 - **TruffleHog** - Secret detection in PR diff
-- **Cannot run locally** - Requires GitHub Actions secrets
+- **Cannot run locally** - Requires Forgejo Actions secrets on the Forgejo CI runner
 
 ### 2. Dependency Scanning
 - **OWASP Dependency-Check** - Scans for known vulnerabilities
