@@ -160,26 +160,23 @@ jobs:
   test:
     name: Run Tests
     needs: [secret-scan, lint]
-    # Host execution, not a container: these tests drive podman on the
-    # runner host.
+    # Same python container as other jobs. ci-test.sh and unit tests do not
+    # need host podman (:host jobs run inside the runner image, which has no
+    # podman binary even though the physical host does).
     runs-on: strongpod
+    container:
+      image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 30
     steps:
+      - name: Install git and node
+        run: apt-get update && apt-get install -y --no-install-recommends git nodejs
+
       - uses: https://data.forgejo.org/actions/checkout@v6
         with:
           persist-credentials: false
 
-      - name: Verify host tooling
-        run: |
-          set -euo pipefail
-          for tool in podman python3 curl openssl; do
-            if ! command -v "$tool" >/dev/null 2>&1; then
-              printf '::error::%s is not installed on the strongpod runner\n' "$tool"
-              exit 1
-            fi
-          done
-          podman --version
-          python3 --version
+      - name: Install Python test dependencies
+        run: pip install --quiet -r webui/requirements.txt
 
       - name: Run Python unit tests
         run: |
