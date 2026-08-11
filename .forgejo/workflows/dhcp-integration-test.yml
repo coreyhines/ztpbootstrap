@@ -1,19 +1,10 @@
 ---
 name: DHCP Integration Tests
 
+# Manual only until this workflow is rewritten for the Fedora strongpod host
+# executor (no apt/sudo; Node Actions need a working host node). Auto runs on
+# push/PR were failing every merge and are not a publish-github gate.
 'on':
-  push:
-    branches:
-      - main
-      - develop
-      - feature/*
-      - copilot/*
-  pull_request:
-    branches:
-      - main
-      - develop
-      - feature/*
-      - copilot/*
   workflow_dispatch:
 
 jobs:

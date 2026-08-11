@@ -62,6 +62,10 @@ regexes = [
     # Allow test values used in automated testing
     '''test_token_for_automated_testing''',
     '''test.*token.*for.*automated.*testing''',
+    # Synthetic JWTs in unit tests / historical fixtures (not real secrets)
+    '''eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9\.payloadpayloadpayload\.signaturesignature''',
+    '''eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9\.test\.token\.here''',
+    '''eyJhbGciOiJSUzI1NiJ9\.new\.token''',
     # Cloud-init placeholders (sed-replaced at runtime)
     '''__DISTRO_USER__''',
     '''__CURRENT_USER__''',
