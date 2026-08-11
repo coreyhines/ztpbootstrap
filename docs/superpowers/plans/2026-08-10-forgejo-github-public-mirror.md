@@ -4,7 +4,7 @@
 
 **Goal:** Make Forgejo the only development remote and CI system, and publish only `main` plus `v*` tags to GitHub after Forgejo CI (including secret-scan) passes.
 
-**Architecture:** Delete GitHub Actions workflows. Extend Forgejo CI with a gated `publish-github` job that uses `scripts/publish-github-mirror.sh` and a Forgejo-only `GITHUB_MIRROR_TOKEN`. Scrub the GitHub repo (close PRs, delete extra branches, disable Actions), remove the local `github` remote, then flip the GitHub repo public only after a clean publish.
+**Architecture:** Delete GitHub Actions workflows and Dependabot config. Extend Forgejo CI with a gated `publish-github` job that uses `scripts/publish-github-mirror.sh` and Forgejo secret `MIRROR_GITHUB_TOKEN`. Scrub the GitHub repo (close PRs, delete extra branches, disable Actions and Issues), remove the local `github` remote, then flip the GitHub repo public only after a clean publish.
 
 **Tech Stack:** Forgejo Actions (strongpod runner), bash + git, GitHub fine-grained PAT, `gh` CLI for one-time scrub.
 
@@ -13,10 +13,13 @@
 ## Global Constraints
 
 - Publish refs: `main` and release tags matching `v*` only — never feature branches
-- Auth: Forgejo secret `GITHUB_MIRROR_TOKEN` only; never commit tokens
-- No force-push to GitHub `main` in normal operation (fast-forward only)
+- Auth: Forgejo secret `MIRROR_GITHUB_TOKEN` only (Forgejo rejects names starting with `GITHUB_`); never commit tokens; never put the token on the process command line
+- Tag publish pushes the tag only; main publish pushes `main` only
+- Publish gate = jobs in `.forgejo/workflows/ci.yml` only — **not** `dhcp-integration-test.yml`
+- No force-push to GitHub `main` in the automated job (fast-forward only)
 - GitHub stays private until first green publish + confirmed clean secret-scan on that tip
-- Local clones must not have a `github` push remote after Task 5
+- GitHub Issues disabled; Forgejo is the issue/MR SoT
+- Local clones must not have a `github` push remote after Task 6
 - Podman, not Docker, for any container work in this repo (unchanged)
 
 ## File map
@@ -26,96 +29,104 @@
 | `.github/workflows/ci.yml` | **Delete** |
 | `.github/workflows/dhcp-integration-test.yml` | **Delete** |
 | `.github/workflows/secret-scan.yml` | **Delete** |
-| `.github/` (dir) | Remove if empty after workflow deletes |
+| `.github/dependabot.yml` | **Delete** (Dependabot off; avoid silent `rm -rf`) |
+| `.github/` (dir) | Remove after the above deletes leave it empty |
 | `.forgejo/workflows/ci.yml` | CI jobs + `on.tags` + `publish-github` job; fix header comments |
-| `scripts/publish-github-mirror.sh` | **Create** — push `main` and optional tag to GitHub over HTTPS |
-| `docs/FORGEJO_GITHUB_MIRROR.md` | **Create** — operator/developer mirror policy |
-| `README.md` | Point clone at GitHub; point contribute/CI at Forgejo; link mirror doc |
+| `.forgejo/workflows/dhcp-integration-test.yml` | **Unchanged** — still runs on Forgejo; does **not** gate publish |
+| `scripts/publish-github-mirror.sh` | **Create** — FF-push `main` **or** push one `v*` tag (distinct modes) |
+| `docs/FORGEJO_GITHUB_MIRROR.md` | **Create** — operator/developer mirror policy + break-glass note |
+| `README.md` | Point clone at GitHub; contribute/CI/issues at Forgejo; link mirror doc |
 | `docs/QUICK_START.md` | Keep public clone URL on GitHub; note development is on Forgejo |
 | `docs/CI_TESTING.md` | Replace “GitHub Actions secrets” with Forgejo CI wording where needed |
+| Other `*.md` with “GitHub Actions as CI” | Grep sweep in Task 4; update operational docs only |
 
 ---
 
-### Task 1: Remove GitHub Actions workflows
+### Task 1: Remove GitHub Actions workflows and Dependabot
 
 **Files:**
 - Delete: `.github/workflows/ci.yml`
 - Delete: `.github/workflows/dhcp-integration-test.yml`
 - Delete: `.github/workflows/secret-scan.yml`
-- Delete: `.github/workflows/` (and `.github/` if empty)
+- Delete: `.github/dependabot.yml`
+- Delete: `.github/` (empty after the above)
 
 **Interfaces:**
 - Consumes: none
-- Produces: repo with no GitHub workflow YAML for Actions to run after scrub/disable
+- Produces: repo with no GitHub workflow YAML and no Dependabot config
 
 - [ ] **Step 1: Confirm files exist**
 
 ```bash
 ls -la .github/workflows/
+ls -la .github/dependabot.yml
 ```
 
-Expected: `ci.yml`, `dhcp-integration-test.yml`, `secret-scan.yml`
+Expected: three workflow files + `dependabot.yml`
 
-- [ ] **Step 2: Delete the workflows and empty dirs**
+- [ ] **Step 2: Delete each path explicitly**
 
 ```bash
 rm -f .github/workflows/ci.yml \
       .github/workflows/dhcp-integration-test.yml \
-      .github/workflows/secret-scan.yml
-rmdir .github/workflows 2>/dev/null || true
-# Remove .github only if nothing else remains (e.g. DEPENDABOT, CODEOWNERS)
-find .github -type f 2>/dev/null
-# If only empty dirs, remove:
-rm -rf .github
+      .github/workflows/secret-scan.yml \
+      .github/dependabot.yml
+rmdir .github/workflows
+rmdir .github
 ```
+
+Do **not** use `rm -rf .github` as a shortcut that hides unexpected files. If `rmdir .github` fails, run `find .github -type f` and decide explicitly before deleting leftovers.
 
 - [ ] **Step 3: Verify gone**
 
 ```bash
-test ! -e .github/workflows && echo "workflows removed"
+test ! -e .github && echo "github dir removed"
 git status -sb
 ```
 
-Expected: deleted workflow files staged or unstaged; no `.github/workflows` path
+Expected: `.github` gone
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add -A .github
 git commit -m "$(cat <<'EOF'
-ci: remove GitHub Actions workflows
+ci: remove GitHub Actions workflows and Dependabot
 
 CI runs on Forgejo only; GitHub is a public mirror face and must not
-execute Actions from mirrored pushes.
+execute Actions or open Dependabot PRs from mirrored pushes.
 EOF
 )"
 ```
 
 ---
 
-### Task 2: Add publish script (testable without pushing)
+### Task 2: Add publish script (simplified, dual-mode)
 
 **Files:**
 - Create: `scripts/publish-github-mirror.sh`
-- Test: run with `--dry-run` and `shellcheck`
+- Test: `--dry-run` + `shellcheck`
 
 **Interfaces:**
-- Consumes: env `GITHUB_MIRROR_TOKEN` (required unless `--dry-run`); optional `GITHUB_MIRROR_OWNER` (default `coreyhines`), `GITHUB_MIRROR_REPO` (default `ztpbootstrap`)
-- Produces: executable script that fast-forward pushes `main` and optionally one tag ref to GitHub; exits non-zero on non-ff or missing token
+- Consumes: env `MIRROR_GITHUB_TOKEN` (required unless `--dry-run`); optional `MIRROR_GITHUB_OWNER` (default `coreyhines`), `MIRROR_GITHUB_REPO` (default `ztpbootstrap`)
+- Produces: script with two modes — default/main mode FF-pushes `main`; `--tag v…` mode pushes that tag only
+- Auth: `git -c http.extraHeader="Authorization: Bearer …"` (no token in remote URL)
 
-- [ ] **Step 1: Write the script**
+- [ ] **Step 1: Write the canonical script**
 
-Create `scripts/publish-github-mirror.sh`:
+Create `scripts/publish-github-mirror.sh` with exactly this content (simplified implementation only — no temp-repo draft):
 
 ```bash
 #!/usr/bin/env bash
-# Push Forgejo main (and optional v* tag) to GitHub after CI gates.
+# Push Forgejo main OR one v* tag to GitHub after CI gates.
+# Modes are distinct: --tag never updates refs/heads/main.
 # Usage:
-#   publish-github-mirror.sh [--dry-run] [--tag v1.2.3]
+#   publish-github-mirror.sh [--dry-run]
+#   publish-github-mirror.sh [--dry-run] --tag v1.2.3
 # Env:
-#   GITHUB_MIRROR_TOKEN  required unless --dry-run
-#   GITHUB_MIRROR_OWNER  default coreyhines
-#   GITHUB_MIRROR_REPO   default ztpbootstrap
+#   MIRROR_GITHUB_TOKEN  required unless --dry-run
+#   MIRROR_GITHUB_OWNER   default coreyhines
+#   MIRROR_GITHUB_REPO    default ztpbootstrap
 set -euo pipefail
 
 DRY_RUN=0
@@ -139,12 +150,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-OWNER="${GITHUB_MIRROR_OWNER:-coreyhines}"
-REPO="${GITHUB_MIRROR_REPO:-ztpbootstrap}"
-TOKEN="${GITHUB_MIRROR_TOKEN:-}"
+OWNER="${MIRROR_GITHUB_OWNER:-coreyhines}"
+REPO="${MIRROR_GITHUB_REPO:-ztpbootstrap}"
+TOKEN="${MIRROR_GITHUB_TOKEN:-}"
 
 if [[ "${DRY_RUN}" -eq 0 && -z "${TOKEN}" ]]; then
-  printf 'error: GITHUB_MIRROR_TOKEN is required (or pass --dry-run)\n' >&2
+  printf 'error: MIRROR_GITHUB_TOKEN is required (or pass --dry-run)\n' >&2
   exit 1
 fi
 
@@ -153,117 +164,88 @@ if [[ -n "${TAG_REF}" && ! "${TAG_REF}" =~ ^v[0-9] ]]; then
   exit 1
 fi
 
-# Mask token in Actions logs if present
 if [[ -n "${TOKEN}" ]]; then
   printf '::add-mask::%s\n' "${TOKEN}"
 fi
 
-WORKDIR="$(mktemp -d)"
-cleanup() { rm -rf "${WORKDIR}"; }
-trap cleanup EXIT
-
-# Clone the already-checked-out SHA from the Actions workspace when possible;
-# otherwise expect to be run from a full git checkout.
 ROOT="$(git rev-parse --show-toplevel)"
-MAIN_SHA="$(git -C "${ROOT}" rev-parse refs/heads/main 2>/dev/null || git -C "${ROOT}" rev-parse HEAD)"
+cd "${ROOT}"
+
+# Remote URL without credentials (token goes in http.extraHeader only).
+REMOTE_URL="https://github.com/${OWNER}/${REPO}.git"
+git_auth() {
+  git -c "http.extraHeader=Authorization: Bearer ${TOKEN}" "$@"
+}
+
+if [[ -n "${TAG_REF}" ]]; then
+  TAG_SHA="$(git rev-parse "refs/tags/${TAG_REF}" 2>/dev/null || git rev-parse "${TAG_REF}")"
+  printf 'Publishing tag %s (%s) to github.com/%s/%s\n' \
+    "${TAG_REF}" "${TAG_SHA}" "${OWNER}" "${REPO}"
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    printf 'dry-run: would push %s:refs/tags/%s (main unchanged)\n' \
+      "${TAG_SHA}" "${TAG_REF}"
+    exit 0
+  fi
+  git_auth push "${REMOTE_URL}" "${TAG_SHA}:refs/tags/${TAG_REF}"
+  printf 'Published tag %s (%s); GitHub main not modified\n' "${TAG_REF}" "${TAG_SHA}"
+  exit 0
+fi
+
+# Main mode: resolve main explicitly — never use detached HEAD as main.
+if git show-ref --verify --quiet refs/heads/main; then
+  MAIN_SHA="$(git rev-parse refs/heads/main)"
+elif git show-ref --verify --quiet refs/remotes/origin/main; then
+  MAIN_SHA="$(git rev-parse refs/remotes/origin/main)"
+else
+  printf 'error: cannot resolve main (no refs/heads/main or origin/main)\n' >&2
+  exit 1
+fi
 
 printf 'Publishing main=%s to github.com/%s/%s\n' "${MAIN_SHA}" "${OWNER}" "${REPO}"
 
 if [[ "${DRY_RUN}" -eq 1 ]]; then
   printf 'dry-run: would push %s:refs/heads/main\n' "${MAIN_SHA}"
-  if [[ -n "${TAG_REF}" ]]; then
-    TAG_SHA="$(git -C "${ROOT}" rev-parse "${TAG_REF}")"
-    printf 'dry-run: would push %s:refs/tags/%s\n' "${TAG_SHA}" "${TAG_REF}"
-  fi
   exit 0
 fi
 
-REMOTE_URL="https://x-access-token:${TOKEN}@github.com/${OWNER}/${REPO}.git"
-
-git init --quiet "${WORKDIR}/mirror"
-git -C "${WORKDIR}/mirror" remote add origin "${REMOTE_URL}"
-# Fetch GitHub main to verify fast-forward
-git -C "${WORKDIR}/mirror" fetch --depth=1 origin main
-GITHUB_MAIN="$(git -C "${WORKDIR}/mirror" rev-parse FETCH_HEAD)"
-
-# Ensure local object exists in temp repo via fetch from workspace
-git -C "${ROOT}" push --force "${WORKDIR}/mirror" "${MAIN_SHA}:refs/heads/local-main" 2>/dev/null \
-  || {
-    # Fallback: add local path remote
-    git -C "${WORKDIR}/mirror" remote add local "${ROOT}"
-    git -C "${WORKDIR}/mirror" fetch local "${MAIN_SHA}"
-    git -C "${WORKDIR}/mirror" update-ref refs/heads/local-main "${MAIN_SHA}"
-  }
-
-# Fast-forward check: GITHUB_MAIN must be ancestor of MAIN_SHA
-if ! git -C "${ROOT}" merge-base --is-ancestor "${GITHUB_MAIN}" "${MAIN_SHA}"; then
-  printf 'error: GitHub main (%s) is not an ancestor of Forgejo tip (%s); refusing non-ff push\n' \
-    "${GITHUB_MAIN}" "${MAIN_SHA}" >&2
-  exit 1
+GITHUB_MAIN="$(git_auth ls-remote "${REMOTE_URL}" refs/heads/main | awk '{print $1}')"
+if [[ -n "${GITHUB_MAIN}" ]]; then
+  if ! git merge-base --is-ancestor "${GITHUB_MAIN}" "${MAIN_SHA}"; then
+    # Fetch the GitHub tip so merge-base can see it if missing locally
+    git_auth fetch --depth=1 "${REMOTE_URL}" "+refs/heads/main:refs/mirror-check/github-main"
+    GITHUB_MAIN="$(git rev-parse refs/mirror-check/github-main)"
+    if ! git merge-base --is-ancestor "${GITHUB_MAIN}" "${MAIN_SHA}"; then
+      printf 'error: refusing non-fast-forward publish (%s ↛ %s)\n' \
+        "${GITHUB_MAIN}" "${MAIN_SHA}" >&2
+      exit 1
+    fi
+  fi
 fi
 
-git -C "${WORKDIR}/mirror" push origin "${MAIN_SHA}:refs/heads/main"
-
-if [[ -n "${TAG_REF}" ]]; then
-  TAG_SHA="$(git -C "${ROOT}" rev-parse "${TAG_REF}")"
-  git -C "${WORKDIR}/mirror" push origin "${TAG_SHA}:refs/tags/${TAG_REF}"
-  printf 'Published tag %s (%s)\n' "${TAG_REF}" "${TAG_SHA}"
-fi
-
+git_auth push "${REMOTE_URL}" "${MAIN_SHA}:refs/heads/main"
 printf 'Published main (%s)\n' "${MAIN_SHA}"
 ```
 
-> **Note for implementer:** If the “push into temp repo” dance is awkward on the runner, simplify to: from `${ROOT}`, `git push "https://x-access-token:${TOKEN}@github.com/${OWNER}/${REPO}.git" "${MAIN_SHA}:refs/heads/main"` after a `git ls-remote` / merge-base check. Prefer the simpler form if Step 2 dry-run + a manual token test succeed. Keep the fast-forward ancestor check either way.
-
-- [ ] **Step 2: Prefer simplified push implementation if needed**
-
-If Step 1’s temp-repo approach is brittle, replace the body after token checks with:
-
-```bash
-ROOT="$(git rev-parse --show-toplevel)"
-MAIN_SHA="$(git rev-parse refs/heads/main 2>/dev/null || git rev-parse HEAD)"
-OWNER="${GITHUB_MIRROR_OWNER:-coreyhines}"
-REPO="${GITHUB_MIRROR_REPO:-ztpbootstrap}"
-REMOTE_URL="https://x-access-token:${TOKEN}@github.com/${OWNER}/${REPO}.git"
-
-if [[ "${DRY_RUN}" -eq 1 ]]; then
-  printf 'dry-run: would push %s → github.com/%s/%s main\n' "${MAIN_SHA}" "${OWNER}" "${REPO}"
-  [[ -z "${TAG_REF}" ]] || printf 'dry-run: would push tag %s\n' "${TAG_REF}"
-  exit 0
-fi
-
-GITHUB_MAIN="$(git ls-remote "${REMOTE_URL}" refs/heads/main | awk '{print $1}')"
-if [[ -n "${GITHUB_MAIN}" ]]; then
-  if ! git merge-base --is-ancestor "${GITHUB_MAIN}" "${MAIN_SHA}"; then
-    printf 'error: refusing non-fast-forward publish (%s ↛ %s)\n' "${GITHUB_MAIN}" "${MAIN_SHA}" >&2
-    exit 1
-  fi
-fi
-
-git push "${REMOTE_URL}" "${MAIN_SHA}:refs/heads/main"
-if [[ -n "${TAG_REF}" ]]; then
-  git push "${REMOTE_URL}" "refs/tags/${TAG_REF}:refs/tags/${TAG_REF}"
-fi
-```
-
-Use this simplified version as the **canonical** script content to commit if the first draft fails local dry-run logic tests.
-
-- [ ] **Step 3: Make executable and dry-run**
+- [ ] **Step 2: Make executable and dry-run**
 
 ```bash
 chmod +x scripts/publish-github-mirror.sh
 shellcheck -S error scripts/publish-github-mirror.sh
 ./scripts/publish-github-mirror.sh --dry-run
-./scripts/publish-github-mirror.sh --dry-run --tag v0.0.0-test 2>&1 | head -5 || true
 ```
 
-Expected: shellcheck clean; dry-run without tag prints would-push main; fake tag may fail rev-parse — that is OK. For tag dry-run, use an existing tag or omit `--tag` until a real tag exists:
+Expected: shellcheck clean; exit 0; line containing `dry-run: would push` and `refs/heads/main`
+
+- [ ] **Step 3: Dry-run tag mode without inventing a tag**
 
 ```bash
-./scripts/publish-github-mirror.sh --dry-run
+# If no v* tag exists, create a local annotated throwaway for dry-run only, then delete:
+git tag -a v0.0.0-mirror-dryrun -m 'dry-run' HEAD
+./scripts/publish-github-mirror.sh --dry-run --tag v0.0.0-mirror-dryrun
+git tag -d v0.0.0-mirror-dryrun
 ```
 
-Expected exit 0 and a “dry-run: would push …” line.
+Expected: `dry-run: would push …:refs/tags/v0.0.0-mirror-dryrun (main unchanged)`
 
 - [ ] **Step 4: Commit**
 
@@ -272,8 +254,8 @@ git add scripts/publish-github-mirror.sh
 git commit -m "$(cat <<'EOF'
 feat(ci): add GitHub mirror publish script
 
-Pushes main (and optional v* tags) to GitHub after Forgejo CI gates,
-with dry-run support and fast-forward checks.
+Distinct main vs tag modes, FF checks, and Bearer auth via
+http.extraHeader so the PAT never appears in the remote URL.
 EOF
 )"
 ```
@@ -283,11 +265,12 @@ EOF
 ### Task 3: Wire `publish-github` into Forgejo CI
 
 **Files:**
-- Modify: `.forgejo/workflows/ci.yml` (header comments, `on:` tags, new job)
+- Modify: `.forgejo/workflows/ci.yml`
 
 **Interfaces:**
-- Consumes: `scripts/publish-github-mirror.sh`; jobs `secret-scan`, `lint`, `dependency-scan`, `sbom`, `test`; secret `GITHUB_MIRROR_TOKEN`
+- Consumes: `scripts/publish-github-mirror.sh`; jobs `secret-scan`, `lint`, `dependency-scan`, `sbom`, `test`; secret `MIRROR_GITHUB_TOKEN`
 - Produces: CI workflow that publishes only on green `main` / `v*` tag pushes
+- Does **not** `needs:` anything from `dhcp-integration-test.yml`
 
 - [ ] **Step 1: Update header comments**
 
@@ -299,6 +282,9 @@ Replace the top comment block in `.forgejo/workflows/ci.yml` with:
 #
 # GitHub is a public mirror face only (main + v* tags). It does not run CI.
 # See docs/FORGEJO_GITHUB_MIRROR.md.
+#
+# publish-github is gated on jobs in THIS file only. The separate
+# dhcp-integration-test workflow does not block the public mirror.
 #
 # Runtime notes for this Forgejo instance:
 #   * runs-on targets the `strongpod` runner; `ubuntu-latest` matches no
@@ -341,7 +327,7 @@ on:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
     env:
-      GITHUB_MIRROR_TOKEN: ${{ secrets.GITHUB_MIRROR_TOKEN }}
+      MIRROR_GITHUB_TOKEN: ${{ secrets.MIRROR_GITHUB_TOKEN }}
     steps:
       - name: Install git
         run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates
@@ -353,19 +339,30 @@ on:
 
       - name: Mask mirror token
         run: |
-          if [ -n "${GITHUB_MIRROR_TOKEN:-}" ]; then
-            printf '::add-mask::%s\n' "${GITHUB_MIRROR_TOKEN}"
+          if [ -n "${MIRROR_GITHUB_TOKEN:-}" ]; then
+            printf '::add-mask::%s\n' "${MIRROR_GITHUB_TOKEN}"
           fi
 
       - name: Publish to GitHub
+        env:
+          # Prefer context over env GITHUB_REF_TYPE (not reliably exported).
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           chmod +x scripts/publish-github-mirror.sh
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            ./scripts/publish-github-mirror.sh --tag "${GITHUB_REF_NAME}"
-          else
-            ./scripts/publish-github-mirror.sh
-          fi
+          case "${REF}" in
+            refs/tags/v*)
+              ./scripts/publish-github-mirror.sh --tag "${REF_NAME}"
+              ;;
+            refs/heads/main)
+              ./scripts/publish-github-mirror.sh
+              ;;
+            *)
+              printf 'error: publish-github if: matched unexpected ref %s\n' "${REF}" >&2
+              exit 1
+              ;;
+          esac
 ```
 
 - [ ] **Step 4: Validate YAML locally**
@@ -375,7 +372,7 @@ yamllint .forgejo/workflows/ci.yml
 python3 -c "import yaml; yaml.safe_load(open('.forgejo/workflows/ci.yml'))"
 ```
 
-Expected: no errors (or only accepted yamllint warnings already used in repo)
+Expected: parse succeeds
 
 - [ ] **Step 5: Commit**
 
@@ -384,8 +381,7 @@ git add .forgejo/workflows/ci.yml
 git commit -m "$(cat <<'EOF'
 ci(forgejo): publish main and v* tags to GitHub after green CI
 
-Gate the public mirror on secret-scan and the full Forgejo CI suite so
-GitHub only advances when checks pass.
+Gate the public mirror on ci.yml jobs only; tag mode does not move main.
 EOF
 )"
 ```
@@ -396,13 +392,12 @@ EOF
 
 **Files:**
 - Create: `docs/FORGEJO_GITHUB_MIRROR.md`
-- Modify: `README.md` (Quick start + Support)
-- Modify: `docs/QUICK_START.md` (clone blurb)
-- Modify: `docs/CI_TESTING.md` (Forgejo wording)
+- Modify: `README.md`, `docs/QUICK_START.md`, `docs/CI_TESTING.md`
+- Possibly modify (after grep): `docs/TESTING.md`, `docs/DHCP_AUTOMATED_TESTING.md`, `dhcp/README.md`, `TEST_AUTOMATION_SUMMARY.md`, `docs/KNOWN_ISSUES.md`
 
 **Interfaces:**
-- Consumes: policy from the design spec
-- Produces: docs that state clone=GitHub, develop/CI=Forgejo
+- Consumes: amended design spec
+- Produces: docs stating clone=GitHub; develop/CI/issues=Forgejo; Issues disabled on GitHub
 
 - [ ] **Step 1: Write `docs/FORGEJO_GITHUB_MIRROR.md`**
 
@@ -413,63 +408,87 @@ EOF
 
 | Host | Role |
 |------|------|
-| **Forgejo** (`forgejo.freeblizz.com/coreyhines/ztpbootstrap`) | Development: branches, merge requests, CI |
+| **Forgejo** (`forgejo.freeblizz.com/coreyhines/ztpbootstrap`) | Development: branches, merge requests, issues, CI |
 | **GitHub** (`github.com/coreyhines/ztpbootstrap`) | Public clone/fork face: `main` and `v*` tags only |
+
+GitHub **Issues** and **Actions** are disabled. Do not file bugs on GitHub.
 
 ## What gets published
 
-After Forgejo CI passes on a push to `main` or a `v*` tag (jobs: secret-scan, lint, dependency-scan, sbom, test), the `publish-github` job runs `scripts/publish-github-mirror.sh` and fast-forward updates GitHub.
+After Forgejo CI passes on a push to `main` or a `v*` tag (jobs in `.forgejo/workflows/ci.yml`: secret-scan, lint, dependency-scan, sbom, test), the `publish-github` job runs `scripts/publish-github-mirror.sh`:
 
-Feature branches are **not** mirrored. Do not add a `github` git remote for day-to-day work.
+- `main` push → fast-forward GitHub `main`
+- `v*` tag push → publish that tag only (does not move GitHub `main`)
 
-## CI
+The separate `dhcp-integration-test` workflow does **not** gate the mirror.
 
-All CI runs on Forgejo (`.forgejo/workflows/`). GitHub Actions are disabled and `.github/workflows/` is not present.
+Feature branches are not mirrored. Do not add a `github` git remote for day-to-day work.
 
 ## Operator notes
 
-- Forgejo Actions secret: `GITHUB_MIRROR_TOKEN` (fine-grained PAT, Contents: Read and write, this repo only).
+- Forgejo Actions secret: `MIRROR_GITHUB_TOKEN` (fine-grained PAT, Contents: Read and write, this repo only). Forgejo rejects secret names starting with `GITHUB_`.
 - Normal publishes never force-push GitHub `main`.
-- History rewrites on Forgejo `main` need a separate recovery procedure before GitHub can follow.
+- Auth uses `http.extraHeader` so the PAT is not on the git remote URL / `ps` listing.
+
+## Break-glass (history rewrite)
+
+If Forgejo `main` is rewritten so GitHub `main` is no longer an ancestor, the automated job will refuse to publish. Recovery is manual and out of band:
+
+1. Decide whether GitHub should be force-updated at all (usually only after coordinating consumers).
+2. From a trusted machine with the PAT:  
+   `git push --force-with-lease https://github.com/coreyhines/ztpbootstrap.git <forgejo-main-sha>:refs/heads/main`
+3. Do **not** add a permanent force-push path to CI.
 ```
 
 - [ ] **Step 2: Update README Quick start and Support**
 
-In `README.md` Quick start block, keep the GitHub clone URL, then add one line after the clone commands:
+After the clone commands in Quick start, add:
 
 ```markdown
-Public clones use GitHub. Development, merge requests, and CI run on
+Public clones use GitHub. Development, merge requests, issues, and CI run on
 [Forgejo](https://forgejo.freeblizz.com/coreyhines/ztpbootstrap)
 ([mirror policy](docs/FORGEJO_GITHUB_MIRROR.md)).
 ```
 
-In Support, change Issues to prefer Forgejo if that is where issues live; if issues remain on GitHub for public users, keep GitHub Issues but add Forgejo for maintainers:
+Update Support to:
 
 ```markdown
-- **This project:** [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) · [GitHub Issues](https://github.com/coreyhines/ztpbootstrap/issues) · [Forgejo](https://forgejo.freeblizz.com/coreyhines/ztpbootstrap) ([mirror policy](docs/FORGEJO_GITHUB_MIRROR.md))
+- **This project:** [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) · [Forgejo](https://forgejo.freeblizz.com/coreyhines/ztpbootstrap) ([mirror policy](docs/FORGEJO_GITHUB_MIRROR.md))
 ```
 
-- [ ] **Step 3: Update `docs/QUICK_START.md` clone section**
+(Remove or demote GitHub Issues links — Issues are disabled on GitHub.)
 
-After the `git clone https://github.com/coreyhines/ztpbootstrap.git` example, add:
+- [ ] **Step 3: Update `docs/QUICK_START.md`**
+
+After the GitHub clone example, add:
 
 ```markdown
 > Development happens on Forgejo; GitHub mirrors `main` and release tags after CI. See [FORGEJO_GITHUB_MIRROR.md](FORGEJO_GITHUB_MIRROR.md).
 ```
 
-- [ ] **Step 4: Fix `docs/CI_TESTING.md` GitHub Actions line**
+- [ ] **Step 4: Fix `docs/CI_TESTING.md`**
 
-Replace any “Requires GitHub Actions secrets” with wording like “Requires Forgejo Actions secrets on the Forgejo CI runner.”
+Replace “Requires GitHub Actions secrets” (and similar) with Forgejo Actions wording.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Grep sweep**
+
+```bash
+rg -n -i 'GitHub Actions|\.github/workflows' --glob '*.md' \
+  README.md docs/ dhcp/ TEST_AUTOMATION_SUMMARY.md CONTRIBUTING.md AGENTS.md
+```
+
+For each hit: update if it describes current CI procedure; leave historical epic/PR footnotes alone.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add docs/FORGEJO_GITHUB_MIRROR.md README.md docs/QUICK_START.md docs/CI_TESTING.md
+# plus any other files changed in the sweep
 git commit -m "$(cat <<'EOF'
 docs: document Forgejo development and GitHub mirror roles
 
-Clarify that clones may use GitHub while CI and day-to-day development
-stay on Forgejo.
+Clone via GitHub; develop, issues, and CI stay on Forgejo. Record
+break-glass for non-ff history without enabling CI force-push.
 EOF
 )"
 ```
@@ -482,56 +501,47 @@ EOF
 
 **Interfaces:**
 - Consumes: GitHub account with admin on `coreyhines/ztpbootstrap`
-- Produces: Forgejo Actions secret `GITHUB_MIRROR_TOKEN`
+- Produces: Forgejo Actions secret `MIRROR_GITHUB_TOKEN`
 
 - [ ] **Step 1: Create fine-grained PAT on GitHub**
 
 1. GitHub → Settings → Developer settings → Fine-grained personal access tokens → Generate
-2. Resource owner: your user; Repository access: **Only select** `ztpbootstrap`
+2. Repository access: **Only select** `ztpbootstrap`
 3. Permissions: **Contents: Read and write**; Metadata: Read
 4. Expiration: choose a remembered rotation date (e.g. 90 days)
-5. Copy the token once; store in your password manager
+5. Copy once; store in password manager
 
 - [ ] **Step 2: Add Forgejo Actions secret**
 
-1. Open `https://forgejo.freeblizz.com/coreyhines/ztpbootstrap/settings/actions/secrets`
-2. Add secret name exactly: `GITHUB_MIRROR_TOKEN`
+1. Open repo → Settings → Actions → Secrets
+2. Name **exactly**: `MIRROR_GITHUB_TOKEN` (must not start with `GITHUB_`)
 3. Paste the PAT; save
 
-- [ ] **Step 3: Smoke-test push auth without changing remotes permanently**
+- [ ] **Step 3: Smoke-test dry-run**
 
 ```bash
-# From a throwaway clone or with env only — do NOT git remote add github
-export GITHUB_MIRROR_TOKEN='…'   # from password manager; do not commit
+export MIRROR_GITHUB_TOKEN='…'   # from password manager; do not commit
 ./scripts/publish-github-mirror.sh --dry-run
-# Optional live test ONLY after Task 6 scrub decision / when ready to sync main:
-# ./scripts/publish-github-mirror.sh
-unset GITHUB_MIRROR_TOKEN
+unset MIRROR_GITHUB_TOKEN
 ```
 
-Expected dry-run: exit 0. Live test (if run): GitHub `main` fast-forwards to Forgejo tip.
+Expected: exit 0
 
-- [ ] **Step 4: Record completion in the MR/PR description** (no secret values)
+- [ ] **Step 4: Record completion without secret values**
 
-Note: “`GITHUB_MIRROR_TOKEN` configured on Forgejo” — never paste the token.
+Note in the MR: “`MIRROR_GITHUB_TOKEN` configured on Forgejo.”
 
 ---
 
 ### Task 6: Remove local `github` remote
 
-**Files:** none (local git config only); mention in `docs/FORGEJO_GITHUB_MIRROR.md` already covers policy
-
-**Interfaces:**
-- Consumes: existing local remote named `github`
-- Produces: only `origin` → Forgejo
+**Files:** none (local git config only)
 
 - [ ] **Step 1: Inspect remotes**
 
 ```bash
 git remote -v
 ```
-
-Expected before: `origin` (Forgejo) and `github` (GitHub)
 
 - [ ] **Step 2: Remove GitHub remote**
 
@@ -540,40 +550,32 @@ git remote remove github
 git remote -v
 ```
 
-Expected: only `origin` pointing at `ssh://git@forgejo.freeblizz.com/coreyhines/ztpbootstrap.git`
+Expected: only `origin` → `ssh://git@forgejo.freeblizz.com/coreyhines/ztpbootstrap.git`
 
-- [ ] **Step 3: Repeat in other worktrees if present**
+- [ ] **Step 3: Repeat in other worktrees**
 
 ```bash
 git worktree list
-# for each worktree path:
-#   git -C "$path" remote remove github 2>/dev/null || true
+# for each path: git -C "$path" remote remove github 2>/dev/null || true
 ```
 
-No commit (local config only).
+No commit.
 
 ---
 
-### Task 7: Scrub GitHub (PRs, branches, disable Actions)
+### Task 7: Scrub GitHub (PRs, branches, Actions, Issues)
 
 **Files:** none in git
 
-**Interfaces:**
-- Consumes: `gh` authenticated to `coreyhines/ztpbootstrap`
-- Produces: GitHub with only `main` (plus any tags later); Actions disabled; no open PRs
-
-- [ ] **Step 1: Close open PRs**
+- [ ] **Step 1: Close all open PRs dynamically**
 
 ```bash
 gh pr list --repo coreyhines/ztpbootstrap --state open --json number,title
-gh pr close 70 --repo coreyhines/ztpbootstrap --comment "Closed: development moved to Forgejo; GitHub is mirror-only (main + tags)."
-gh pr close 69 --repo coreyhines/ztpbootstrap --comment "Closed: development moved to Forgejo; GitHub is mirror-only (main + tags)."
-gh pr close 68 --repo coreyhines/ztpbootstrap --comment "Closed: development moved to Forgejo; GitHub is mirror-only (main + tags)."
-gh pr close 48 --repo coreyhines/ztpbootstrap --comment "Closed: Dependabot disabled; CI runs on Forgejo only."
-gh pr close 47 --repo coreyhines/ztpbootstrap --comment "Closed: Dependabot disabled; CI runs on Forgejo only."
-gh pr close 45 --repo coreyhines/ztpbootstrap --comment "Closed: Dependabot disabled; CI runs on Forgejo only."
-gh pr close 44 --repo coreyhines/ztpbootstrap --comment "Closed: Dependabot disabled; CI runs on Forgejo only."
-gh pr close 43 --repo coreyhines/ztpbootstrap --comment "Closed: Dependabot disabled; CI runs on Forgejo only."
+gh pr list --repo coreyhines/ztpbootstrap --state open --json number --jq '.[].number' \
+  | while read -r n; do
+      gh pr close "$n" --repo coreyhines/ztpbootstrap \
+        --comment "Closed: development moved to Forgejo; GitHub is mirror-only (main + tags)."
+    done
 gh pr list --repo coreyhines/ztpbootstrap --state open
 ```
 
@@ -582,10 +584,12 @@ Expected: empty open list
 - [ ] **Step 2: Delete non-`main` branches**
 
 ```bash
-gh api repos/coreyhines/ztpbootstrap/branches --paginate --jq '.[].name' | grep -v '^main$' | while read -r b; do
-  printf 'Deleting %s\n' "$b"
-  gh api -X DELETE "repos/coreyhines/ztpbootstrap/git/refs/heads/${b}"
-done
+gh api repos/coreyhines/ztpbootstrap/branches --paginate --jq '.[].name' \
+  | grep -v '^main$' \
+  | while read -r b; do
+      printf 'Deleting %s\n' "$b"
+      gh api -X DELETE "repos/coreyhines/ztpbootstrap/git/refs/heads/${b}"
+    done
 gh api repos/coreyhines/ztpbootstrap/branches --jq '.[].name'
 ```
 
@@ -594,62 +598,80 @@ Expected: only `main`
 - [ ] **Step 3: Disable GitHub Actions**
 
 ```bash
-gh api -X PUT repos/coreyhines/ztpbootstrap/actions/permissions \
-  -f enabled=false \
-  -f allowed_actions=selected
+gh api -X PUT repos/coreyhines/ztpbootstrap/actions/permissions -F enabled=false
 gh api repos/coreyhines/ztpbootstrap/actions/permissions
 ```
 
-Expected: `"enabled": false`
+Expected: `"enabled": false`  
+Do **not** send `allowed_actions` when disabling (causes 422).
 
-- [ ] **Step 4: Disable Dependabot alerts/PRs if enabled (optional but recommended)**
+- [ ] **Step 4: Disable GitHub Issues**
+
+```bash
+gh repo edit coreyhines/ztpbootstrap --disable-issues
+gh api repos/coreyhines/ztpbootstrap --jq '{has_issues:.has_issues}'
+```
+
+Expected: `"has_issues": false`
+
+- [ ] **Step 5: Disable Dependabot / vulnerability alerts if still on**
 
 ```bash
 gh api -X DELETE repos/coreyhines/ztpbootstrap/vulnerability-alerts 2>/dev/null || true
-# Also turn off Dependabot in GitHub UI: Settings → Code security → Dependabot
 ```
+
+Also confirm in GitHub UI: Settings → Code security → Dependabot off.
 
 ---
 
-### Task 8: Land on Forgejo `main`, first publish, then go public
-
-**Files:** merge the feature branch via Forgejo MR (this plan’s commits)
+### Task 8: Land on Forgejo `main`, verify gates, first publish, go public
 
 **Interfaces:**
-- Consumes: Tasks 1–7 complete; `GITHUB_MIRROR_TOKEN` set; GitHub Actions disabled
-- Produces: GitHub `main` == Forgejo `main`; repo public after secret-scan confirmation
+- Consumes: Tasks 1–7; `MIRROR_GITHUB_TOKEN` set; Actions/Issues disabled
+- Produces: GitHub `main` == Forgejo `main`; repo public after clean scan
 
-- [ ] **Step 1: Open / merge Forgejo MR**
-
-Push branch (if not already) and merge into `main` on Forgejo:
+- [ ] **Step 1: Ancestor pre-check (must pass before first publish)**
 
 ```bash
-git push -u origin HEAD
-# Open MR: docs/forgejo-github-public-mirror (or implementation branch) → main
-# Merge when CI on the MR is green
-```
-
-- [ ] **Step 2: Confirm CI on `main` including `publish-github`**
-
-After merge, watch Forgejo Actions for the `main` push run. All of `secret-scan`, `lint`, `dependency-scan`, `sbom`, `test`, `publish-github` must be green.
-
-If `publish-github` fails on missing secret, fix Task 5 and re-run workflow_dispatch or empty commit on `main` **only if necessary**.
-
-- [ ] **Step 3: Verify GitHub `main` matches**
-
-```bash
-# Read-only compare without adding a remote:
 forgejo_main=$(git ls-remote ssh://git@forgejo.freeblizz.com/coreyhines/ztpbootstrap.git refs/heads/main | awk '{print $1}')
 github_main=$(git ls-remote https://github.com/coreyhines/ztpbootstrap.git refs/heads/main | awk '{print $1}')
 printf 'forgejo=%s\ngithub=%s\n' "$forgejo_main" "$github_main"
+git fetch origin main
+git merge-base --is-ancestor "$github_main" "$forgejo_main" \
+  && echo 'OK: GitHub main is ancestor of Forgejo main' \
+  || { echo 'STOP: diverged; do not force-publish from CI'; exit 1; }
+```
+
+Expected: `OK: …` (verified true as of design time: `04ce735` ⊂ `351984d`)
+
+- [ ] **Step 2: Open / merge Forgejo MR into `main`**
+
+```bash
+git push -u origin HEAD
+# Merge MR when green
+```
+
+- [ ] **Step 3: Confirm CI on `main` including `publish-github`**
+
+All of `secret-scan`, `lint`, `dependency-scan`, `sbom`, `test`, `publish-github` green on the `main` push run.
+
+- [ ] **Step 4: Verify GitHub `main` matches Forgejo**
+
+```bash
+forgejo_main=$(git ls-remote ssh://git@forgejo.freeblizz.com/coreyhines/ztpbootstrap.git refs/heads/main | awk '{print $1}')
+github_main=$(git ls-remote https://github.com/coreyhines/ztpbootstrap.git refs/heads/main | awk '{print $1}')
 test "$forgejo_main" = "$github_main" && echo MATCH
 ```
 
 Expected: `MATCH`
 
-- [ ] **Step 4: Confirm secret-scan clean on published tip**
+- [ ] **Step 5: Verify success criterion 3 (publish skipped off-main)**
 
-Use the green `secret-scan` job on that same Forgejo run as the authority. Optionally re-run locally:
+On a recent PR run or `feature/*` push in Forgejo Actions UI, confirm `publish-github` shows **Skipped** (because of the `if:`). Do this **before** flipping visibility.
+
+- [ ] **Step 6: Confirm secret-scan clean on published tip**
+
+Use the green `secret-scan` job on that same run. Optionally:
 
 ```bash
 ./scripts/secret-scan.sh ci
@@ -657,37 +679,36 @@ Use the green `secret-scan` job on that same Forgejo run as the authority. Optio
 
 Expected: exit 0
 
-- [ ] **Step 5: Make GitHub repository public**
+- [ ] **Step 7: Make GitHub repository public**
 
 ```bash
 gh repo edit coreyhines/ztpbootstrap --visibility public --accept-visibility-change-consequences
-gh api repos/coreyhines/ztpbootstrap --jq '{private:.private,visibility:.visibility}'
+gh api repos/coreyhines/ztpbootstrap --jq '{private:.private,visibility:.visibility,has_issues:.has_issues}'
 ```
 
-Expected: `"private": false`, `"visibility": "public"`
+Expected: public, `has_issues: false`
 
-- [ ] **Step 6: Final checklist against success criteria**
+- [ ] **Step 8: Final checklist**
 
 | Criterion | Check |
 |-----------|--------|
 | No local `github` remote | `git remote -v` |
-| No `.github/workflows` | `test ! -e .github/workflows` |
-| Actions disabled | `gh api …/actions/permissions` → enabled false |
-| Green CI required to publish | documented + publish job `needs:` + `if:` |
-| Only `main` (+ later tags) on GitHub | `gh api …/branches` |
-| Public after clean scan | Steps 4–5 |
+| No `.github/` workflows/Dependabot | `test ! -e .github` |
+| Actions disabled | `gh api …/actions/permissions` |
+| Issues disabled | `has_issues: false` |
+| Publish skipped on PR/feature | Step 5 |
+| FF publish on green main | Steps 3–4 |
+| Public after clean scan | Steps 6–7 |
 
-- [ ] **Step 7: Commit nothing further unless docs need a “went public on DATE” note**
+- [ ] **Step 9: Optional go-live note**
 
-Optional one-liner in `docs/FORGEJO_GITHUB_MIRROR.md`:
+Add to `docs/FORGEJO_GITHUB_MIRROR.md`:
 
 ```markdown
 ## Status
 
-GitHub public mirror enabled (CI-gated) as of YYYY-MM-DD.
+GitHub public mirror enabled (CI-gated) as of YYYY-MM-DD. Issues disabled on GitHub.
 ```
-
-Commit only if you add that note:
 
 ```bash
 git commit -am "docs: record GitHub public mirror go-live date"
@@ -699,16 +720,20 @@ git commit -am "docs: record GitHub public mirror go-live date"
 
 | Spec requirement | Task |
 |------------------|------|
-| CI-gated publish of `main` + `v*` | Tasks 2–3, 8 |
-| Delete `.github/workflows` + disable Actions | Tasks 1, 7 |
-| Forgejo secret `GITHUB_MIRROR_TOKEN` | Task 5 |
+| CI-gated publish of `main` + `v*` with distinct modes | Tasks 2–3, 8 |
+| Gate = ci.yml jobs only; not dhcp-integration | Tasks 3, Global Constraints, mirror doc |
+| Delete workflows + dependabot; disable Actions | Tasks 1, 7 |
+| Disable GitHub Issues | Task 7 Step 4 |
+| Secret `MIRROR_GITHUB_TOKEN` | Tasks 2, 3, 5 |
 | Remove local `github` remote | Task 6 |
-| Close PRs / delete non-main branches | Task 7 |
-| Docs clone=GitHub, develop=Forgejo | Task 4 |
+| Close PRs dynamically / delete non-main branches | Task 7 |
+| Docs + grep sweep | Task 4 |
 | Public only after clean secret-scan | Task 8 |
-| No force-push / FF only | Task 2 script |
-| Out of scope: branch cleanup on Forgejo, Releases UI | Not in plan |
+| Ancestor pre-check | Task 8 Step 1 |
+| Criterion 3 verified (skipped off-main) | Task 8 Step 5 |
+| FF only; break-glass out of CI | Task 2 script + Task 4 doc |
+| Bearer auth / no token in URL | Task 2 |
 
 ## Placeholder scan
 
-No TBD/TODO left in task steps; scripts and YAML are inlined; scrub PR numbers are explicit.
+No TBD left; secret rename applied throughout; single simplified script; `gh -F enabled=false` only; tag/main modes distinct.
