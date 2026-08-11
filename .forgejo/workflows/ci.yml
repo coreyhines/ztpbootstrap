@@ -204,8 +204,8 @@ jobs:
     env:
       MIRROR_GITHUB_TOKEN: ${{ secrets.MIRROR_GITHUB_TOKEN }}
     steps:
-      - name: Install git
-        run: apt-get update && apt-get install -y --no-install-recommends git ca-certificates
+      - name: Install git and node
+        run: apt-get update && apt-get install -y --no-install-recommends git nodejs ca-certificates
 
       - uses: https://data.forgejo.org/actions/checkout@v6
         with:
