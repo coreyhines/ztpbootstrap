@@ -110,7 +110,7 @@ EOF
 **Interfaces:**
 - Consumes: env `MIRROR_GITHUB_TOKEN` (required unless `--dry-run`); optional `MIRROR_GITHUB_OWNER` (default `coreyhines`), `MIRROR_GITHUB_REPO` (default `ztpbootstrap`)
 - Produces: script with two modes — default/main mode FF-pushes `main`; `--tag v…` mode pushes that tag only
-- Auth: `git -c http.extraHeader="Authorization: Bearer …"` (no token in remote URL)
+- Auth: `http.extraHeader` with **Basic** `x-access-token:<PAT>` (GitHub's git-over-HTTPS scheme; Bearer is Azure DevOps and does not authenticate here), passed via `GIT_CONFIG_*` env so the PAT is never in the remote URL **or** in `ps` output
 
 - [ ] **Step 1: Write the canonical script**
 
@@ -173,8 +173,24 @@ cd "${ROOT}"
 
 # Remote URL without credentials (token goes in http.extraHeader only).
 REMOTE_URL="https://github.com/${OWNER}/${REPO}.git"
+
+# GitHub's git-over-HTTPS wants Basic with the x-access-token: prefix — the
+# same header actions/checkout writes. Bearer is an Azure DevOps convention
+# and is NOT accepted here.
+#
+# The header goes through GIT_CONFIG_* env vars rather than `git -c`, because
+# `git -c "http.extraHeader=…"` puts the PAT in argv, where any user on the
+# runner can read it out of `ps`. Environment is not world-readable on Linux.
+#
+# `base64 | tr -d '\n'` instead of `base64 -w0`: macOS base64 has no -w flag
+# and this script is also run by hand during setup.
 git_auth() {
-  git -c "http.extraHeader=Authorization: Bearer ${TOKEN}" "$@"
+  local hdr
+  hdr="AUTHORIZATION: basic $(printf 'x-access-token:%s' "${TOKEN}" | base64 | tr -d '\n')"
+  GIT_CONFIG_COUNT=1 \
+  GIT_CONFIG_KEY_0=http.extraHeader \
+  GIT_CONFIG_VALUE_0="${hdr}" \
+    git "$@"
 }
 
 if [[ -n "${TAG_REF}" ]]; then
@@ -210,13 +226,22 @@ fi
 
 GITHUB_MAIN="$(git_auth ls-remote "${REMOTE_URL}" refs/heads/main | awk '{print $1}')"
 if [[ -n "${GITHUB_MAIN}" ]]; then
-  if ! git merge-base --is-ancestor "${GITHUB_MAIN}" "${MAIN_SHA}"; then
-    # Fetch the GitHub tip so merge-base can see it if missing locally
-    git_auth fetch --depth=1 "${REMOTE_URL}" "+refs/heads/main:refs/mirror-check/github-main"
-    GITHUB_MAIN="$(git rev-parse refs/mirror-check/github-main)"
+  # The first check fails harmlessly ("not a valid object name") when the
+  # GitHub tip is absent locally, which is exactly the diverged case; fetch
+  # it and re-check so the refusal below is a real ancestry verdict.
+  #
+  # No --depth here: a shallow fetch writes .git/shallow into whatever repo
+  # this runs in, which would quietly truncate a developer's working clone.
+  if ! git merge-base --is-ancestor "${GITHUB_MAIN}" "${MAIN_SHA}" 2>/dev/null; then
+    CHECK_REF="refs/mirror-check/github-main"
+    cleanup_check_ref() { git update-ref -d "${CHECK_REF}" 2>/dev/null || true; }
+    trap cleanup_check_ref EXIT
+    git_auth fetch --quiet "${REMOTE_URL}" "+refs/heads/main:${CHECK_REF}"
+    GITHUB_MAIN="$(git rev-parse "${CHECK_REF}")"
     if ! git merge-base --is-ancestor "${GITHUB_MAIN}" "${MAIN_SHA}"; then
       printf 'error: refusing non-fast-forward publish (%s ↛ %s)\n' \
         "${GITHUB_MAIN}" "${MAIN_SHA}" >&2
+      printf 'see docs/FORGEJO_GITHUB_MIRROR.md "Break-glass" before forcing anything\n' >&2
       exit 1
     fi
   fi
@@ -254,8 +279,9 @@ git add scripts/publish-github-mirror.sh
 git commit -m "$(cat <<'EOF'
 feat(ci): add GitHub mirror publish script
 
-Distinct main vs tag modes, FF checks, and Bearer auth via
-http.extraHeader so the PAT never appears in the remote URL.
+Distinct main vs tag modes, fast-forward checks, and Basic auth via
+http.extraHeader passed through GIT_CONFIG_* so the PAT reaches git
+without landing in the remote URL or in ps output.
 EOF
 )"
 ```
@@ -426,9 +452,10 @@ Feature branches are not mirrored. Do not add a `github` git remote for day-to-d
 
 ## Operator notes
 
-- Forgejo Actions secret: `MIRROR_GITHUB_TOKEN` (fine-grained PAT, Contents: Read and write, this repo only). Forgejo rejects secret names starting with `GITHUB_`.
+- Forgejo Actions secret: `MIRROR_GITHUB_TOKEN` (fine-grained PAT, Contents: Read and write, this repo only). Forgejo rejects secret names starting with `GITHUB_`, `GITEA_`, or `FORGEJO_`.
+- **PAT expires: YYYY-MM-DD.** Rotate before then. On expiry, `publish-github` fails on every `main` push and GitHub stops advancing — the failure looks like a broken build, so check the token first.
 - Normal publishes never force-push GitHub `main`.
-- Auth uses `http.extraHeader` so the PAT is not on the git remote URL / `ps` listing.
+- Auth uses Basic `x-access-token:<PAT>` in `http.extraHeader`, supplied through `GIT_CONFIG_*` environment variables — the PAT is in neither the remote URL nor `ps` output. (`git -c http.extraHeader=…` would put it in argv; don't.)
 
 ## Break-glass (history rewrite)
 
@@ -517,19 +544,46 @@ EOF
 2. Name **exactly**: `MIRROR_GITHUB_TOKEN` (must not start with `GITHUB_`)
 3. Paste the PAT; save
 
-- [ ] **Step 3: Smoke-test dry-run**
+- [ ] **Step 3: Prove the token actually authenticates**
+
+`--dry-run` returns before any network call, so it cannot validate a token —
+it exits 0 with a garbage value. Round-trip against GitHub instead. This one
+command validates the auth scheme, the token, and the PAT's repo scope
+together, which is the only check standing between here and a red
+`publish-github` on `main`:
 
 ```bash
-export MIRROR_GITHUB_TOKEN='…'   # from password manager; do not commit
-./scripts/publish-github-mirror.sh --dry-run
-unset MIRROR_GITHUB_TOKEN
+read -rs MIRROR_GITHUB_TOKEN   # paste from password manager; keeps it out of shell history
+export MIRROR_GITHUB_TOKEN
+hdr="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$MIRROR_GITHUB_TOKEN" | base64 | tr -d '\n')"
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader GIT_CONFIG_VALUE_0="$hdr" \
+  git ls-remote https://github.com/coreyhines/ztpbootstrap.git refs/heads/main
+unset MIRROR_GITHUB_TOKEN hdr
 ```
 
-Expected: exit 0
+Expected: one line, `<sha>\trefs/heads/main`.
+
+- Empty output or `Repository not found` → PAT is not scoped to this repo (or
+  the repo is still private to a PAT that lacks access).
+- `could not read Username` / `Authentication failed` → wrong header scheme.
+  GitHub's git endpoint wants Basic with the `x-access-token:` prefix; `Bearer`
+  does not work here.
+
+Then confirm the script's own plumbing separately:
+
+```bash
+./scripts/publish-github-mirror.sh --dry-run
+```
+
+Expected: exit 0, prints the `main` SHA it would push.
 
 - [ ] **Step 4: Record completion without secret values**
 
-Note in the MR: “`MIRROR_GITHUB_TOKEN` configured on Forgejo.”
+Note in the MR: “`MIRROR_GITHUB_TOKEN` configured on Forgejo; `ls-remote` auth
+probe passed.” Record the PAT's **expiry date** in
+`docs/FORGEJO_GITHUB_MIRROR.md` (Operator notes) — when it lapses, every push
+to `main` turns `publish-github` red and GitHub silently stops advancing, and
+that symptom reads like a broken build rather than an expired credential.
 
 ---
 
@@ -632,24 +686,52 @@ Also confirm in GitHub UI: Settings → Code security → Dependabot off.
 
 - [ ] **Step 1: Ancestor pre-check (must pass before first publish)**
 
+Run this as a script (it `exit`s on failure; pasting it into an interactive
+shell will close the terminal):
+
 ```bash
+#!/usr/bin/env bash
+set -euo pipefail
 forgejo_main=$(git ls-remote ssh://git@forgejo.freeblizz.com/coreyhines/ztpbootstrap.git refs/heads/main | awk '{print $1}')
 github_main=$(git ls-remote https://github.com/coreyhines/ztpbootstrap.git refs/heads/main | awk '{print $1}')
 printf 'forgejo=%s\ngithub=%s\n' "$forgejo_main" "$github_main"
-git fetch origin main
-git merge-base --is-ancestor "$github_main" "$forgejo_main" \
-  && echo 'OK: GitHub main is ancestor of Forgejo main' \
-  || { echo 'STOP: diverged; do not force-publish from CI'; exit 1; }
+
+# Fetch BOTH tips before comparing. Without the GitHub side present locally,
+# merge-base fails with "not a valid object name" and the diverged-vs-
+# not-fetched cases become indistinguishable.
+git fetch -q origin main
+git fetch -q https://github.com/coreyhines/ztpbootstrap.git \
+  "+refs/heads/main:refs/mirror-check/github-main"
+
+if git merge-base --is-ancestor "$github_main" "$forgejo_main"; then
+  echo 'OK: GitHub main is an ancestor of Forgejo main; publish will fast-forward'
+else
+  echo 'STOP: histories diverged. Do not force-publish from CI.'
+  echo 'See docs/FORGEJO_GITHUB_MIRROR.md "Break-glass".'
+  exit 1
+fi
+git update-ref -d refs/mirror-check/github-main
 ```
 
 Expected: `OK: …` (verified true as of design time: `04ce735` ⊂ `351984d`)
 
-- [ ] **Step 2: Open / merge Forgejo MR into `main`**
+- [ ] **Step 2: Open Forgejo MR and verify the publish gate *before* merging**
 
 ```bash
 git push -u origin HEAD
-# Merge MR when green
+# Open MR: <branch> → main
 ```
+
+On the MR's own CI run, confirm `publish-github` reports **Skipped**. This is
+success criterion 3's only cheap test, and the MR run is the one place it can
+be made: the job does not exist on any run predating Task 3, and after the
+merge every run is a `main` push where the job is supposed to fire. Getting
+the `if:` wrong is trivially fixable here and expensive to discover later.
+
+If it shows anything other than Skipped, fix the `if:` in Task 3 Step 3 and
+push again before merging.
+
+Merge the MR once CI is green and the skip is confirmed.
 
 - [ ] **Step 3: Confirm CI on `main` including `publish-github`**
 
@@ -665,11 +747,7 @@ test "$forgejo_main" = "$github_main" && echo MATCH
 
 Expected: `MATCH`
 
-- [ ] **Step 5: Verify success criterion 3 (publish skipped off-main)**
-
-On a recent PR run or `feature/*` push in Forgejo Actions UI, confirm `publish-github` shows **Skipped** (because of the `if:`). Do this **before** flipping visibility.
-
-- [ ] **Step 6: Confirm secret-scan clean on published tip**
+- [ ] **Step 5: Confirm secret-scan clean on published tip**
 
 Use the green `secret-scan` job on that same run. Optionally:
 
@@ -679,7 +757,7 @@ Use the green `secret-scan` job on that same run. Optionally:
 
 Expected: exit 0
 
-- [ ] **Step 7: Make GitHub repository public**
+- [ ] **Step 6: Make GitHub repository public**
 
 ```bash
 gh repo edit coreyhines/ztpbootstrap --visibility public --accept-visibility-change-consequences
@@ -688,19 +766,24 @@ gh api repos/coreyhines/ztpbootstrap --jq '{private:.private,visibility:.visibil
 
 Expected: public, `has_issues: false`
 
-- [ ] **Step 8: Final checklist**
+- [ ] **Step 7: Final checklist**
 
-| Criterion | Check |
-|-----------|--------|
-| No local `github` remote | `git remote -v` |
-| No `.github/` workflows/Dependabot | `test ! -e .github` |
-| Actions disabled | `gh api …/actions/permissions` |
-| Issues disabled | `has_issues: false` |
-| Publish skipped on PR/feature | Step 5 |
-| FF publish on green main | Steps 3–4 |
-| Public after clean scan | Steps 6–7 |
+| Criterion | Check | Kind |
+|-----------|--------|------|
+| No local `github` remote | `git remote -v` | tested |
+| No `.github/` workflows/Dependabot | `test ! -e .github` | tested |
+| Actions disabled | `gh api …/actions/permissions` | tested |
+| Issues disabled | `has_issues: false` | tested |
+| Publish skipped on PR/feature | Step 2 (MR run) | tested |
+| FF publish on green main | Steps 3–4 | tested |
+| Public after clean scan | Steps 5–6 | tested |
+| Failing CI does not publish | `needs:` list in Task 3 Step 3 | **inspected only** |
 
-- [ ] **Step 9: Optional go-live note**
+The last row is deliberate: exercising it for real means landing a knowingly
+broken commit on `main`. The `needs:` gate is verified by reading the workflow,
+not by observation — don't record it as tested.
+
+- [ ] **Step 8: Optional go-live note**
 
 Add to `docs/FORGEJO_GITHUB_MIRROR.md`:
 
@@ -730,10 +813,16 @@ git commit -am "docs: record GitHub public mirror go-live date"
 | Docs + grep sweep | Task 4 |
 | Public only after clean secret-scan | Task 8 |
 | Ancestor pre-check | Task 8 Step 1 |
-| Criterion 3 verified (skipped off-main) | Task 8 Step 5 |
+| Criterion 3 verified (skipped off-main) | Task 8 Step 2, on the MR run |
 | FF only; break-glass out of CI | Task 2 script + Task 4 doc |
-| Bearer auth / no token in URL | Task 2 |
+| Basic auth, token in neither URL nor `ps` | Task 2; probed in Task 5 Step 3 |
 
 ## Placeholder scan
 
-No TBD left; secret rename applied throughout; single simplified script; `gh -F enabled=false` only; tag/main modes distinct.
+No TBD left; secret rename applied throughout; single simplified script;
+`gh -F enabled=false` only; tag/main modes distinct.
+
+One intentional placeholder remains: the PAT expiry date in
+`docs/FORGEJO_GITHUB_MIRROR.md` Operator notes reads `YYYY-MM-DD` and must be
+filled with the real date during Task 5 Step 4. Same for the go-live date in
+Task 8 Step 8, if that note is added.
