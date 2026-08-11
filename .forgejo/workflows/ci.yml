@@ -51,7 +51,11 @@ jobs:
 
       - name: Mask scanner credentials
         run: |
+          # Trim CR/LF/space so ::add-mask:: is valid; secret-scan.sh also
+          # sanitizes before ggshield builds Authorization: Token <key>.
           if [ -n "${GITGUARDIAN_API_KEY:-}" ]; then
+            GITGUARDIAN_API_KEY="$(printf '%s' "${GITGUARDIAN_API_KEY}" | tr -d '\r\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+            export GITGUARDIAN_API_KEY
             printf '::add-mask::%s\n' "${GITGUARDIAN_API_KEY}"
           fi
 
