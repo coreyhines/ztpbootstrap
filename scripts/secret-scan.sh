@@ -6,6 +6,9 @@
 # hosts, so a script keeps CI identical under Forgejo Actions, GitHub
 # Actions, and local git hooks.
 #
+# CI gates on gitleaks only. Local pre-commit may still run ggshield when
+# GITGUARDIAN_API_KEY is set to a valid key.
+#
 # Not to be confused with scripts/security-scan.sh, which runs dependency
 # and DAST scans (pip-audit, bandit, ZAP) and writes a report.
 set -euo pipefail
@@ -34,14 +37,7 @@ run_gitleaks_history() {
   gitleaks git . --redact=100 --no-banner --log-level warn
 }
 
-run_ggshield_pre_commit() {
-  printf 'Running GitGuardian pre-commit scan...\n'
-  ggshield secret scan pre-commit --no-check-for-updates --fail-on-server-error
-}
-
 sanitize_gitguardian_api_key() {
-  # Forgejo secrets often include CR/LF or a pasted "Token " prefix; httpx then
-  # rejects Authorization: Token <key>. Strip all whitespace and a Token prefix.
   local key="${GITGUARDIAN_API_KEY:-}"
   key="${key//[[:space:]]/}"
   key="${key#\"}"
@@ -51,18 +47,17 @@ sanitize_gitguardian_api_key() {
   if [[ "${key}" == [Tt][Oo][Kk][Ee][Nn]* ]]; then
     key="${key:5}"
   fi
-  if [[ -z "${key}" ]]; then
-    printf 'error: GITGUARDIAN_API_KEY is required for CI secret scanning.\n' >&2
-    return 1
-  fi
   export GITGUARDIAN_API_KEY="${key}"
 }
 
-run_ggshield_ci() {
+run_ggshield_pre_commit() {
   sanitize_gitguardian_api_key
-
-  printf 'Running GitGuardian CI scan...\n'
-  ggshield secret scan ci --no-check-for-updates --fail-on-server-error
+  if [[ -z "${GITGUARDIAN_API_KEY:-}" ]]; then
+    printf 'Skipping GitGuardian (GITGUARDIAN_API_KEY unset).\n'
+    return 0
+  fi
+  printf 'Running GitGuardian pre-commit scan...\n'
+  ggshield secret scan pre-commit --no-check-for-updates --fail-on-server-error
 }
 
 check_tracked_ignored_files() {
@@ -78,10 +73,11 @@ check_tracked_ignored_files() {
 
 run_pre_commit() {
   require_command gitleaks
-  require_command ggshield
   check_tracked_ignored_files
   run_gitleaks_staged
-  run_ggshield_pre_commit
+  if command -v ggshield >/dev/null 2>&1; then
+    run_ggshield_pre_commit
+  fi
 }
 
 run_pre_push() {
@@ -92,10 +88,8 @@ run_pre_push() {
 
 run_ci() {
   require_command gitleaks
-  require_command ggshield
   check_tracked_ignored_files
   run_gitleaks_history
-  run_ggshield_ci
 }
 
 case "$MODE" in
