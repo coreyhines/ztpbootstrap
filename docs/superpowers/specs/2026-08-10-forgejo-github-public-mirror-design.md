@@ -84,7 +84,7 @@ publish-github                          publish-github
 
 ## Publish credentials and failure behavior
 
-- Auth: HTTPS with PAT via git `http.extraHeader` (Authorization: Bearer), not token-in-URL.
+- Auth: HTTPS with PAT via git `http.extraHeader` using Basic `x-access-token:<PAT>` (supplied through `GIT_CONFIG_*`, not `git -c` / not token-in-URL).
 - If publish fails, Forgejo CI is red; GitHub stays on the last successfully published tip.
 - Force-push to GitHub `main` is **not** part of normal operation; publish is fast-forward only for `main`, and create/update for tags.
 - Before the **first** publish, verify GitHub `main` is an ancestor of Forgejo `main` (expected today: yes). If not, stop and resolve manually — do not force-push from the automated job.

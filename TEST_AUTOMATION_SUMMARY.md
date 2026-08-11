@@ -160,7 +160,10 @@ The automated tests include two methods for DHCP client simulation:
 
 The automated test can be integrated into CI/CD pipelines:
 
-### GitHub Actions Example
+### Forgejo / CI Example
+
+(Historical example shape; live CI is under `.forgejo/workflows/` — see
+[docs/FORGEJO_GITHUB_MIRROR.md](docs/FORGEJO_GITHUB_MIRROR.md).)
 
 ```yaml
 - name: Run DHCP Automated Tests
