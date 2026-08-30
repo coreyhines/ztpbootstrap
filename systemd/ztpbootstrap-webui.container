@@ -1,5 +1,10 @@
 [Unit]
 Description=ZTP Bootstrap Web UI Container
+# Cap automatic restarts: five starts in five minutes, then the unit stays
+# failed instead of retrying forever. A fault that survives a restart should
+# be visible as a failed unit, not hidden behind an endless restart loop.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Container]
 Image=registry.fedoraproject.org/fedora:44
@@ -28,6 +33,7 @@ HealthStartPeriod=30s
 
 [Service]
 Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target default.target

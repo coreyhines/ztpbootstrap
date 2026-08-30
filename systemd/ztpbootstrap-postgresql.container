@@ -2,6 +2,11 @@
 Description=ZTP Bootstrap PostgreSQL Database for Kea
 After=network-online.target
 Wants=network-online.target
+# Cap automatic restarts: five starts in five minutes, then the unit stays
+# failed instead of retrying forever. A fault that survives a restart should
+# be visible as a failed unit, not hidden behind an endless restart loop.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Container]
 Image=docker.io/library/postgres:17.10-alpine
@@ -17,6 +22,7 @@ EnvironmentFile=-/opt/containerdata/ztpbootstrap/.env
 
 [Service]
 Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=ztpbootstrap-pod.service

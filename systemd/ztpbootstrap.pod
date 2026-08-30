@@ -1,5 +1,10 @@
 [Unit]
 Description=ZTP Bootstrap Service Pod
+# Cap automatic restarts: five starts in five minutes, then the unit stays
+# failed instead of retrying forever. A fault that survives a restart should
+# be visible as a failed unit, not hidden behind an endless restart loop.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Pod]
 PodName=ztpbootstrap
@@ -10,7 +15,12 @@ Network=ztpbootstrap-net
 # IP6=2001:db8::10
 
 [Service]
+# Quadlet overrides Restart for .pod units: podman 5.8.4 emits
+# Restart=on-failure into the generated service regardless of the value
+# below, so this line is documentation, not policy. The limits above are
+# honoured, and they are what actually bounds a looping pod.
 Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target default.target
