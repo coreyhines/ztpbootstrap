@@ -438,6 +438,18 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     relay_agents = resolve_relay_agents(ipv6_config, subnet, gateway)
     if relay_agents:
         subnet_config["relay"] = {"ip-addresses": relay_agents}
+    else:
+        # DHCPv6 has no giaddr. For directly connected clients Kea picks the
+        # subnet from the interface the Solicit arrived on, so a subnet6 that
+        # names no interface matches nothing and the client gets back
+        # NoAddrsAvail ("could not select subnet"). Relayed traffic is selected
+        # by the relay link-address instead and needs no interface here.
+        subnet_iface = str(ipv6_config.get("interface", "")).strip()
+        if not subnet_iface:
+            # A single detected interface (host mode) is authoritative; under
+            # macvlan the pod always presents its network as eth0.
+            subnet_iface = interfaces[0] if len(interfaces) == 1 else "eth0"
+        subnet_config["interface"] = subnet_iface
 
     # Add gateway/router option (option 3 for IPv6)
     if gateway and gateway.strip():
