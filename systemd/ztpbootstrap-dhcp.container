@@ -17,6 +17,14 @@ Environment=TZ=UTC
 AddCapability=CAP_NET_RAW
 AddCapability=CAP_NET_BIND_SERVICE
 
+# Assert the DHCP daemons answer, not merely that the container runs:
+# kea-ctrl-agent is PID 1, so a dead kea-dhcp4/6 is otherwise invisible.
+HealthCmd=["/bin/sh", "/app/kea-healthcheck.sh"]
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=60s
+
 [Service]
 Restart=no
 
