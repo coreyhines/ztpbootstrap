@@ -1,5 +1,10 @@
 [Unit]
 Description=ZTP Bootstrap Script Server for Arista CVaaS
+# Cap automatic restarts: five starts in five minutes, then the unit stays
+# failed instead of retrying forever. A fault that survives a restart should
+# be visible as a failed unit, not hidden behind an endless restart loop.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Container]
 ContainerName=ztpbootstrap
@@ -24,6 +29,7 @@ HealthStartPeriod=60s
 
 [Service]
 Restart=on-failure
+RestartSec=10
 
 [Install]
 WantedBy=default.target
