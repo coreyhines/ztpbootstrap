@@ -305,6 +305,44 @@ class TestDHCPConfig(unittest.TestCase):
 
     @patch("dhcp_config.detect_networking_mode")
     @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp6_config_names_interface_when_unrelayed(
+        self, mock_interfaces, mock_networking
+    ):
+        """Direct DHCPv6 clients are only matched when subnet6 names an interface.
+
+        Without it Kea has no giaddr to select on and answers NoAddrsAvail
+        ("could not select subnet"), which is how the v6 subnet served nothing.
+        """
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+        config = generate_dhcp6_config(self.minimal_config["dhcp"], "macvlan", self.minimal_config)
+        self.assertNotIn("relay", config["subnet6"][0])
+        self.assertEqual(config["subnet6"][0]["interface"], "eth0")
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp6_config_defaults_interface_under_macvlan(
+        self, mock_interfaces, mock_networking
+    ):
+        """Under macvlan no interface is detected, so the pod's eth0 is assumed"""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = []
+        config = generate_dhcp6_config(self.minimal_config["dhcp"], "macvlan", self.minimal_config)
+        self.assertEqual(config["subnet6"][0]["interface"], "eth0")
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp6_config_interface_is_overridable(self, mock_interfaces, mock_networking):
+        """An explicit ipv6.interface wins over detection"""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+        dhcp = dict(self.minimal_config["dhcp"])
+        dhcp["ipv6"] = dict(dhcp["ipv6"], interface="eth1")
+        config = generate_dhcp6_config(dhcp, "macvlan", self.minimal_config)
+        self.assertEqual(config["subnet6"][0]["interface"], "eth1")
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
     def test_generate_pxe_options(self, mock_interfaces, mock_networking):
         """Test PXE options generation"""
         pxe_config = {

@@ -3,6 +3,11 @@ Description=ZTP Bootstrap DHCP Server (Kea)
 After=ztpbootstrap-pod.service ztpbootstrap-postgresql.service
 Requires=ztpbootstrap-pod.service
 Wants=ztpbootstrap-postgresql.service
+# Cap automatic restarts: five starts in five minutes, then the unit stays
+# failed instead of retrying forever. A config Kea cannot parse should be
+# visible as a failed unit, not hidden behind an endless restart loop.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Container]
 Image=ztpbootstrap-kea:3.0.3
@@ -17,8 +22,20 @@ Environment=TZ=UTC
 AddCapability=CAP_NET_RAW
 AddCapability=CAP_NET_BIND_SERVICE
 
+# Assert the DHCP daemons answer, not merely that the container runs:
+# kea-ctrl-agent is PID 1, so a dead kea-dhcp4/6 is otherwise invisible.
+HealthCmd=["/bin/sh", "/app/kea-healthcheck.sh"]
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=3
+HealthStartPeriod=60s
+
 [Service]
-Restart=no
+# Recover from a crash, but not from a clean exit -- and never restart on a
+# failing healthcheck: an unparseable config would loop. Unhealthy is
+# reported, deliberately, rather than acted on.
+Restart=on-failure
+RestartSec=10
 
 [Install]
 WantedBy=ztpbootstrap-pod.service
