@@ -220,8 +220,24 @@ class TestDHCPConfig(unittest.TestCase):
         """CCS-710P and other modern Arista OUIs must be in ARISTA_ONLY"""
         classes = generate_client_classes({"arista_only_mode": True}, "ipv4")
         test_expr = classes[0]["test"]
-        for oui in ["2CDDE9", "FCBD67", "E0FA5B", "28993A", "EC8A48", "001C73"]:
+        for oui in ["2CDDE9", "FCBD67", "E0FA5B", "28993A", "EC8A48", "001C73", "C0D682"]:
             self.assertIn(f"0x{oui}", test_expr, f"{oui} missing from ARISTA_ONLY")
+
+    def test_generate_client_classes_excludes_non_arista_ouis(self):
+        """ARISTA_ONLY must not admit other vendors.
+
+        00:1E:0D-1F were listed as Arista for years but belong to Micran,
+        Huawei, Cisco, Nortel and others -- the block was assumed contiguous.
+        """
+        expr = generate_client_classes({"arista_only_mode": True}, "ipv4")[0]["test"]
+        for oui, owner in [
+            ("001E10", "Huawei"),
+            ("001E13", "Cisco"),
+            ("001E14", "Cisco"),
+            ("001E1F", "Nortel"),
+            ("001E1E", "Honeywell"),
+        ]:
+            self.assertNotIn(f"0x{oui}", expr, f"{oui} ({owner}) must not be in ARISTA_ONLY")
 
     def test_oui_test_compares_binary_mac_to_hex_literal(self):
         """
