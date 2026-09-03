@@ -607,31 +607,62 @@ def generate_client_classes(oui_config: Dict, version: str) -> List[Dict]:
         # Known Arista OUIs (common prefixes). The 2C:DD:E9 block covers the
         # CCS-710P; omitting it caused Kea to NAK those switches on VLAN5.
         arista_ouis = [
-            "00:1C:73",  # Arista Networks
-            "2C:DD:E9",  # Arista Networks (CCS-710P and other modern platforms)
-            "FC:BD:67",  # Arista Networks
-            "E0:FA:5B",  # Arista Networks
-            "28:99:3A",  # Arista Networks
-            "EC:8A:48",  # Arista Networks
-            "00:1E:0D",  # Arista Networks
-            "00:1E:0E",  # Arista Networks
-            "00:1E:0F",  # Arista Networks
-            "00:1E:10",  # Arista Networks
-            "00:1E:11",  # Arista Networks
-            "00:1E:12",  # Arista Networks
-            "00:1E:13",  # Arista Networks
-            "00:1E:14",  # Arista Networks
-            "00:1E:15",  # Arista Networks
-            "00:1E:16",  # Arista Networks
-            "00:1E:17",  # Arista Networks
-            "00:1E:18",  # Arista Networks
-            "00:1E:19",  # Arista Networks
-            "00:1E:1A",  # Arista Networks
-            "00:1E:1B",  # Arista Networks
-            "00:1E:1C",  # Arista Networks
-            "00:1E:1D",  # Arista Networks
-            "00:1E:1E",  # Arista Networks
-            "00:1E:1F",  # Arista Networks
+            # Every OUI IEEE has registered to Arista Networks. Kept as the full
+            # set deliberately: the list has now been the cause of three VLAN5
+            # outages, each time because a new Arista platform shipped with an OUI
+            # nobody had added yet (2C:DD:E9 for the CCS-710P, then C0:D6:82).
+            "00:1C:73",
+            "18:9C:E1",
+            "1C:8C:6E",
+            "28:99:3A",
+            "28:E7:1D",
+            "2C:DD:E9",  # CCS-710P
+            "30:86:2D",
+            "38:38:A6",
+            "40:01:07",
+            "44:4C:A8",
+            "4C:09:97",
+            "54:0F:2C",
+            "5C:16:C7",
+            "60:29:72",
+            "60:6B:5B",
+            "68:8B:F4",
+            "68:BF:6C",
+            "6C:7A:63",
+            "74:83:EF",
+            "78:5F:6C",
+            "84:50:29",
+            "88:F7:15",
+            "8C:01:9D",
+            "94:8E:D3",
+            "98:5D:82",
+            "9C:69:ED",
+            "A4:3F:68",
+            "A4:7A:72",
+            "A8:8F:99",
+            "AC:3D:94",
+            "B4:3A:96",
+            "B4:92:FE",
+            "B8:58:FF",
+            "B8:A1:B8",
+            "C0:69:11",
+            "C0:D6:82",  # 720XP and later
+            "C4:CA:2B",
+            "C8:08:8B",
+            "CC:1A:A3",
+            "CC:E4:D1",
+            "D4:AF:F7",
+            "D8:06:F3",
+            "E0:1C:A7",
+            "E0:FA:5B",
+            "E4:78:76",
+            "E8:AE:C5",
+            "EC:8A:48",
+            "FC:59:C0",
+            "FC:BD:67",
+            # Mojo Networks, acquired by Arista in 2018 -- Cognitive WiFi access
+            # points ship under the original OUI. Deployed on this site.
+            "E4:D1:24",
         ]
 
         test_expr = build_oui_test(arista_ouis)
