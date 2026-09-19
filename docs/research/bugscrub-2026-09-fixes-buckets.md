@@ -51,6 +51,10 @@ Coordinator: Claude Code (Opus 5)
 - **K1 → cursor-auto** (probe: `cursor-named-opus`). Named Opus on Cursor is `api_metered`, and Cursor usage is unreadable. Auto uses the included pool. Cursor now has two buckets (D1, K1), both on the included pool.
 - **Model tags ⚠:** the distribute probe still reports the old June tags (`qwen3.6:35b-a3b-mxfp8`, `kimi-k2.7-code:cloud`) even though the new `models.choices` are saved. The likely cause is `OLLAMA_FARM_*` env defaults taking precedence. At farm time I will export `OLLAMA_FARM_LOCAL_MODEL=qwen3.8:27b-mlx` and `OLLAMA_FARM_CLOUD_MODEL=kimi-k3:cloud` so the farms use what you chose. This deserves an issue on the parallel-buckets repo.
 
+## Execution status (2026-09-19)
+
+All buckets **merged** into `feature/bugscrub-2026-09-fixes`. Commits: C1 `61ac558`, N1 `7990f7f`, A1 `9c867f6`, W1 `0925f8f`, D1 `01b53e7`, K1 `9a63d13` (+`ad08c05`), M1 `9afd2b2` (+`96abe2c`), D2 `3604e20`, A2 `6774fc6`. Final gate: 257 tests OK; ruff, black and shellcheck clean. C1/N1/A2 ran as native Claude sub-agents (see the session report for why).
+
 ## Merge order
 
 ```text
@@ -141,4 +145,4 @@ Each file has one owner per wave. `webui/app.py` is A1 in wave 1 and A2 in wave 
 
 | Date | Chat posted | File |
 |------|-------------|------|
-| | | `docs/research/bugscrub-2026-09-fixes-session-*.md` |
+| 2026-09-19 | yes | `docs/research/bugscrub-2026-09-fixes-session-2026-09-19.md` |
