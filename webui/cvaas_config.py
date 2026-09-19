@@ -7,10 +7,10 @@ Updates config.yaml cvaas.enroll_chars and syncs enrollChars in bootstrap.py
 """
 
 import re
-import shutil
-import time
 from pathlib import Path
 from typing import Optional, Tuple
+
+from config_manager import create_unique_backup
 
 ENROLL_CHARS_LINE = re.compile(r"^enrollChars = .*$", re.MULTILINE)
 
@@ -38,7 +38,8 @@ def sync_enroll_chars_to_bootstrap(
     """
     Update enrollChars in bootstrap.py to match config.yaml.
 
-    Creates a timestamped backup before writing.
+    Creates a uniquely named, owner-only (0600) backup before writing, since the
+    backup holds the previous enrollment token and sits in the nginx docroot.
     """
     if not bootstrap_path.exists():
         return False, f"Bootstrap script not found: {bootstrap_path}"
@@ -49,7 +50,6 @@ def sync_enroll_chars_to_bootstrap(
     if count == 0:
         return False, "enrollChars assignment not found in bootstrap.py"
 
-    backup_path = bootstrap_path.parent / f"bootstrap_backup_{int(time.time())}.py"
-    shutil.copy2(bootstrap_path, backup_path)
+    create_unique_backup(bootstrap_path, bootstrap_path.parent, "bootstrap_backup_", ".py")
     bootstrap_path.write_text(new_content, encoding="utf-8")
     return True, None

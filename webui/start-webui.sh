@@ -36,5 +36,5 @@ export FLASK_ENV="${FLASK_ENV:-production}"
 # Wait a moment for any initialization
 sleep 2
 
-# Start Flask app
-exec python3 app.py
+# Keep one worker: rate-limit, lockout, and log-processing state is in memory.
+exec gunicorn --bind 127.0.0.1:5000 --workers 1 --threads 8 --timeout 120 app:app

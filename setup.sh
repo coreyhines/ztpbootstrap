@@ -362,45 +362,47 @@ configure_http_only() {
 # HTTP-ONLY MODE (NOT RECOMMENDED FOR PRODUCTION)
 # WARNING: This configuration is insecure and should only be used in isolated lab environments
 
-# Main server block for HTTP
+# Single server for every hostname/IP. server_name is "_" so the real
+# domain and addresses match without templating (#22).
 server {
-    listen 80;
-    listen [::]:80;
-    server_name ztpboot.example.com 10.0.0.10 2001:db8::10;
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
 
-    # Root directory for serving files
+    # The docroot is the whole config directory (config.yaml, dhcp/, logs/,
+    # webui/ ...). Serve only bootstrap scripts; everything else is 404 (#67).
     root /usr/share/nginx/html;
-    index bootstrap.py;
 
     # Logging
     access_log /var/log/nginx/ztpbootstrap_access.log;
     error_log /var/log/nginx/ztpbootstrap_error.log;
-
-    # Main location block
-    location / {
-        try_files $uri $uri/ =404;
-
-        # Set proper MIME type for Python scripts
-        location ~* \.py$ {
-            add_header Content-Type "text/plain; charset=utf-8";
-            add_header Content-Disposition "attachment; filename=bootstrap.py";
-        }
-
-        # Cache control for bootstrap script
-        location = /bootstrap.py {
-            add_header Cache-Control "no-cache, no-store, must-revalidate";
-            add_header Pragma "no-cache";
-            add_header Expires "0";
-            add_header Content-Type "text/plain; charset=utf-8";
-            add_header Content-Disposition "attachment; filename=bootstrap.py";
-        }
-    }
 
     # Health check endpoint
     location /health {
         access_log off;
         return 200 "healthy\n";
         add_header Content-Type text/plain;
+    }
+
+    # Active bootstrap script (what switches fetch during ZTP)
+    location = /bootstrap.py {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+        add_header Expires "0";
+        add_header Content-Type "text/plain; charset=utf-8";
+        add_header Content-Disposition "attachment; filename=bootstrap.py";
+    }
+
+    # Script backups are never published. Must precede the *.py regex below:
+    # nginx uses the first matching regex location.
+    location ~ ^/bootstrap_backup_[^/]*$ {
+        return 404;
+    }
+
+    # Alternate bootstrap scripts at the docroot top level
+    location ~ ^/[A-Za-z0-9_-]+\.py$ {
+        add_header Content-Type "text/plain; charset=utf-8";
+        add_header Content-Disposition "attachment";
     }
 
     # Deny access to hidden files
@@ -410,22 +412,10 @@ server {
         log_not_found off;
     }
 
-    # Deny access to backup files
-    location ~ ~$ {
-        deny all;
-        access_log off;
-        log_not_found off;
+    # Everything else in the config directory stays private
+    location / {
+        return 404;
     }
-}
-
-# Default server block to catch any other requests
-server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name _;
-
-    # Return 444 to close connection for invalid requests
-    return 444;
 }
 NGINX_EOF
 

@@ -287,5 +287,54 @@ class TestDHCPValidation(unittest.TestCase):
         self.assertIn("must be less than", error)
 
 
+@unittest.skipIf(validate_ip_address is None, "DHCP validation not available")
+class TestCustomOptionsValidation(unittest.TestCase):
+    """#53: dhcp.options.custom is validated and legacy dhcp.custom is accepted."""
+
+    def test_options_custom_valid_passes(self):
+        config = {
+            "ipv4": {"subnet": "192.168.1.0/24"},
+            "options": {"custom": [{"code": 150, "name": "ntp-extra", "data": "10.0.0.9"}]},
+        }
+        is_valid, error = validate_dhcp_config(config)
+        self.assertTrue(is_valid, error)
+
+    def test_options_custom_rejects_protected_code(self):
+        # Option 3 (routers) is protected and must be rejected under options.custom.
+        config = {"options": {"custom": [{"code": 3, "name": "routers", "data": "192.168.1.1"}]}}
+        is_valid, error = validate_dhcp_config(config)
+        self.assertFalse(is_valid)
+        self.assertIn("protected", error)
+        self.assertIn("options.custom", error)
+
+    def test_legacy_custom_still_accepted(self):
+        config = {"custom": [{"code": 200, "name": "legacy", "data": "value"}]}
+        is_valid, error = validate_dhcp_config(config)
+        self.assertTrue(is_valid, error)
+
+    def test_legacy_custom_rejects_protected_code(self):
+        config = {"custom": [{"code": 1, "name": "subnet-mask", "data": "255.255.255.0"}]}
+        is_valid, error = validate_dhcp_config(config)
+        self.assertFalse(is_valid)
+        self.assertIn("protected", error)
+
+    def test_both_locations_validated(self):
+        # A protected code in the legacy location is still rejected even when the
+        # canonical options.custom location is empty.
+        config = {
+            "options": {"custom": [{"code": 150, "name": "ok", "data": "x"}]},
+            "custom": [{"code": 6, "name": "domain-name-servers", "data": "8.8.8.8"}],
+        }
+        is_valid, error = validate_dhcp_config(config)
+        self.assertFalse(is_valid)
+        self.assertIn("protected", error)
+
+    def test_options_custom_must_be_list(self):
+        config = {"options": {"custom": "not-a-list"}}
+        is_valid, error = validate_dhcp_config(config)
+        self.assertFalse(is_valid)
+        self.assertIn("must be a list", error)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -9,7 +9,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from kea_client import get_kea_ctrl_agent_url
@@ -532,7 +532,7 @@ def start_dhcp_container() -> bool:
         for i in range(12):  # Check every 5 seconds for up to 60 seconds
             time.sleep(5)
             status = check_dhcp_container_status()
-            if status.get("container_running") and status.get("dhcp4_running"):
+            if status.get("container_running") and _expected_daemons_running(status):
                 logger.info(f"DHCP container verified running after {i * 5} seconds")
                 return True
             logger.debug(f"Waiting for container to start... ({i * 5}s)")
@@ -755,6 +755,40 @@ def _kea_daemons_in_container() -> Dict[str, bool]:
     return result
 
 
+def expected_dhcp_daemons(config_dir: Optional[Path] = None) -> Dict[int, bool]:
+    """Return which Kea daemons are expected to run for this deployment.
+
+    The expectation is derived from the generated Kea config files written to
+    the DHCP config directory: ``kea-dhcp4.conf`` implies a DHCPv4 daemon and
+    ``kea-dhcp6.conf`` implies a DHCPv6 daemon. A v6-only deployment therefore
+    expects only kea-dhcp6 and is healthy when that daemon is up.
+    """
+    base = config_dir or DHCP_CONFIG_DIR
+    return {
+        4: (base / "kea-dhcp4.conf").exists(),
+        6: (base / "kea-dhcp6.conf").exists(),
+    }
+
+
+def _expected_daemons_running(status: Dict[str, Any]) -> bool:
+    """True when every expected Kea daemon is running.
+
+    Expected daemons come from the generated config files, so a v6-only
+    deployment is ready when kea-dhcp6 is up even though kea-dhcp4 is not. When
+    no config files are visible, fall back to requiring kea-dhcp4 (the
+    historical default) so a bare container_running signal is not read as ready.
+    """
+    expected = expected_dhcp_daemons()
+    if not any(expected.values()):
+        return bool(status.get("dhcp4_running", False))
+    running = [
+        bool(status.get(f"dhcp{version}_running", False))
+        for version, want in expected.items()
+        if want
+    ]
+    return bool(running) and all(running)
+
+
 def check_dhcp_container_status() -> Dict[str, Any]:
     """
     Get container status.
@@ -879,14 +913,34 @@ def check_dhcp_container_status() -> Dict[str, Any]:
 
         daemon_status = _kea_daemons_in_container()
         result.update(daemon_status)
-        if result["dhcp4_running"] and not result["container_running"]:
+
+        expected = expected_dhcp_daemons()
+        any_daemon_running = result["dhcp4_running"] or result["dhcp6_running"]
+
+        # Any running expected daemon is a positive signal that the container
+        # itself is up (podman top can fail while Kea answers the ctrl agent).
+        if any_daemon_running and not result["container_running"]:
             result["container_running"] = True
             result["service_active"] = True
-            result["service_status"] = "active"
-        elif result["container_running"] and not result["dhcp4_running"]:
-            result["service_status"] = "degraded"
-        elif result["dhcp4_running"]:
-            result["service_status"] = "active"
+
+        if not any(expected.values()):
+            # No config files visible: keep the historical dhcp4 heuristic so a
+            # bare container_running signal is not read as a healthy deployment.
+            if result["dhcp4_running"]:
+                result["service_status"] = "active"
+            elif result["container_running"]:
+                result["service_status"] = "degraded"
+        else:
+            # Health is derived from the expected daemons, so a v6-only
+            # deployment (only kea-dhcp6.conf present) is healthy when kea-dhcp6
+            # is up even though kea-dhcp4 is not.
+            expected_running = [
+                bool(result[f"dhcp{version}_running"]) for version, want in expected.items() if want
+            ]
+            if expected_running and all(expected_running):
+                result["service_status"] = "active"
+            elif result["container_running"] or any_daemon_running:
+                result["service_status"] = "degraded"
 
     except Exception as e:
         logger.warning(f"Failed to check DHCP container status: {e}")

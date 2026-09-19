@@ -4,13 +4,15 @@ Simple Web UI for ZTP Bootstrap Service
 Lightweight Flask application for configuration and monitoring
 """
 
-import fcntl
+import hmac
 import json
 import logging
 import os
 import re
 import secrets
 import subprocess
+import tempfile
+import threading
 import time
 from datetime import datetime, timedelta
 from functools import wraps
@@ -19,6 +21,7 @@ from pathlib import Path
 import yaml
 from flask import (
     Flask,
+    abort,
     jsonify,
     make_response,
     render_template,
@@ -34,7 +37,7 @@ DEBUG = os.environ.get("DEBUG", "false").lower() == "true"
 
 # Import security and utility modules
 try:
-    from config_manager import ConfigManager
+    from config_manager import ConfigManager, create_unique_backup
     from cvaas_config import sync_enroll_chars_to_bootstrap, validate_enroll_chars
     from dhcp_validation import validate_cidr, validate_dhcp_config
     from rate_limiter import rate_limiter
@@ -43,6 +46,7 @@ except ImportError as e:
     # Create fallback if needed
     rate_limiter = None
     ConfigManager = None
+    create_unique_backup = None
     validate_dhcp_config = None
     validate_cidr = None
     validate_enroll_chars = None
@@ -195,6 +199,7 @@ def safe_path_join(base_dir, filename):
 
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 # Enable template auto-reload in production for development/testing
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
@@ -216,6 +221,75 @@ if not NGINX_ERROR_LOG.exists():
 
 # Initialize ConfigManager for thread-safe config updates (Issue #1)
 config_manager = ConfigManager(CONFIG_FILE) if ConfigManager else None
+
+
+_fallback_config_lock = threading.Lock()
+
+
+def _update_config(mutator, validate=None):
+    """
+    Read, mutate and write config.yaml as one locked operation (#48).
+
+    ``mutator`` gets the current config dict (``{}`` if the file is missing) and
+    may edit it in place or return a new dict. Raising aborts the update without
+    writing anything. It must not call back into ``config_manager``.
+
+    Returns ``(success, error, config)``, where ``config`` is the dict that was
+    written (``None`` on failure).
+    """
+    written = {}
+
+    def _capture(config):
+        result = mutator(config)
+        if result is not None:
+            config = result
+        written["config"] = config
+        return config
+
+    if config_manager is not None:
+        success, error = config_manager.update(_capture, validate=validate)
+        return success, error, (written.get("config") if success else None)
+
+    # Fallback when config_manager.py could not be imported: only a thread lock
+    # (no cross-process flock), but still one read-modify-write with an atomic,
+    # 0600 replace.
+    with _fallback_config_lock:
+        return _update_config_without_manager(_capture, validate)
+
+
+def _update_config_without_manager(mutator, validate):
+    """Fallback for _update_config; the caller holds _fallback_config_lock."""
+    try:
+        config = {}
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE, "r") as f:
+                config = yaml.safe_load(f) or {}
+        config = mutator(config)
+        if validate:
+            is_valid, error_msg = validate(config)
+            if not is_valid:
+                return False, error_msg, None
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(CONFIG_FILE.parent), prefix=f".{CONFIG_FILE.name}.", suffix=".tmp"
+        )
+        tmp_file = Path(tmp_name)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w") as f:
+                yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_file, CONFIG_FILE)
+        except BaseException:
+            try:
+                tmp_file.unlink()
+            except OSError:
+                pass
+            raise
+        return True, None, config
+    except Exception as e:
+        return False, str(e), None
+
 
 # ============================================================================
 # Security Event Logging Configuration
@@ -313,16 +387,22 @@ def load_auth_config():
     if not config["session_secret"]:
         config["session_secret"] = secrets.token_hex(32)
         # Persist the generated session secret to config file
-        try:
-            if config_manager and CONFIG_FILE.exists():
-                # Only update the auth section's session_secret
-                current_config = config_manager.read_config()
-                if "auth" not in current_config:
-                    current_config["auth"] = {}
-                current_config["auth"]["session_secret"] = config["session_secret"]
-                config_manager.write_config(current_config)
-        except Exception as e:
-            print(f"Warning: Failed to persist session secret: {e}")
+        if CONFIG_FILE.exists():
+
+            def _persist_secret(current_config):
+                auth = current_config.get("auth")
+                if not isinstance(auth, dict):
+                    auth = current_config["auth"] = {}
+                # Another worker may have persisted one since we read the file;
+                # adopt it so every worker signs sessions with the same key.
+                if auth.get("session_secret"):
+                    config["session_secret"] = auth["session_secret"]
+                else:
+                    auth["session_secret"] = config["session_secret"]
+
+            success, error, _ = _update_config(_persist_secret)
+            if not success:
+                print(f"Warning: Failed to persist session secret: {error}")
 
     return config
 
@@ -423,6 +503,23 @@ def is_authenticated():
             session.clear()
             return False
     return True
+
+
+@app.before_request
+def gate_api_requests():
+    """Require sessions for APIs except login and public dashboard health polls."""
+    public_paths = {
+        "/api/auth/status",  # Establish the UI's initial session state.
+        "/api/auth/login",  # Allow users to establish a session.
+        "/api/status",  # Initial dashboard health and periodic status polling.
+        "/api/dhcp/status",  # DHCP dashboard polls service health before login.
+    }
+    if request.path.startswith("/api/") and request.path not in public_paths:
+        if not is_authenticated():
+            return jsonify({"error": "Authentication required", "code": "AUTH_REQUIRED"}), 401
+    # Reject known oversized bodies before endpoint exception handlers consume them.
+    if request.content_length and request.content_length > app.config["MAX_CONTENT_LENGTH"]:
+        abort(413)
 
 
 def generate_csrf_token():
@@ -603,7 +700,7 @@ def auth_login():
                     computed_hash = hashlib.pbkdf2_hmac(
                         "sha256", password.encode("utf-8"), b"ztpbootstrap", 100000
                     )
-                    password_valid = stored_hash == computed_hash
+                    password_valid = hmac.compare_digest(stored_hash, computed_hash)
                     if DEBUG:
                         print(
                             f"Password verification (fallback format): valid={password_valid}, hash lengths match={len(stored_hash) == len(computed_hash)}",
@@ -645,19 +742,15 @@ def auth_login():
             ):
                 try:
                     new_hash = generate_password_hash(password)
-                    with open(CONFIG_FILE, "r") as f:
-                        yaml_config = yaml.safe_load(f) or {}
-                    if "auth" not in yaml_config:
-                        yaml_config["auth"] = {}
-                    yaml_config["auth"]["admin_password_hash"] = new_hash
-                    with open(CONFIG_FILE, "w") as f:
-                        yaml.dump(
-                            yaml_config,
-                            f,
-                            default_flow_style=False,
-                            sort_keys=False,
-                            allow_unicode=True,
-                        )
+
+                    def _migrate_hash(yaml_config):
+                        if not isinstance(yaml_config.get("auth"), dict):
+                            yaml_config["auth"] = {}
+                        yaml_config["auth"]["admin_password_hash"] = new_hash
+
+                    success, error, _ = _update_config(_migrate_hash)
+                    if not success:
+                        raise RuntimeError(error)
                     reload_auth_config()
                     log_security_event(
                         "login",
@@ -754,7 +847,7 @@ def auth_change_password():
                 computed_hash = hashlib.pbkdf2_hmac(
                     "sha256", current_password.encode("utf-8"), b"ztpbootstrap", 100000
                 )
-                password_valid = stored_hash == computed_hash
+                password_valid = hmac.compare_digest(stored_hash, computed_hash)
             except Exception:
                 password_valid = False
         else:
@@ -801,67 +894,19 @@ def auth_change_password():
         # Update config.yaml
         if CONFIG_FILE.exists():
             try:
-                # Read current config
-                with open(CONFIG_FILE, "r") as f:
-                    yaml_config = yaml.safe_load(f) or {}
-
-                # Ensure auth section exists
-                if "auth" not in yaml_config:
-                    yaml_config["auth"] = {}
-
                 # Update password hash (ensure it's a string and properly formatted)
                 # Werkzeug hashes contain special characters ($, :) that need proper handling
-                yaml_config["auth"]["admin_password_hash"] = str(new_password_hash).strip()
+                stored_hash = str(new_password_hash).strip()
 
-                # Write back to file using atomic write with file locking (write to temp, then rename)
+                def _set_password_hash(yaml_config):
+                    if not isinstance(yaml_config.get("auth"), dict):
+                        yaml_config["auth"] = {}
+                    yaml_config["auth"]["admin_password_hash"] = stored_hash
 
-                temp_file = CONFIG_FILE.with_suffix(".yaml.tmp")
-                try:
-                    # Use file locking to prevent race conditions
-                    with open(CONFIG_FILE, "r+") as lock_file:
-                        try:
-                            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        except (IOError, OSError):
-                            # File is locked by another process, wait briefly and retry
-                            time.sleep(0.1)
-                            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-
-                        # Write to temp file while holding lock
-                        with open(temp_file, "w") as f:
-                            yaml.dump(
-                                yaml_config,
-                                f,
-                                default_flow_style=False,
-                                sort_keys=False,
-                                allow_unicode=True,
-                            )
-                        # Atomic rename (releases lock automatically)
-                        temp_file.replace(CONFIG_FILE)
-                except (IOError, OSError) as e:
-                    # File locking not available (Windows) or failed - use atomic write without lock
-                    if DEBUG:
-                        print(f"File locking not available, using atomic write: {e}", flush=True)
-                    try:
-                        with open(temp_file, "w") as f:
-                            yaml.dump(
-                                yaml_config,
-                                f,
-                                default_flow_style=False,
-                                sort_keys=False,
-                                allow_unicode=True,
-                            )
-                        # Atomic rename
-                        temp_file.replace(CONFIG_FILE)
-                    except Exception as e2:
-                        # Clean up temp file on error
-                        if temp_file.exists():
-                            temp_file.unlink()
-                        raise e2
-                except Exception as e:
-                    # Clean up temp file on error
-                    if temp_file.exists():
-                        temp_file.unlink()
-                    raise e
+                # One locked, atomic read-modify-write (#48)
+                success, error, _ = _update_config(_set_password_hash)
+                if not success:
+                    raise RuntimeError(error)
 
                 # Reload auth config using the reload function
                 reload_auth_config()
@@ -893,7 +938,7 @@ def auth_change_password():
                                 computed_hash = hashlib.pbkdf2_hmac(
                                     "sha256", new_password.encode("utf-8"), b"ztpbootstrap", 100000
                                 )
-                                test_result = stored_hash == computed_hash
+                                test_result = hmac.compare_digest(stored_hash, computed_hash)
                             except Exception:
                                 test_result = False
 
@@ -963,6 +1008,20 @@ def serve_image(filename):
         return "Image not found", 404
 
 
+def redact_config(value):
+    """Copy configuration without credentials, including nested password fields."""
+    if isinstance(value, dict):
+        return {
+            key: redact_config(item)
+            for key, item in value.items()
+            if "password" not in str(key).lower()
+            and str(key).lower() not in {"session_secret", "enroll_chars"}
+        }
+    if isinstance(value, list):
+        return [redact_config(item) for item in value]
+    return value
+
+
 @app.route("/api/config")
 @require_auth
 def get_config():
@@ -972,13 +1031,13 @@ def get_config():
             raw_content = CONFIG_FILE.read_text()
             # Try to parse YAML using PyYAML
             try:
-                parsed_config = yaml.safe_load(raw_content)
-                return jsonify({"parsed": parsed_config, "raw": raw_content})
+                parsed_config = redact_config(yaml.safe_load(raw_content))
+                return jsonify({"parsed": parsed_config, "raw": yaml.safe_dump(parsed_config)})
             except yaml.YAMLError:
-                # YAML parsing failed, return raw content
+                # Do not expose unparsed text: it may contain credentials.
                 return jsonify(
                     {
-                        "raw": raw_content,
+                        "raw": "",
                         "parsed": None,
                         "error": "YAML parse error: Invalid configuration file format",
                     }
@@ -1040,31 +1099,20 @@ def update_cvaas_enroll_chars():
             )
             return jsonify({"error": error_msg}), 400
 
-        config = _load_full_config()
-        cvaas = dict(config.get("cvaas") or {})
-        cvaas["enroll_chars"] = enroll_chars
-
-        if config_manager:
-            success, update_error = config_manager.update_section("cvaas", cvaas)
-            if not success:
-                log_security_event(
-                    "cvaas_enroll_chars_update",
-                    "failure",
-                    client_ip,
-                    f"config_error={update_error}",
-                )
-                return jsonify({"error": f"Failed to update configuration: {update_error}"}), 500
-        else:
+        def _set_enroll_chars(config):
+            cvaas = dict(config.get("cvaas") or {})
+            cvaas["enroll_chars"] = enroll_chars
             config["cvaas"] = cvaas
-            save_ok, save_error = _save_full_config(config)
-            if not save_ok:
-                log_security_event(
-                    "cvaas_enroll_chars_update",
-                    "failure",
-                    client_ip,
-                    f"config_error={save_error}",
-                )
-                return jsonify({"error": f"Failed to update configuration: {save_error}"}), 500
+
+        success, update_error, _ = _update_config(_set_enroll_chars)
+        if not success:
+            log_security_event(
+                "cvaas_enroll_chars_update",
+                "failure",
+                client_ip,
+                f"config_error={update_error}",
+            )
+            return jsonify({"error": f"Failed to update configuration: {update_error}"}), 500
 
         sync_ok, sync_error = sync_enroll_chars_to_bootstrap(BOOTSTRAP_SCRIPT, enroll_chars)
         if not sync_ok:
@@ -1125,6 +1173,42 @@ def save_scripts_metadata(metadata):
     except Exception as e:
         print(f"Error saving metadata: {e}")
         return False
+
+
+def _move_to_unique_backup(target):
+    """
+    Move ``target`` to a never-before-used ``bootstrap_backup_*.py`` name.
+
+    The name is reserved with create_unique_backup (O_EXCL, so two concurrent
+    backups in the same second cannot clobber each other, #58), then the
+    original file is renamed over it, so the backup keeps the original's
+    inode, mode and mtime and ``target`` no longer exists afterwards.
+    """
+    mode = target.stat().st_mode & 0o777
+    if create_unique_backup is not None:
+        backup = create_unique_backup(target, CONFIG_DIR, "bootstrap_backup_", ".py", mode=mode)
+    else:
+        now_ns = time.time_ns()
+        stamp = f"{now_ns // 1_000_000_000}_{(now_ns // 1000) % 1_000_000:06d}"
+        backup = CONFIG_DIR / f"bootstrap_backup_{stamp}.py"
+    os.replace(target, backup)
+    return backup
+
+
+def _backup_timestamp(filename):
+    """
+    Seconds part of a bootstrap backup name, or None if it has none.
+
+    Handles both ``bootstrap_backup_<sec>.py`` (old) and
+    ``bootstrap_backup_<sec>_<usec>[_<n>].py`` (create_unique_backup).
+    """
+    parts = Path(filename).stem.split("_")
+    if len(parts) < 3:
+        return None
+    try:
+        return int(parts[2])
+    except ValueError:
+        return None
 
 
 def cleanup_old_backups():
@@ -1394,8 +1478,7 @@ def set_active_script(filename):
         elif target.exists():
             # Backup existing bootstrap.py
             # lgtm[py/path-injection]
-            backup = CONFIG_DIR / f"bootstrap_backup_{int(target.stat().st_mtime)}.py"
-            target.rename(backup)
+            _move_to_unique_backup(target)
             # Clean up old backups, keeping only the 5 most recent
             cleanup_old_backups()
 
@@ -1614,20 +1697,16 @@ def list_backup_scripts():
     for file in script_dir.glob("bootstrap_backup_*.py"):
         try:
             stat = file.stat()
-            # Extract timestamp from filename (bootstrap_backup_TIMESTAMP.py)
-            timestamp_str = file.stem.replace("bootstrap_backup_", "")
+            # Timestamp from the filename, falling back to the modification time
+            timestamp = _backup_timestamp(file.name)
             try:
-                timestamp = int(timestamp_str)
-                from datetime import datetime
-
+                if timestamp is None:
+                    raise ValueError("no timestamp in backup name")
                 dt = datetime.fromtimestamp(timestamp)
-                human_date = dt.strftime("%Y-%m-%d %H:%M:%S")
-            except (ValueError, OSError):
-                # Fallback to file modification time
-                from datetime import datetime
-
+            except (ValueError, OSError, OverflowError):
+                timestamp = int(stat.st_mtime)
                 dt = datetime.fromtimestamp(stat.st_mtime)
-                human_date = dt.strftime("%Y-%m-%d %H:%M:%S")
+            human_date = dt.strftime("%Y-%m-%d %H:%M:%S")
 
             backups.append(
                 {
@@ -1636,7 +1715,7 @@ def list_backup_scripts():
                     "size": stat.st_size,
                     "modified": stat.st_mtime,
                     "human_date": human_date,
-                    "timestamp": timestamp if "timestamp" in locals() else int(stat.st_mtime),
+                    "timestamp": timestamp,
                 }
             )
         except OSError:
@@ -1689,11 +1768,10 @@ def restore_backup_script(filename):
         else:
             # Restore as a new script with a cleaned name
             # Extract original name or create a new one
-            from datetime import datetime
-
-            timestamp_str = filename.replace("bootstrap_backup_", "").replace(".py", "")
             try:
-                timestamp = int(timestamp_str)
+                timestamp = _backup_timestamp(filename)
+                if timestamp is None:
+                    timestamp = int(backup_path.stat().st_mtime)
                 dt = datetime.fromtimestamp(timestamp)
                 new_name = f"bootstrap_restored_{dt.strftime('%Y%m%d_%H%M%S')}.py"
             except Exception:
@@ -1913,6 +1991,25 @@ def _tail_nginx_log_lines(log_path: Path, max_bytes: int = 2 * 1024 * 1024) -> l
         return []
 
 
+PROCESSED_LOG_LINES_LIMIT = 2000
+
+
+def _merge_processed_lines(previous, current, limit=PROCESSED_LOG_LINES_LIMIT):
+    """
+    Merge processed nginx log lines, oldest first, keeping the newest ``limit``.
+
+    ``previous`` are lines loaded from processed_log_lines.txt (file order) and
+    ``current`` are the lines seen in this scan (log order). A line seen again
+    moves to the newest position. Returns a list, oldest first (#64).
+    """
+    merged = dict.fromkeys(previous)
+    for line in current:
+        merged.pop(line, None)
+        merged[line] = None
+    lines = list(merged)
+    return lines[-limit:] if limit > 0 else []
+
+
 def parse_nginx_access_log():
     """Parse nginx access log to track device connections"""
     connections = load_device_connections()
@@ -1921,7 +2018,9 @@ def parse_nginx_access_log():
     # Track which log lines we've already processed
     # Only track processed lines for the last 24 hours to allow re-processing if filtering logic changes
     processed_lines_file = CONFIG_DIR / "processed_log_lines.txt"
-    processed_lines = set()
+    # Ordered oldest -> newest (dict keys keep insertion order) so the cap below
+    # can keep the newest lines (#64).
+    processed_lines = {}
     if processed_lines_file.exists():
         try:
             with open(processed_lines_file, "r") as f:
@@ -1938,13 +2037,13 @@ def parse_nginx_access_log():
                             dt = datetime.strptime(timestamp_str.split()[0], "%d/%b/%Y:%H:%M:%S")
                             line_timestamp = dt.timestamp()
                             if line_timestamp > cutoff_time:
-                                processed_lines.add(line)
+                                processed_lines[line] = None
                         except Exception:
                             # If we can't parse timestamp, keep the line (conservative approach)
-                            processed_lines.add(line)
+                            processed_lines[line] = None
                     else:
                         # If it doesn't match log format, it might be a MARK line, keep it
-                        processed_lines.add(line)
+                        processed_lines[line] = None
         except Exception:
             pass
 
@@ -1958,12 +2057,12 @@ def parse_nginx_access_log():
         bootstrap_lines = [ln for ln in recent_lines if "/bootstrap.py" in ln or ' "GET / ' in ln]
         lines_to_scan = list(dict.fromkeys(recent_lines[-5000:] + bootstrap_lines))
 
-        new_processed_lines = set()
+        new_processed_lines = {}
         for line in lines_to_scan:
             line_stripped = line.strip()
             # Skip if we've already processed this line
             if line_stripped in processed_lines:
-                new_processed_lines.add(line_stripped)
+                new_processed_lines[line_stripped] = None
                 continue
 
             # Parse log line
@@ -1973,7 +2072,7 @@ def parse_nginx_access_log():
                 line,
             )
             if not match:
-                new_processed_lines.add(line_stripped)
+                new_processed_lines[line_stripped] = None
                 continue
 
             ip = match.group(1)
@@ -2013,7 +2112,7 @@ def parse_nginx_access_log():
                 )
             ):
                 # Mark as processed but don't count
-                new_processed_lines.add(line_stripped)
+                new_processed_lines[line_stripped] = None
                 continue
 
             # Parse timestamp (format: 08/Nov/2025:12:00:00 +0000)
@@ -2068,17 +2167,20 @@ def parse_nginx_access_log():
                 device["sessions"] = device["sessions"][-50:]
 
             # Mark this line as processed
-            new_processed_lines.add(line_stripped)
+            new_processed_lines[line_stripped] = None
 
-        # Save processed lines (keep only last 2000 to avoid file growing too large)
-        all_processed = processed_lines | new_processed_lines
-        if len(all_processed) > 2000:
-            # Keep only the most recent 2000
-            all_processed = set(list(all_processed)[-2000:])
+        # Save processed lines (keep only the newest 2000 so the file stays small).
+        # Never drop a line that is still inside the scanned tail, or the next
+        # poll would count it again.
+        all_processed = _merge_processed_lines(
+            processed_lines,
+            new_processed_lines,
+            limit=max(PROCESSED_LOG_LINES_LIMIT, len(new_processed_lines)),
+        )
 
         try:
             with open(processed_lines_file, "w") as f:
-                for line in sorted(all_processed):
+                for line in all_processed:
                     f.write(line + "\n")
         except Exception as e:
             print(f"Error saving processed lines: {e}")
@@ -3108,6 +3210,46 @@ def get_device_connections():
 # ============================================================================
 
 
+KEA_CONFIG_FILES = {
+    "Dhcp4": "kea-dhcp4.conf",
+    "Dhcp6": "kea-dhcp6.conf",
+    "Control-agent": "kea-ctrl-agent.conf",
+}
+
+
+def _write_kea_config_files(kea_config):
+    """
+    Write the generated Kea configs into CONFIG_DIR/dhcp.
+
+    A DHCP server config for an address family that is no longer configured is
+    deleted, so a stale kea-dhcp4.conf cannot start a v4 server on a v6-only
+    install (or vice versa) (#54).
+    """
+    dhcp_config_dir = CONFIG_DIR / "dhcp"
+    dhcp_config_dir.mkdir(parents=True, exist_ok=True)
+
+    for key, filename in KEA_CONFIG_FILES.items():
+        path = dhcp_config_dir / filename
+        if key not in kea_config:
+            if key in ("Dhcp4", "Dhcp6"):
+                try:
+                    path.unlink()
+                    logger.info(f"Removed stale {filename}: {key} is no longer configured")
+                except FileNotFoundError:
+                    pass
+            continue
+        try:
+            # Kea expects the config wrapped in its top-level key. Serialize and
+            # parse back first so a bad value never produces a half-written file.
+            json_str = json.dumps({key: kea_config[key]}, indent=2)
+            json.loads(json_str)
+        except (TypeError, ValueError) as e:
+            logger.error(f"Invalid JSON in {key} config: {e}")
+            raise
+        with open(path, "w") as f:
+            f.write(json_str)
+
+
 @app.route("/api/dhcp/config", methods=["GET"])
 @require_auth
 def get_dhcp_config():
@@ -3148,38 +3290,23 @@ def update_dhcp_config():
         # enabled is owned by /api/dhcp/enable|disable — preserve existing flag on config save
         dhcp_payload.pop("enabled", None)
 
-        # Use ConfigManager for thread-safe update (Issue #1)
-        if config_manager:
-            try:
-                existing = config_manager.read_config()
-            except FileNotFoundError:
-                existing = {}
-            preserved_enabled = (existing.get("dhcp") or {}).get("enabled", False)
-            dhcp_payload["enabled"] = preserved_enabled
-
-            success, error_msg = config_manager.update_section("dhcp", dhcp_payload)
-            if not success:
-                log_security_event(
-                    "dhcp_config_update", "failure", client_ip, f"update_error={error_msg}"
-                )
-                return jsonify({"error": f"Failed to update configuration: {error_msg}"}), 500
-
-            # Read back the updated config
-            config = config_manager.read_config()
-        else:
-            # Fallback to old method if ConfigManager not available
-            if CONFIG_FILE.exists():
-                with open(CONFIG_FILE, "r") as f:
-                    config = yaml.safe_load(f)
-            else:
-                config = {}
-
-            preserved_enabled = (config.get("dhcp") or {}).get("enabled", False)
-            dhcp_payload["enabled"] = preserved_enabled
+        def _save_dhcp(config):
+            existing_dhcp = config.get("dhcp") or {}
+            # enabled belongs to /api/dhcp/enable|disable and reservations to
+            # /api/dhcp/reservations; read both under the lock so a concurrent
+            # toggle or reservation change is not overwritten by a stale form.
+            dhcp_payload["enabled"] = existing_dhcp.get("enabled", False)
+            if "reservations" in existing_dhcp:
+                dhcp_payload["reservations"] = existing_dhcp["reservations"]
             config["dhcp"] = dhcp_payload
 
-            with open(CONFIG_FILE, "w") as f:
-                yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        # One locked read-modify-write (Issue #1, #48)
+        success, error_msg, config = _update_config(_save_dhcp)
+        if not success:
+            log_security_event(
+                "dhcp_config_update", "failure", client_ip, f"update_error={error_msg}"
+            )
+            return jsonify({"error": f"Failed to update configuration: {error_msg}"}), 500
 
         # Log successful update
         log_security_event("dhcp_config_update", "success", client_ip, "config_updated")
@@ -3188,37 +3315,7 @@ def update_dhcp_config():
         if config.get("dhcp", {}).get("enabled", False):
             try:
                 kea_config = generate_kea_config(config)
-                # Write Kea config files
-                dhcp_config_dir = CONFIG_DIR / "dhcp"
-                dhcp_config_dir.mkdir(parents=True, exist_ok=True)
-
-                if "Dhcp4" in kea_config:
-                    dhcp4_file = dhcp_config_dir / "kea-dhcp4.conf"
-                    # Validate JSON before writing
-                    try:
-                        config_json = {"Dhcp4": kea_config["Dhcp4"]}
-                        # Test JSON serialization
-                        json_str = json.dumps(config_json, indent=2)
-                        # Validate it can be parsed back
-                        json.loads(json_str)
-                        # Write the validated JSON
-                        with open(dhcp4_file, "w") as f:
-                            f.write(json_str)
-                    except (TypeError, ValueError) as e:
-                        logger.error(f"Invalid JSON in DHCP4 config: {e}")
-                        raise
-
-                if "Dhcp6" in kea_config:
-                    dhcp6_file = dhcp_config_dir / "kea-dhcp6.conf"
-                    with open(dhcp6_file, "w") as f:
-                        # Kea expects the config wrapped in a top-level "Dhcp6" key
-                        json.dump({"Dhcp6": kea_config["Dhcp6"]}, f, indent=2)
-
-                if "Control-agent" in kea_config:
-                    ctrl_agent_file = dhcp_config_dir / "kea-ctrl-agent.conf"
-                    with open(ctrl_agent_file, "w") as f:
-                        # Kea expects the config wrapped in a top-level "Control-agent" key
-                        json.dump({"Control-agent": kea_config["Control-agent"]}, f, indent=2)
+                _write_kea_config_files(kea_config)
 
                 # Reload Kea config if container is running
                 try:
@@ -3409,69 +3506,25 @@ def enable_dhcp():
         # We'll attempt to start Kea anyway - it will fail with a clear error if it can't bind
         port_conflicts = check_dhcp_port_conflicts()
 
-        # Load and update config using ConfigManager (Issue #1)
-        if config_manager:
-            config = config_manager.read_config()
-            if "dhcp" not in config:
+        if not CONFIG_FILE.exists():
+            return jsonify({"error": "Config file not found"}), 404
+
+        def _enable(config):
+            if not isinstance(config.get("dhcp"), dict):
                 config["dhcp"] = {}
             config["dhcp"]["enabled"] = True
 
-            # Update just the dhcp section atomically
-            success, error_msg = config_manager.update_section("dhcp", config["dhcp"])
-            if not success:
-                log_security_event(
-                    "dhcp_enable", "failure", client_ip, f"config_update_error={error_msg}"
-                )
-                return jsonify({"error": f"Failed to update configuration: {error_msg}"}), 500
-        else:
-            # Fallback to old method
-            if not CONFIG_FILE.exists():
-                return jsonify({"error": "Config file not found"}), 404
-
-            with open(CONFIG_FILE, "r") as f:
-                config = yaml.safe_load(f)
-
-            # Enable DHCP in config
-            if "dhcp" not in config:
-                config["dhcp"] = {}
-            config["dhcp"]["enabled"] = True
-
-            # Write config
-            with open(CONFIG_FILE, "w") as f:
-                yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        # One locked read-modify-write (Issue #1, #48)
+        success, error_msg, config = _update_config(_enable)
+        if not success:
+            log_security_event(
+                "dhcp_enable", "failure", client_ip, f"config_update_error={error_msg}"
+            )
+            return jsonify({"error": f"Failed to update configuration: {error_msg}"}), 500
 
         # Generate Kea config
         kea_config = generate_kea_config(config)
-        dhcp_config_dir = CONFIG_DIR / "dhcp"
-        dhcp_config_dir.mkdir(parents=True, exist_ok=True)
-
-        if "Dhcp4" in kea_config:
-            dhcp4_file = dhcp_config_dir / "kea-dhcp4.conf"
-            # Validate JSON before writing
-            try:
-                config_json = {"Dhcp4": kea_config["Dhcp4"]}
-                # Test JSON serialization
-                json_str = json.dumps(config_json, indent=2)
-                # Validate it can be parsed back
-                json.loads(json_str)
-                # Write the validated JSON
-                with open(dhcp4_file, "w") as f:
-                    f.write(json_str)
-            except (TypeError, ValueError) as e:
-                logger.error(f"Invalid JSON in DHCP4 config: {e}")
-                raise
-
-        if "Dhcp6" in kea_config:
-            dhcp6_file = dhcp_config_dir / "kea-dhcp6.conf"
-            with open(dhcp6_file, "w") as f:
-                # Kea expects the config wrapped in a top-level "Dhcp6" key
-                json.dump({"Dhcp6": kea_config["Dhcp6"]}, f, indent=2)
-
-        if "Control-agent" in kea_config:
-            ctrl_agent_file = dhcp_config_dir / "kea-ctrl-agent.conf"
-            with open(ctrl_agent_file, "w") as f:
-                # Kea expects the config wrapped in a top-level "Control-agent" key
-                json.dump({"Control-agent": kea_config["Control-agent"]}, f, indent=2)
+        _write_kea_config_files(kea_config)
 
         # Create container if needed
         container_status = check_dhcp_container_status()
@@ -3587,27 +3640,19 @@ def disable_dhcp():
     try:
         client_ip = request.remote_addr
 
-        # Load and update config using ConfigManager (Issue #1)
-        if config_manager:
-            config = config_manager.read_config()
-            if "dhcp" in config:
-                config["dhcp"]["enabled"] = False
-                success, error_msg = config_manager.update_section("dhcp", config["dhcp"])
-                if not success:
-                    log_security_event(
-                        "dhcp_disable", "failure", client_ip, f"config_update_error={error_msg}"
-                    )
-                    return jsonify({"error": f"Failed to update configuration: {error_msg}"}), 500
-        else:
-            # Fallback to old method
-            if CONFIG_FILE.exists():
-                with open(CONFIG_FILE, "r") as f:
-                    config = yaml.safe_load(f)
-                config["dhcp"]["enabled"] = False
+        if CONFIG_FILE.exists():
 
-                # Write config
-                with open(CONFIG_FILE, "w") as f:
-                    yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+            def _disable(config):
+                if isinstance(config.get("dhcp"), dict):
+                    config["dhcp"]["enabled"] = False
+
+            # One locked read-modify-write (Issue #1, #48)
+            success, error_msg, _ = _update_config(_disable)
+            if not success:
+                log_security_event(
+                    "dhcp_disable", "failure", client_ip, f"config_update_error={error_msg}"
+                )
+                return jsonify({"error": f"Failed to update configuration: {error_msg}"}), 500
 
         # Stop container and verify it stopped
         stop_success = stop_dhcp_container()
@@ -3771,15 +3816,21 @@ def add_dhcp_reservation():
                 config_record["hostname"] = kea_reservation["hostname"]
 
             if CONFIG_FILE.exists():
-                with open(CONFIG_FILE, "r") as f:
-                    config = yaml.safe_load(f) or {}
-                if "dhcp" not in config:
-                    config["dhcp"] = {}
-                if "reservations" not in config["dhcp"]:
-                    config["dhcp"]["reservations"] = []
-                config["dhcp"]["reservations"].append(config_record)
-                with open(CONFIG_FILE, "w") as f:
-                    yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+                def _append_reservation(config):
+                    if not isinstance(config.get("dhcp"), dict):
+                        config["dhcp"] = {}
+                    if not isinstance(config["dhcp"].get("reservations"), list):
+                        config["dhcp"]["reservations"] = []
+                    config["dhcp"]["reservations"].append(config_record)
+
+                # One locked read-modify-write (#48)
+                ok, error, _ = _update_config(_append_reservation)
+                if not ok:
+                    return (
+                        jsonify({"error": f"Reservation added to Kea but not saved: {error}"}),
+                        500,
+                    )
 
             return jsonify({"success": True})
         return jsonify({"error": "Failed to add reservation"}), 500
@@ -3812,16 +3863,24 @@ def remove_dhcp_reservation(mac):
 
             target = _normalize_mac(mac)
             if CONFIG_FILE.exists():
-                with open(CONFIG_FILE, "r") as f:
-                    config = yaml.safe_load(f) or {}
-                if "dhcp" in config and "reservations" in config["dhcp"]:
-                    config["dhcp"]["reservations"] = [
-                        r
-                        for r in config["dhcp"]["reservations"]
-                        if _normalize_mac(str(r.get("hw-address") or r.get("mac") or "")) != target
-                    ]
-                    with open(CONFIG_FILE, "w") as f:
-                        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+                def _drop_reservation(config):
+                    dhcp = config.get("dhcp")
+                    if isinstance(dhcp, dict) and "reservations" in dhcp:
+                        dhcp["reservations"] = [
+                            r
+                            for r in dhcp["reservations"] or []
+                            if _normalize_mac(str(r.get("hw-address") or r.get("mac") or ""))
+                            != target
+                        ]
+
+                # One locked read-modify-write (#48)
+                ok, error, _ = _update_config(_drop_reservation)
+                if not ok:
+                    return (
+                        jsonify({"error": f"Reservation removed from Kea but not saved: {error}"}),
+                        500,
+                    )
 
             return jsonify({"success": True})
         return jsonify({"error": "Failed to remove reservation"}), 500
@@ -3861,18 +3920,9 @@ def _load_full_config() -> dict:
 
 
 def _save_full_config(config: dict):
-    if config_manager:
-        try:
-            config_manager.write_config(config)
-            return True, None
-        except Exception as exc:
-            return False, str(exc)
-    try:
-        with open(CONFIG_FILE, "w") as f:
-            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
-        return True, None
-    except Exception as exc:
-        return False, str(exc)
+    """Replace config.yaml with ``config`` (locked, atomic, 0600, backed up)."""
+    success, error, _ = _update_config(lambda _current: config)
+    return success, error
 
 
 @app.route("/api/network/status", methods=["GET"])
@@ -3946,22 +3996,38 @@ def api_network_ztp_save():
             return jsonify({"error": "Network modules not available"}), 503
         data = request.get_json() or {}
         ztp_data = data.get("ztp") or data
-        config = _load_full_config()
-        config = merge_ztp_update(config, ztp_data)
-        errors, warnings = validate_ztp_profile(config)
-        if errors:
+        result = {"errors": [], "warnings": []}
+
+        def _save_ztp(current):
+            config = merge_ztp_update(current, ztp_data)
+            errors, warnings = validate_ztp_profile(config)
+            result["errors"], result["warnings"] = errors, warnings
+            if errors:
+                raise ValueError("; ".join(errors))
+            network = config.setdefault("network", {})
+            ztp = network.setdefault("ztp", {})
+            if ztp.get("enabled") and ztp.get("status") != "applied":
+                ztp["status"] = "pending"
+            return config
+
+        # Merge, validate and save under one lock (#48)
+        ok, err, config = _update_config(_save_ztp)
+        if result["errors"]:
             return (
-                jsonify({"error": "; ".join(errors), "errors": errors, "warnings": warnings}),
+                jsonify(
+                    {
+                        "error": "; ".join(result["errors"]),
+                        "errors": result["errors"],
+                        "warnings": result["warnings"],
+                    }
+                ),
                 400,
             )
-        network = config.setdefault("network", {})
-        ztp = network.setdefault("ztp", {})
-        if ztp.get("enabled") and ztp.get("status") != "applied":
-            ztp["status"] = "pending"
-        ok, err = _save_full_config(config)
         if not ok:
             return jsonify({"error": err}), 500
-        return jsonify({"success": True, "ztp": get_ztp_profile(config), "warnings": warnings})
+        return jsonify(
+            {"success": True, "ztp": get_ztp_profile(config), "warnings": result["warnings"]}
+        )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -4026,7 +4092,7 @@ def api_network_auto_detect():
 
 
 if __name__ == "__main__":
-    # Run on all interfaces (accessible from nginx container in pod).
+    # Bind to loopback; nginx shares the pod network namespace.
     # threaded=True so a single slow/blocked handler (e.g. a DHCP/Kea or podman
     # call) cannot stall the whole UI, including health checks and status polls.
-    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
+    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)

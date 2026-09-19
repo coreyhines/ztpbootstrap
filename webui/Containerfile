@@ -1,9 +1,15 @@
-# Containerfile for building a Fedora-based image with Python, podman, and systemd
-# This can be built locally: podman build -t ztpbootstrap-webui:local -f webui/Containerfile .
-# Then update systemd/ztpbootstrap-webui.container to use: Image=ztpbootstrap-webui:local
+# Fedora-based WebUI image with Python, podman and systemd, plus the WebUI code.
+# Build with webui/ as the context:
+#   podman build -t ztpbootstrap-webui:<tag> -f webui/Containerfile webui/
+#
+# The code is baked in at /app so a pinned image tag fully describes what
+# runs. Installs that still bind-mount the code over /app keep working: the
+# mount simply shadows the baked copy.
 
 FROM registry.fedoraproject.org/fedora:44
-RUN dnf install -y -q python3 python3-pip podman systemd && dnf clean all
+RUN dnf install -y -q python3 python3-pip podman systemd iproute && dnf clean all
 WORKDIR /app
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
+COPY . /app/
+CMD ["/app/start-webui.sh"]

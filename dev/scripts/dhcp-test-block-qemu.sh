@@ -52,7 +52,7 @@ if command -v iptables >/dev/null 2>&1; then
     log_info "Requesting DHCP lease (should get address from Kea pool 10.0.2.50-10.0.2.55)..."
     if timeout 15 dhclient -v ${INTERFACE} 2>&1 | tee /tmp/dhcp-test.log; then
         # Check what IP we got
-        local client_ip=$(grep -oP "DHCPACK of \K[0-9.]+" /tmp/dhcp-test.log | head -1 || \
+        client_ip=$(grep -oP "DHCPACK of \K[0-9.]+" /tmp/dhcp-test.log | head -1 || \
                          ip addr show ${INTERFACE} | grep "inet " | head -1 | awk '{print $2}' | cut -d'/' -f1)
 
         if [ -n "${client_ip}" ]; then

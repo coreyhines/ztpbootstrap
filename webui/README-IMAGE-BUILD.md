@@ -6,9 +6,16 @@ and has all dependencies baked in — no packages are installed at container sta
 ## Build
 
 ```bash
-# Build from the repo root
-podman build -t ztpbootstrap-webui:local -f webui/Containerfile .
+# Build with webui/ as the context (the Containerfile copies requirements.txt
+# and the WebUI code from there)
+podman build -t ztpbootstrap-webui:local -f webui/Containerfile webui/
 ```
+
+The WebUI code is baked into the image at `/app`, so a pinned tag describes
+exactly what runs. The fedora1 deployment pulls a pinned tag from
+`hub.freeblizz.com` (see the `ztpbootstrap` service in the podman deploy repo);
+an install that bind-mounts the code over `/app` still works, the mount just
+shadows the baked copy.
 
 ## Use the Local Build
 

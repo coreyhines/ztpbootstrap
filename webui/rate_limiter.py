@@ -38,11 +38,8 @@ class RateLimiter:
 
     def _get_client_identifier(self) -> str:
         """Get unique identifier for the client."""
-        # Use X-Forwarded-For if behind proxy, otherwise use remote_addr
-        client_ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-        if "," in client_ip:
-            # X-Forwarded-For can contain multiple IPs, use the first one
-            client_ip = client_ip.split(",")[0].strip()
+        # ProxyFix resolves trusted forwarding headers before requests reach us.
+        client_ip = request.remote_addr
         endpoint = request.endpoint or "unknown"
         return f"{client_ip}:{endpoint}"
 

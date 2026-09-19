@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+Containerfile
+.containerignore
+README.md
+README-IMAGE-BUILD.md
