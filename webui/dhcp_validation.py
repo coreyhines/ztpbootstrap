@@ -482,16 +482,24 @@ def validate_dhcp_config(dhcp_config: Dict) -> Tuple[bool, Optional[str]]:
             if not is_valid:
                 return False, f"IPv6 domain: {error}"
 
-    # Validate custom options if present
+    # Validate custom DHCP options. The canonical location is dhcp.options.custom
+    # (consumed by dhcp_config.generate_custom_options); the legacy dhcp.custom
+    # location is still accepted for backward compatibility. A protected option
+    # code in either location is rejected.
+    custom_locations: List[Tuple[str, object]] = []
+    options_config = dhcp_config.get("options")
+    if isinstance(options_config, dict) and "custom" in options_config:
+        custom_locations.append(("options.custom", options_config["custom"]))
     if "custom" in dhcp_config:
-        custom_options = dhcp_config["custom"]
-        if not isinstance(custom_options, list):
-            return False, "Custom options must be a list"
+        custom_locations.append(("custom", dhcp_config["custom"]))
 
+    for label, custom_options in custom_locations:
+        if not isinstance(custom_options, list):
+            return False, f"Custom options must be a list ({label})"
         for i, option in enumerate(custom_options):
             is_valid, error = validate_dhcp_option(option)
             if not is_valid:
-                return False, f"Custom option #{i+1}: {error}"
+                return False, f"Custom option #{i + 1} ({label}): {error}"
 
     # Validate lease time if present
     if "lease_time" in dhcp_config:

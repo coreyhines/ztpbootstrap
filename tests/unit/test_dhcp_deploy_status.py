@@ -3,7 +3,9 @@
 
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../webui"))
@@ -63,6 +65,96 @@ class TestContainerStatusTruthfulness(unittest.TestCase):
                 status.get("container_running"),
                 "container_running must not be True without positive runtime signals",
             )
+
+
+class TestExpectedDaemons(unittest.TestCase):
+    """#54: expected daemons are derived from the generated config files."""
+
+    def test_expected_from_config_files(self):
+        from dhcp_deploy import expected_dhcp_daemons
+
+        with tempfile.TemporaryDirectory() as d:
+            # v6-only deployment
+            Path(d).mkdir(exist_ok=True)
+            (Path(d) / "kea-dhcp6.conf").write_text("{}")
+            self.assertEqual(expected_dhcp_daemons(Path(d)), {4: False, 6: True})
+
+            # both families
+            (Path(d) / "kea-dhcp4.conf").write_text("{}")
+            self.assertEqual(expected_dhcp_daemons(Path(d)), {4: True, 6: True})
+
+        with tempfile.TemporaryDirectory() as empty:
+            self.assertEqual(expected_dhcp_daemons(Path(empty)), {4: False, 6: False})
+
+    def test_expected_daemons_running_v6_only(self):
+        import dhcp_deploy
+        from dhcp_deploy import _expected_daemons_running
+
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "kea-dhcp6.conf").write_text("{}")
+            with patch.object(dhcp_deploy, "DHCP_CONFIG_DIR", Path(d)):
+                # v6-only: ready when only kea-dhcp6 is up
+                self.assertTrue(
+                    _expected_daemons_running({"dhcp4_running": False, "dhcp6_running": True})
+                )
+                # missing the expected daemon is not ready
+                self.assertFalse(
+                    _expected_daemons_running({"dhcp4_running": True, "dhcp6_running": False})
+                )
+
+    def test_expected_daemons_running_falls_back_to_dhcp4(self):
+        import dhcp_deploy
+        from dhcp_deploy import _expected_daemons_running
+
+        # No config files visible: historical behaviour requires kea-dhcp4.
+        with tempfile.TemporaryDirectory() as empty:
+            with patch.object(dhcp_deploy, "DHCP_CONFIG_DIR", Path(empty)):
+                self.assertTrue(
+                    _expected_daemons_running({"dhcp4_running": True, "dhcp6_running": False})
+                )
+                self.assertFalse(
+                    _expected_daemons_running({"dhcp4_running": False, "dhcp6_running": True})
+                )
+
+
+class TestV6OnlyReadiness(unittest.TestCase):
+    """#54: a v6-only deployment is reported healthy when kea-dhcp6 is up."""
+
+    def _status(self, config_dir, daemons):
+        import dhcp_deploy
+
+        # systemctl and podman ps find nothing and the ctrl-agent port probe is
+        # skipped, so health comes only from the per-daemon check.
+        with (
+            patch("dhcp_deploy.subprocess.run", return_value=MagicMock(returncode=1, stdout="")),
+            patch("dhcp_deploy.get_podman_cmd", return_value=["podman"]),
+            patch("dhcp_deploy._kea_ctrl_agent_host_port", side_effect=OSError("skip")),
+            patch("dhcp_deploy._kea_daemons_in_container", return_value=daemons),
+            patch.object(dhcp_deploy, "DHCP_CONFIG_DIR", Path(config_dir)),
+        ):
+            return dhcp_deploy.check_dhcp_container_status()
+
+    def test_v6_only_is_healthy(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "kea-dhcp6.conf").write_text("{}")
+            status = self._status(d, {"dhcp4_running": False, "dhcp6_running": True})
+        self.assertTrue(status["container_running"])
+        self.assertEqual(status["service_status"], "active")
+
+    def test_v6_only_degraded_when_expected_daemon_down(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "kea-dhcp6.conf").write_text("{}")
+            status = self._status(d, {"dhcp4_running": True, "dhcp6_running": False})
+        self.assertEqual(status["service_status"], "degraded")
+
+    def test_dual_stack_needs_both_daemons(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "kea-dhcp4.conf").write_text("{}")
+            (Path(d) / "kea-dhcp6.conf").write_text("{}")
+            both = self._status(d, {"dhcp4_running": True, "dhcp6_running": True})
+            v4_only = self._status(d, {"dhcp4_running": True, "dhcp6_running": False})
+        self.assertEqual(both["service_status"], "active")
+        self.assertEqual(v4_only["service_status"], "degraded")
 
 
 if __name__ == "__main__":
