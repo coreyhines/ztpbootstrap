@@ -385,47 +385,31 @@ update_nginx_conf() {
 
     log "Updating nginx.conf..."
 
-    local domain
-    local ipv4
-    local ipv6
     local https_port
     local http_only
 
-    domain=$(get_yaml_value '.network.domain')
-    ipv4=$(get_yaml_value '.network.ipv4')
-    ipv6=$(get_yaml_value '.network.ipv6')
     https_port=$(get_yaml_value '.network.https_port')
     http_only=$(get_yaml_value '.network.http_only')
 
-    # Build server_name line
-    local server_name="$domain"
-    if [[ -n "$ipv4" ]] && [[ "$ipv4" != "null" ]]; then
-        server_name="$server_name $ipv4"
-    fi
-    if [[ -n "$ipv6" ]] && [[ "$ipv6" != "null" ]]; then
-        server_name="$server_name $ipv6"
-    fi
+    # nginx.conf uses "server_name _;" in every server block, so the domain and
+    # addresses match without rewriting server_name here (#61, #22).
 
-    # Update server_name in the first two server blocks only (HTTPS and HTTP redirect)
-    # Do NOT update the default server block (which should have server_name _;)
-    # Use awk to replace only the first two occurrences, skipping the default server block
-    awk -v new_server_name="$server_name" '
-        /server_name/ && count < 2 && !/server_name _;/ {
-            sub(/server_name .*;/, "server_name " new_server_name ";")
-            count++
-        }
-        { print }
-    ' "$nginx_file" > "${nginx_file}.tmp2" && mv "${nginx_file}.tmp2" "$nginx_file"
-
-    # Update ports if needed
     if [[ "$http_only" == "true" ]]; then
-        # HTTP-only mode - remove SSL and update ports
-        sed -i.tmp "s|listen 443 ssl http2;|listen 80;|g" "$nginx_file"
-        sed -i.tmp "s|listen \[::\]:443 ssl http2;|listen [::]:80;|g" "$nginx_file"
-    else
-        # HTTPS mode - ensure correct ports
+        # HTTP-only needs a different server layout (no TLS listener, no
+        # redirect), not a port rewrite: turning the 443 listener into port 80
+        # collides with the port-80 redirect server. setup.sh owns that layout.
+        if ! grep -q "HTTP-ONLY MODE" "$nginx_file"; then
+            warn "network.http_only is true but nginx.conf is the HTTPS layout."
+            warn "Run: ./setup.sh --http-only   (rewrites nginx.conf for HTTP-only)"
+        fi
+    elif [[ -n "$https_port" ]] && [[ "$https_port" != "null" ]]; then
         sed -i.tmp "s|listen 443 ssl http2;|listen $https_port ssl http2;|g" "$nginx_file"
         sed -i.tmp "s|listen \[::\]:443 ssl http2;|listen [::]:$https_port ssl http2;|g" "$nginx_file"
+        # $host carries no port, so a non-default HTTPS port must be spelled
+        # out in the HTTP->HTTPS redirect.
+        if [[ "$https_port" != "443" ]]; then
+            sed -i.tmp "s|return 301 https://\$host\$request_uri;|return 301 https://\$host:$https_port\$request_uri;|" "$nginx_file"
+        fi
     fi
 
     rm -f "${nginx_file}.tmp"
