@@ -103,6 +103,19 @@ class TestNetworkDeploy(unittest.TestCase):
         self.assertIn("ztpbootstrap-dhcp.service", str(ctx.exception))
         self.assertIn("unit not found", str(ctx.exception))
 
+    @patch("network_deploy._run_systemctl")
+    def test_stop_skips_units_that_are_not_loaded(self, mock_systemctl):
+        # systemctl exits 5 for a unit that is not installed (e.g. no DHCP
+        # quadlet); that must not abort a network apply.
+        mock_systemctl.side_effect = [
+            subprocess.CompletedProcess([], 5, "", "Unit ztpbootstrap-dhcp.service not loaded."),
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, "", ""),
+            subprocess.CompletedProcess([], 0, "", ""),
+        ]
+        stop_ztp_stack()
+        self.assertEqual(mock_systemctl.call_count, 4)
+
     @patch("network_deploy.stop_ztp_stack")
     @patch("network_deploy._run_systemctl")
     def test_restart_reports_service_start_failure(self, mock_systemctl, _mock_stop):
@@ -196,12 +209,17 @@ class TestNetworkDeploy(unittest.TestCase):
                 "network_deploy.sync_pod_quadlet",
                 side_effect=RuntimeError("quadlet write failed"),
             ):
-                success, error, _updated = apply_ztp_network(
+                success, error, updated = apply_ztp_network(
                     desired, restart=True, current_config=current
                 )
 
         self.assertFalse(success)
         self.assertEqual(error, "quadlet write failed")
+        # app.py persists the returned config, so it must be the restored one
+        # (old gateway) marked as errored, not the failed candidate.
+        self.assertEqual(updated["network"]["ztp"]["ipv4"]["gateway"], "10.0.5.1")
+        self.assertEqual(updated["network"]["ztp"]["status"], "error")
+        self.assertEqual(updated["network"]["ztp"]["last_error"], "quadlet write failed")
         mock_restore.assert_called_once_with(backup)
         mock_inspect.assert_called()
         restored_profile = mock_ensure.call_args[0][0]

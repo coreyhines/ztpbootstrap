@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 LOCK_FILE = Path("/opt/containerdata/ztpbootstrap/.network-apply.lock")
 BACKUP_DIR = Path("/opt/containerdata/ztpbootstrap/.ztpbootstrap-backups/network")
 CONFIG_PATH = Path("/opt/containerdata/ztpbootstrap/config.yaml")
+SYSTEMCTL_UNIT_NOT_LOADED = 5
 
 SERVICES_STOP_ORDER = [
     "ztpbootstrap-dhcp.service",
@@ -141,8 +142,12 @@ def _ensure_network_from_backup(backup_path: Path, restored_config: Dict[str, An
 
 def _rollback_network_apply(
     backup_path: Path, fallback_config: Dict[str, Any], stopped: bool
-) -> None:
-    """Restore quadlet + config, recreate network, regen Kea, restart if stopped."""
+) -> Dict[str, Any]:
+    """Restore quadlet + config, recreate network, regen Kea, restart if stopped.
+
+    Returns the restored config so the caller persists it rather than the
+    failed candidate config it was trying to apply.
+    """
     restore_network_backup(backup_path)
     restored_config = _load_config_from_backup(backup_path) or fallback_config
     try:
@@ -151,10 +156,10 @@ def _rollback_network_apply(
         logger.warning(f"Podman network restore during rollback failed: {exc}")
     _regenerate_kea_configs(restored_config)
     if stopped:
-        try:
-            restart_ztp_stack(restored_config)
-        except Exception as exc:
-            logger.warning(f"Stack restart during rollback failed: {exc}")
+        ok, err = restart_ztp_stack(restored_config)
+        if not ok:
+            logger.warning(f"Stack restart during rollback failed: {err}")
+    return restored_config
 
 
 def ensure_podman_network(profile: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
@@ -318,6 +323,11 @@ def stop_ztp_stack() -> None:
             result = _run_systemctl(["stop", service], timeout=90)
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"Timeout stopping {service}") from exc
+        # systemctl exits 5 when the unit is not loaded (e.g. no DHCP quadlet
+        # installed); a unit that does not exist is already stopped.
+        if result.returncode == SYSTEMCTL_UNIT_NOT_LOADED:
+            logger.info(f"{service} not loaded; nothing to stop")
+            continue
         if result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip() or "stop failed"
             raise RuntimeError(f"Failed to stop {service}: {detail}")
@@ -463,7 +473,10 @@ def apply_ztp_network(
     except Exception as exc:
         logger.error(f"Network apply failed: {exc}")
         if backup_path is not None:
-            _rollback_network_apply(backup_path, current, stopped)
+            # app.py saves whatever config we return, so hand back the
+            # restored one; returning the failed candidate would overwrite
+            # the config.yaml the rollback just put back.
+            config = _rollback_network_apply(backup_path, current, stopped)
         network = config.setdefault("network", {})
         ztp = network.setdefault("ztp", {})
         ztp["status"] = "error"
