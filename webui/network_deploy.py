@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 LOCK_FILE = Path("/opt/containerdata/ztpbootstrap/.network-apply.lock")
 BACKUP_DIR = Path("/opt/containerdata/ztpbootstrap/.ztpbootstrap-backups/network")
+CONFIG_PATH = Path("/opt/containerdata/ztpbootstrap/config.yaml")
 
 SERVICES_STOP_ORDER = [
     "ztpbootstrap-dhcp.service",
@@ -88,18 +89,72 @@ def create_network_backup(tag: Optional[str] = None) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     if POD_FILE.exists():
         shutil.copy2(POD_FILE, dest / "ztpbootstrap.pod")
-    config_path = Path("/opt/containerdata/ztpbootstrap/config.yaml")
-    if config_path.exists():
-        shutil.copy2(config_path, dest / "config.yaml")
+    if CONFIG_PATH.exists():
+        shutil.copy2(CONFIG_PATH, dest / "config.yaml")
     return dest
 
 
 def restore_network_backup(backup_path: Path) -> bool:
+    """Restore pod quadlet and config.yaml from a network-apply backup."""
+    restored = False
     pod_backup = backup_path / "ztpbootstrap.pod"
     if pod_backup.exists() and POD_FILE.parent.exists():
         shutil.copy2(pod_backup, POD_FILE)
-        return True
-    return False
+        restored = True
+    config_backup = backup_path / "config.yaml"
+    if config_backup.exists() and CONFIG_PATH.parent.exists():
+        shutil.copy2(config_backup, CONFIG_PATH)
+        restored = True
+    return restored
+
+
+def _load_config_from_backup(backup_path: Path) -> Optional[Dict[str, Any]]:
+    config_backup = backup_path / "config.yaml"
+    if not config_backup.exists():
+        return None
+    try:
+        import yaml
+
+        data = yaml.safe_load(config_backup.read_text())
+        return data if isinstance(data, dict) else None
+    except Exception as exc:
+        logger.warning(f"Failed to load restored config.yaml: {exc}")
+        return None
+
+
+def _ensure_network_from_backup(backup_path: Path, restored_config: Dict[str, Any]) -> None:
+    """Recreate a podman network referenced by the backup pod file if it is missing."""
+    pod_backup = backup_path / "ztpbootstrap.pod"
+    if not pod_backup.exists():
+        return
+    network_name = parse_pod_quadlet(pod_backup).get("network")
+    if not network_name or network_name == "host":
+        return
+    if inspect_podman_network(network_name):
+        return
+    profile = dict(get_ztp_profile(restored_config))
+    profile["podman_network"] = network_name
+    ok, err = ensure_podman_network(profile)
+    if not ok:
+        raise RuntimeError(err or f"Failed to restore podman network {network_name}")
+
+
+def _rollback_network_apply(
+    backup_path: Path, fallback_config: Dict[str, Any], stopped: bool
+) -> None:
+    """Restore quadlet + config, recreate network, regen Kea, restart if stopped."""
+    restore_network_backup(backup_path)
+    restored_config = _load_config_from_backup(backup_path) or fallback_config
+    try:
+        _ensure_network_from_backup(backup_path, restored_config)
+    except Exception as exc:
+        logger.warning(f"Podman network restore during rollback failed: {exc}")
+    _regenerate_kea_configs(restored_config)
+    if stopped:
+        try:
+            restart_ztp_stack(restored_config)
+        except Exception as exc:
+            logger.warning(f"Stack restart during rollback failed: {exc}")
 
 
 def ensure_podman_network(profile: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
@@ -260,20 +315,29 @@ def sync_pod_quadlet(profile: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
 def stop_ztp_stack() -> None:
     for service in SERVICES_STOP_ORDER:
         try:
-            _run_systemctl(["stop", service], timeout=90)
-        except subprocess.TimeoutExpired:
-            logger.warning(f"Timeout stopping {service}")
+            result = _run_systemctl(["stop", service], timeout=90)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"Timeout stopping {service}") from exc
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "stop failed"
+            raise RuntimeError(f"Failed to stop {service}: {detail}")
 
 
 def start_ztp_stack(dhcp_enabled: bool = False) -> None:
-    _run_systemctl(["daemon-reload"], timeout=30)
+    result = _run_systemctl(["daemon-reload"], timeout=30)
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or "daemon-reload failed"
+        raise RuntimeError(f"Failed daemon-reload: {detail}")
     for service in SERVICES_START_ORDER:
         if service.startswith("ztpbootstrap-dhcp") and not dhcp_enabled:
             continue
         try:
-            _run_systemctl(["start", service], timeout=120)
-        except subprocess.TimeoutExpired:
-            logger.warning(f"Timeout starting {service}")
+            result = _run_systemctl(["start", service], timeout=120)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(f"Timeout starting {service}") from exc
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip() or "start failed"
+            raise RuntimeError(f"Failed to start {service}: {detail}")
 
 
 def restart_ztp_stack(config: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
@@ -357,8 +421,9 @@ def apply_ztp_network(
         with network_apply_lock():
             backup_path = create_network_backup()
             if plan.get("restart_required") and restart:
-                stop_ztp_stack()
+                # Mark stopped before stop so partial failures still trigger rollback restart.
                 stopped = True
+                stop_ztp_stack()
 
             for old_network in plan.get("remove_networks") or []:
                 ok, err = remove_stale_network(old_network, ztp_only=True)
@@ -397,12 +462,8 @@ def apply_ztp_network(
             return True, None, config
     except Exception as exc:
         logger.error(f"Network apply failed: {exc}")
-        if stopped and backup_path is not None:
-            restore_network_backup(backup_path)
-            try:
-                restart_ztp_stack(config)
-            except Exception:
-                pass
+        if backup_path is not None:
+            _rollback_network_apply(backup_path, current, stopped)
         network = config.setdefault("network", {})
         ztp = network.setdefault("ztp", {})
         ztp["status"] = "error"
