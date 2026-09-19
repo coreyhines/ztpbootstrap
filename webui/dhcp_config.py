@@ -304,17 +304,15 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
                 {"name": "ntp-servers", "data": ", ".join(cleaned_ntp)}
             )
 
-    # Handle relay mode
+    # Relay mode: keep the primary subnet (and its option-data) and append every
+    # configured relay subnet. Selection uses Kea's native relay.ip-addresses,
+    # not undefined RELAY_* client classes.
+    subnet4_list = [subnet_config]
     relay_config = dhcp_config.get("relay", {})
     if relay_config.get("enabled", False):
-        relay_subnets = generate_relay_subnets(relay_config, "ipv4")
-        if relay_subnets:
-            subnet_config = relay_subnets[0]  # Use first relay subnet as primary
-            # Add other relay subnets as shared networks if needed
-            if len(relay_subnets) > 1:
-                # For multiple relay subnets, we'd configure shared networks
-                # For now, use the first one
-                pass
+        subnet4_list.extend(
+            generate_relay_subnets(relay_config, "ipv4", start_id=DEFAULT_DHCP4_SUBNET_ID + 1)
+        )
 
     _apply_subnet_reservations(subnet_config, dhcp_config, ip_version=4)
 
@@ -325,7 +323,7 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     config = {
         "interfaces-config": interfaces_config,
         "lease-database": generate_lease_database(backend_config),
-        "subnet4": [subnet_config],
+        "subnet4": subnet4_list,
         "valid-lifetime": 86400,  # 24 hours default
         "renew-timer": 43200,  # 12 hours
         "rebind-timer": 75600,  # 21 hours
@@ -354,11 +352,19 @@ def generate_dhcp4_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
         client_classes = generate_client_classes(oui_config, "ipv4")
         if client_classes:
             config["client-classes"] = client_classes
-        # Add classifier to subnet, but only if the class was actually defined
+        # Require a positive-match class on every subnet when one is defined.
+        # Blocked OUIs use Kea's DROP class (see generate_client_classes) and
+        # do not need a subnet client-class.
+        required_class = None
         if oui_config.get("arista_only_mode") and any(
             cls["name"] == "ARISTA_ONLY" for cls in client_classes
         ):
-            subnet_config["client-class"] = "ARISTA_ONLY"
+            required_class = "ARISTA_ONLY"
+        elif any(cls["name"] == "ALLOWED_OUI" for cls in client_classes):
+            required_class = "ALLOWED_OUI"
+        if required_class:
+            for subnet in subnet4_list:
+                subnet["client-class"] = required_class
 
     # Add PXE configuration
     pxe_config = dhcp_config.get("pxe", {})
@@ -430,7 +436,7 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     # Build subnet configuration
     # Kea requires each subnet to have a unique id
     subnet_config = {
-        "id": 1,  # Use 1 as default, can be made configurable if needed
+        "id": DEFAULT_DHCP6_SUBNET_ID,
         "subnet": subnet,
         "pools": [{"pool": f"{range_start} - {range_end}"}],
     }
@@ -451,11 +457,9 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
             subnet_iface = interfaces[0] if len(interfaces) == 1 else "eth0"
         subnet_config["interface"] = subnet_iface
 
-    # Add gateway/router option (option 3 for IPv6)
-    if gateway and gateway.strip():
-        if "option-data" not in subnet_config:
-            subnet_config["option-data"] = []
-        subnet_config["option-data"].append({"name": "sntp-servers", "data": str(gateway).strip()})
+    # DHCPv6 has no routers option analogous to DHCPv4 option 3; the default
+    # gateway is learned via Router Advertisement, not DHCP. Do not emit the
+    # gateway as sntp-servers (option 31) — that was a mis-mapping.
 
     # Add DNS servers (option 23 - must be array of IP addresses)
     dns_servers = ipv6_config.get("dns_servers", [])
@@ -481,12 +485,14 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
             subnet_config["option-data"] = []
         subnet_config["option-data"].append({"name": "domain-search", "data": domain})
 
-    # Handle relay mode
+    # Relay mode: keep the primary subnet (and its option-data) and append every
+    # configured relay subnet. Selection uses Kea's native relay.ip-addresses.
+    subnet6_list = [subnet_config]
     relay_config = dhcp_config.get("relay", {})
     if relay_config.get("enabled", False):
-        relay_subnets = generate_relay_subnets(relay_config, "ipv6")
-        if relay_subnets:
-            subnet_config = relay_subnets[0]
+        subnet6_list.extend(
+            generate_relay_subnets(relay_config, "ipv6", start_id=DEFAULT_DHCP6_SUBNET_ID + 1)
+        )
 
     _apply_subnet_reservations(subnet_config, dhcp_config, ip_version=6)
 
@@ -502,7 +508,7 @@ def generate_dhcp6_config(dhcp_config: Dict, networking_mode: str, config_yaml: 
     config = {
         "interfaces-config": interfaces_config,
         "lease-database": lease_db,
-        "subnet6": [subnet_config],
+        "subnet6": subnet6_list,
         "valid-lifetime": 86400,  # 24 hours default
         "renew-timer": 43200,  # 12 hours
         "rebind-timer": 75600,  # 21 hours
@@ -675,7 +681,7 @@ def generate_client_classes(oui_config: Dict, version: str) -> List[Dict]:
                 }
             )
 
-    # Allowed OUIs
+    # Allowed OUIs — subnet requires this class (see generate_dhcp4_config).
     test_expr = build_oui_test(oui_config.get("allowed_ouis", []))
     if test_expr:
         classes.append(
@@ -686,13 +692,26 @@ def generate_client_classes(oui_config: Dict, version: str) -> List[Dict]:
             }
         )
 
-    # Blocked OUIs
+    # Blocked OUIs — use Kea's special DROP class rather than a subnet
+    # ``client-class`` of ``not member('BLOCKED_OUI')``. Reasons:
+    # 1. DROP is evaluated early and rejects the packet globally, so a blocked
+    #    MAC cannot fall through to another subnet.
+    # 2. A subnet can require only one client-class name; DROP composes cleanly
+    #    with ARISTA_ONLY / ALLOWED_OUI without building a compound class.
+    # 3. The OUI match still uses the #45 hex form via BLOCKED_OUI's test.
     test_expr = build_oui_test(oui_config.get("blocked_ouis", []))
     if test_expr:
         classes.append(
             {
                 "name": "BLOCKED_OUI",
                 "test": test_expr,
+                "option-data": [],
+            }
+        )
+        classes.append(
+            {
+                "name": "DROP",
+                "test": "member('BLOCKED_OUI')",
                 "option-data": [],
             }
         )
@@ -782,13 +801,18 @@ def generate_pxe_options(pxe_config: Dict, version: str) -> List[Dict]:
     return options
 
 
-def generate_relay_subnets(relay_config: Dict, version: str) -> List[Dict]:
+def generate_relay_subnets(relay_config: Dict, _version: str, start_id: int = 2) -> List[Dict]:
     """
     Generate subnet configurations for each relay agent.
 
+    Each subnet is selected via Kea's native ``relay.ip-addresses`` (giaddr /
+    link-address match). Do not invent RELAY_* client classes — those were
+    never registered in the generated config.
+
     Args:
         relay_config: Relay configuration
-        version: "ipv4" or "ipv6"
+        _version: "ipv4" or "ipv6" (reserved for future per-family options)
+        start_id: First subnet id to assign (must not collide with the primary)
 
     Returns:
         List of subnet configurations (one per relay agent)
@@ -798,7 +822,7 @@ def generate_relay_subnets(relay_config: Dict, version: str) -> List[Dict]:
 
     for relay_subnet in relay_subnets:
         subnet = relay_subnet.get("subnet", "")
-        relay_agent = relay_subnet.get("relay_agent", "")
+        relay_agent = str(relay_subnet.get("relay_agent", "")).strip()
         range_start = relay_subnet.get("range_start", "")
         range_end = relay_subnet.get("range_end", "")
 
@@ -806,43 +830,17 @@ def generate_relay_subnets(relay_config: Dict, version: str) -> List[Dict]:
             continue
 
         subnet_config = {
-            "id": len(subnets) + 1,  # Unique ID for each relay subnet
+            "id": start_id + len(subnets),
             "subnet": subnet,
             "pools": [{"pool": f"{range_start} - {range_end}"}],
         }
 
-        # Configure giaddr matching for relay
         if relay_agent:
-            # Kea uses client-classes to match giaddr
-            subnet_config["client-class"] = f"RELAY_{relay_agent.replace('.', '_')}"
+            subnet_config["relay"] = {"ip-addresses": [relay_agent]}
 
         subnets.append(subnet_config)
 
     return subnets
-
-
-def configure_giaddr_matching(relay_config: Dict) -> Dict:
-    """
-    Configure giaddr-based routing for relay agents.
-
-    Args:
-        relay_config: Relay configuration
-
-    Returns:
-        Client class configuration for giaddr matching
-    """
-    classes = []
-    relay_subnets = relay_config.get("subnets", [])
-
-    for relay_subnet in relay_subnets:
-        relay_agent = relay_subnet.get("relay_agent", "")
-        if relay_agent:
-            class_name = f"RELAY_{relay_agent.replace('.', '_')}"
-            # Match giaddr (relay agent IP)
-            test_expr = f"pkt4.giaddr == '{relay_agent}'"
-            classes.append({"name": class_name, "test": test_expr, "option-data": []})
-
-    return {"client-classes": classes}
 
 
 def generate_lease_database(backend_config: Dict) -> Dict:
@@ -903,12 +901,16 @@ def generate_ctrl_agent_config() -> Dict:
 # ============================================================================
 
 
-def dhcp_subnet_id_for_service(config: Dict, service: str) -> int:
-    """Return configured Kea subnet id (matches generate_dhcp4/6_config id field)."""
-    dhcp = config.get("dhcp") or {}
+def dhcp_subnet_id_for_service(_config: Dict, service: str) -> int:
+    """Return Kea subnet id matching generate_dhcp4/6_config primary ``id``.
+
+    Config keys ``ipv4_subnet_id`` / ``ipv6_subnet_id`` are ignored: the
+    generator always emits the DEFAULT_* constants, so reservation API calls
+    must use the same fixed ids.
+    """
     if service == "dhcp6":
-        return int(dhcp.get("ipv6_subnet_id") or DEFAULT_DHCP6_SUBNET_ID)
-    return int(dhcp.get("ipv4_subnet_id") or DEFAULT_DHCP4_SUBNET_ID)
+        return DEFAULT_DHCP6_SUBNET_ID
+    return DEFAULT_DHCP4_SUBNET_ID
 
 
 def find_reservation_in_config(config: Dict, mac: str) -> Optional[Dict]:

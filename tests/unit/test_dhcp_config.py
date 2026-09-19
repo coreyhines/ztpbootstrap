@@ -13,8 +13,10 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "webui"))
 
 from dhcp_config import (
+    DEFAULT_DHCP4_SUBNET_ID,
+    DEFAULT_DHCP6_SUBNET_ID,
     build_oui_test,
-    configure_giaddr_matching,
+    dhcp_subnet_id_for_service,
     generate_client_classes,
     generate_ctrl_agent_config,
     generate_custom_options,
@@ -376,7 +378,7 @@ class TestDHCPConfig(unittest.TestCase):
     @patch("dhcp_config.detect_networking_mode")
     @patch("dhcp_config.get_interfaces_for_kea")
     def test_generate_relay_subnets(self, mock_interfaces, mock_networking):
-        """Test relay subnet generation"""
+        """Relay subnets use native relay.ip-addresses, not RELAY_* classes"""
         relay_config = {
             "enabled": True,
             "subnets": [
@@ -391,6 +393,48 @@ class TestDHCPConfig(unittest.TestCase):
         subnets = generate_relay_subnets(relay_config, "ipv4")
         self.assertEqual(len(subnets), 1)
         self.assertEqual(subnets[0]["subnet"], "10.0.1.0/24")
+        self.assertEqual(subnets[0]["relay"]["ip-addresses"], ["10.0.1.1"])
+        self.assertNotIn("client-class", subnets[0])
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp4_relay_keeps_primary_options_and_all_subnets(
+        self, mock_interfaces, mock_networking
+    ):
+        """Relay mode must not discard primary option-data or extra relay subnets"""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+
+        config = self.minimal_config.copy()
+        config["dhcp"]["relay"] = {
+            "enabled": True,
+            "subnets": [
+                {
+                    "subnet": "10.0.1.0/24",
+                    "relay_agent": "10.0.1.1",
+                    "range_start": "10.0.1.100",
+                    "range_end": "10.0.1.200",
+                },
+                {
+                    "subnet": "10.0.2.0/24",
+                    "relay_agent": "10.0.2.1",
+                    "range_start": "10.0.2.100",
+                    "range_end": "10.0.2.200",
+                },
+            ],
+        }
+        result = generate_dhcp4_config(config["dhcp"], "macvlan", config)
+        self.assertEqual(len(result["subnet4"]), 3)
+        primary = result["subnet4"][0]
+        self.assertEqual(primary["subnet"], "10.0.0.0/24")
+        self.assertEqual(primary["id"], DEFAULT_DHCP4_SUBNET_ID)
+        routers = [o for o in primary.get("option-data", []) if o["name"] == "routers"]
+        self.assertEqual(len(routers), 1)
+        self.assertEqual(routers[0]["data"], "10.0.0.1")
+        self.assertEqual(result["subnet4"][1]["relay"]["ip-addresses"], ["10.0.1.1"])
+        self.assertEqual(result["subnet4"][2]["relay"]["ip-addresses"], ["10.0.2.1"])
+        self.assertEqual(result["subnet4"][1]["id"], DEFAULT_DHCP4_SUBNET_ID + 1)
+        self.assertEqual(result["subnet4"][2]["id"], DEFAULT_DHCP4_SUBNET_ID + 2)
 
     @patch("dhcp_config.detect_networking_mode")
     @patch("dhcp_config.get_interfaces_for_kea")
@@ -407,8 +451,22 @@ class TestDHCPConfig(unittest.TestCase):
         self.assertEqual(len(result["subnet6"]), 1)
         subnet = result["subnet6"][0]
         self.assertEqual(subnet["subnet"], "2001:db8::/64")
+        self.assertEqual(subnet["id"], DEFAULT_DHCP6_SUBNET_ID)
         self.assertEqual(len(subnet["pools"]), 1)
         self.assertEqual(subnet["pools"][0]["pool"], "2001:db8::50 - 2001:db8::ff00")
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp6_config_does_not_emit_gateway_as_sntp(
+        self, mock_interfaces, mock_networking
+    ):
+        """DHCPv6 must not map the gateway into sntp-servers (option 31)"""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+
+        result = generate_dhcp6_config(self.minimal_config["dhcp"], "macvlan", self.minimal_config)
+        option_names = [o["name"] for o in result["subnet6"][0].get("option-data", [])]
+        self.assertNotIn("sntp-servers", option_names)
 
     @patch("dhcp_config.detect_networking_mode")
     @patch("dhcp_config.get_interfaces_for_kea")
@@ -465,6 +523,55 @@ class TestDHCPConfig(unittest.TestCase):
         self.assertIn("client-classes", result)
         self.assertEqual(len(result["client-classes"]), 1)
         self.assertEqual(result["client-classes"][0]["name"], "ARISTA_ONLY")
+        self.assertEqual(result["subnet4"][0]["client-class"], "ARISTA_ONLY")
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp4_config_requires_allowed_oui_class(
+        self, mock_interfaces, mock_networking
+    ):
+        """allowed_ouis guards the subnet with ALLOWED_OUI (hex OUI expression)"""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+
+        config = self.minimal_config.copy()
+        config["dhcp"]["oui_filtering"] = {
+            "arista_only_mode": False,
+            "allowed_ouis": ["2C:DD:E9"],
+            "blocked_ouis": [],
+        }
+        result = generate_dhcp4_config(config["dhcp"], "macvlan", config)
+        self.assertEqual(result["subnet4"][0]["client-class"], "ALLOWED_OUI")
+        allowed = next(c for c in result["client-classes"] if c["name"] == "ALLOWED_OUI")
+        self.assertIn("0x2CDDE9", allowed["test"])
+        self.assertNotIn("'", allowed["test"])
+
+    @patch("dhcp_config.detect_networking_mode")
+    @patch("dhcp_config.get_interfaces_for_kea")
+    def test_generate_dhcp4_config_blocked_oui_uses_drop(self, mock_interfaces, mock_networking):
+        """blocked_ouis emit BLOCKED_OUI plus Kea DROP; subnet stays ungated by name"""
+        mock_networking.return_value = "macvlan"
+        mock_interfaces.return_value = ["eth0"]
+
+        config = self.minimal_config.copy()
+        config["dhcp"]["oui_filtering"] = {
+            "arista_only_mode": False,
+            "allowed_ouis": [],
+            "blocked_ouis": ["00:11:22"],
+        }
+        result = generate_dhcp4_config(config["dhcp"], "macvlan", config)
+        names = [c["name"] for c in result["client-classes"]]
+        self.assertEqual(names, ["BLOCKED_OUI", "DROP"])
+        blocked = result["client-classes"][0]
+        self.assertEqual(blocked["test"], "substring(pkt4.mac,0,3) == 0x001122")
+        self.assertEqual(result["client-classes"][1]["test"], "member('BLOCKED_OUI')")
+        self.assertNotIn("client-class", result["subnet4"][0])
+
+    def test_dhcp_subnet_id_for_service_uses_constants(self):
+        """Subnet ids match generator constants regardless of config overrides"""
+        config = {"dhcp": {"ipv4_subnet_id": 99, "ipv6_subnet_id": 88}}
+        self.assertEqual(dhcp_subnet_id_for_service(config, "dhcp4"), DEFAULT_DHCP4_SUBNET_ID)
+        self.assertEqual(dhcp_subnet_id_for_service(config, "dhcp6"), DEFAULT_DHCP6_SUBNET_ID)
 
     @patch("dhcp_config.detect_networking_mode")
     @patch("dhcp_config.get_interfaces_for_kea")
@@ -546,18 +653,6 @@ class TestDHCPConfig(unittest.TestCase):
         self.assertEqual(options[0]["name"], "option-66")
         self.assertEqual(options[0]["code"], 66)
 
-    def test_configure_giaddr_matching(self):
-        """Test giaddr matching configuration"""
-        relay_config = {
-            "subnets": [
-                {"relay_agent": "10.0.1.1"},
-                {"relay_agent": "10.0.2.1"},
-            ]
-        }
-        result = configure_giaddr_matching(relay_config)
-        self.assertIn("client-classes", result)
-        self.assertEqual(len(result["client-classes"]), 2)
-
     def test_generate_lease_database_memfile(self):
         """Test memfile lease database generation"""
         backend_config = {"type": "memfile"}
@@ -594,15 +689,20 @@ class TestDHCPConfig(unittest.TestCase):
     @patch("dhcp_config.detect_networking_mode")
     @patch("dhcp_config.get_interfaces_for_kea")
     def test_generate_client_classes_blocked_ouis(self, mock_interfaces, mock_networking):
-        """Test blocked OUIs filtering"""
+        """Blocked OUIs define BLOCKED_OUI and a DROP class that members it"""
         oui_config = {
             "arista_only_mode": False,
             "allowed_ouis": [],
             "blocked_ouis": ["00:11:22", "00:33:44"],
         }
         classes = generate_client_classes(oui_config, "ipv4")
-        self.assertEqual(len(classes), 1)
+        self.assertEqual(len(classes), 2)
         self.assertEqual(classes[0]["name"], "BLOCKED_OUI")
+        self.assertIn("0x001122", classes[0]["test"])
+        self.assertIn("0x003344", classes[0]["test"])
+        self.assertNotIn("'", classes[0]["test"])
+        self.assertEqual(classes[1]["name"], "DROP")
+        self.assertEqual(classes[1]["test"], "member('BLOCKED_OUI')")
 
     @patch("dhcp_config.detect_networking_mode")
     @patch("dhcp_config.get_interfaces_for_kea")
