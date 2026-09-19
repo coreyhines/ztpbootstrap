@@ -1,33 +1,33 @@
 product: ztpbootstrap
-version: "1.0.0"
-
+version: 1.0.0
 spec:
   dir: docs/research
-  spec_suffix: "-spec.md"
-  buckets_suffix: "-buckets.md"
-
+  spec_suffix: -spec.md
+  buckets_suffix: -buckets.md
 integration:
-  branch_pattern: "feature/{feature}"
-
+  branch_pattern: feature/{feature}
 wiring:
   globs:
-    - webui/app.py
-
+  - webui/app.py
 resource_portfolio_local: .cursor/parallel-buckets/resource-portfolio.local.md
-
 models:
   catalog: .cursor/parallel-buckets/model-catalog.json
-  configured_at: "2026-06-22"
+  configured_at: '2026-09-19'
   choices:
-    ollama_local:
-      standard: qwen3.6:35b-a3b-mxfp8
-      fast: gemma4:12b-mlx
-    ollama_cloud:
-      standard: kimi-k2.7-code:cloud
+    cursor:
+      default: auto
+      sonnet: sonnet
+      opus: opus
     claude:
       sonnet: sonnet
       opus: opus
-    cursor:
-      default: auto
-
+    codex:
+      default: gpt-6-astra
+    ollama_local:
+      standard: qwen3.8:27b-mlx
+      fast: qwen3.8:27b-mlx
+    ollama_workstation:
+      standard: qwen3:32b
+    ollama_cloud:
+      standard: kimi-k3:cloud
 skill_symlink: .cursor/skills/parallel-buckets
