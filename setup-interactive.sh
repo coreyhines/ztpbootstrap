@@ -739,14 +739,15 @@ _get_podman_network_subnet_family() {
         return 1
     fi
 
-    printf '%s' "$inspect_json" | python3 - "$family" <<'PY'
+    ZTPB_INPUT="$inspect_json" python3 - "$family" <<'PY'
 import ipaddress
 import json
 import sys
+import os
 
 family = int(sys.argv[1])
 try:
-    payload = json.load(sys.stdin)
+    payload = json.loads(os.environ["ZTPB_INPUT"])
 except Exception:
     raise SystemExit(1)
 net = payload[0] if isinstance(payload, list) and payload else payload
@@ -778,14 +779,15 @@ _get_podman_network_gateway_family() {
         return 1
     fi
 
-    printf '%s' "$inspect_json" | python3 - "$family" <<'PY'
+    ZTPB_INPUT="$inspect_json" python3 - "$family" <<'PY'
 import ipaddress
 import json
 import sys
+import os
 
 family = int(sys.argv[1])
 try:
-    payload = json.load(sys.stdin)
+    payload = json.loads(os.environ["ZTPB_INPUT"])
 except Exception:
     raise SystemExit(1)
 net = payload[0] if isinstance(payload, list) and payload else payload
@@ -3296,9 +3298,10 @@ interactive_config() {
         # Hash the password using Python (use stdin to avoid shell escaping issues)
         log "Hashing password..."
         # Try werkzeug first (suppress stderr to avoid traceback)
-        ADMIN_PASSWORD_HASH=$(echo "$RESET_PASSWORD" | python3 2>/dev/null <<'PYTHON_SCRIPT'
+        ADMIN_PASSWORD_HASH=$(ZTPB_INPUT="$RESET_PASSWORD" python3 2>/dev/null <<'PYTHON_SCRIPT'
 import sys
-password = sys.stdin.read().rstrip('\n')
+import os
+password = os.environ["ZTPB_INPUT"].rstrip('\n')
 # Verify we got the password correctly
 if len(password) == 0:
     sys.stderr.write("ERROR: Empty password received!\n")
@@ -3318,11 +3321,12 @@ PYTHON_SCRIPT
 
         if [[ -z "$ADMIN_PASSWORD_HASH" ]]; then
             # Fallback: use Python's built-in hashlib (should always be available)
-            ADMIN_PASSWORD_HASH=$(echo "$RESET_PASSWORD" | python3 <<'PYTHON_SCRIPT' 2>/dev/null
+            ADMIN_PASSWORD_HASH=$(ZTPB_INPUT="$RESET_PASSWORD" python3 <<'PYTHON_SCRIPT' 2>/dev/null
 import sys
+import os
 import hashlib
 import base64
-password = sys.stdin.read().rstrip('\n')
+password = os.environ["ZTPB_INPUT"].rstrip('\n')
 hash_value = 'pbkdf2:sha256:' + base64.b64encode(hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)).decode()
 print(hash_value)
 PYTHON_SCRIPT
@@ -3337,11 +3341,12 @@ PYTHON_SCRIPT
 
             # Verify the hash works with the password we just hashed
             log "Verifying hash matches password..."
-            VERIFICATION_RESULT=$(echo "$RESET_PASSWORD" | python3 2>/dev/null <<PYTHON_VERIFY
+            VERIFICATION_RESULT=$(ZTPB_INPUT="$RESET_PASSWORD" python3 2>/dev/null <<PYTHON_VERIFY
 import sys
+import os
 import hashlib
 import base64
-password = sys.stdin.read().rstrip('\n')
+password = os.environ["ZTPB_INPUT"].rstrip('\n')
 hash_value = "$ADMIN_PASSWORD_HASH"
 
 if hash_value.startswith('pbkdf2:sha256:') and '\$' not in hash_value:
@@ -3399,16 +3404,17 @@ PYTHON_VERIFY
                 ADMIN_PASSWORD=$(python3 -c "import secrets, string; print(''.join(secrets.choice(string.ascii_letters + string.digits + string.punctuation) for _ in range(15)))" 2>/dev/null || openssl rand -base64 12 | tr -d "=+/" | cut -c1-15)
                 warn "⚠️  No admin password provided. Generated secure random password: $ADMIN_PASSWORD"
                 warn "⚠️  IMPORTANT: Save this password! It will be needed to access the Web UI."
-                ADMIN_PASSWORD_HASH=$(echo "$ADMIN_PASSWORD" | python3 2>/dev/null <<'PYTHON_SCRIPT'
+                ADMIN_PASSWORD_HASH=$(ZTPB_INPUT="$ADMIN_PASSWORD" python3 2>/dev/null <<'PYTHON_SCRIPT'
 import sys
+import os
 import hashlib
 import base64
 try:
     from werkzeug.security import generate_password_hash
-    password = sys.stdin.read().rstrip('\n')
+    password = os.environ["ZTPB_INPUT"].rstrip('\n')
     print(generate_password_hash(password))
 except ImportError:
-    password = sys.stdin.read().rstrip('\n')
+    password = os.environ["ZTPB_INPUT"].rstrip('\n')
     hash_bytes = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), b'ztpbootstrap', 100000)
     print('pbkdf2:sha256:' + base64.b64encode(hash_bytes).decode())
 PYTHON_SCRIPT
