@@ -51,10 +51,17 @@ class TestDhcpConfigPutPreservesEnabled(unittest.TestCase):
     def test_put_ignores_client_enabled_and_preserves_existing(
         self, mock_config_manager, _mock_kea
     ):
-        mock_config_manager.read_config.return_value = {
-            "dhcp": {"enabled": False, "ipv4": {"subnet": "10.0.5.0/24"}}
-        }
-        mock_config_manager.update_section.return_value = (True, None)
+        stored = {"dhcp": {"enabled": False, "ipv4": {"subnet": "10.0.5.0/24"}}}
+
+        def fake_update(mutator, validate=None, timeout=5):
+            result = mutator(stored)
+            if result is not None and result is not stored:
+                stored.clear()
+                stored.update(result)
+            return True, None
+
+        # The PUT is one locked read-modify-write via ConfigManager.update (#48)
+        mock_config_manager.update.side_effect = fake_update
 
         payload = {
             "dhcp": {
@@ -69,7 +76,7 @@ class TestDhcpConfigPutPreservesEnabled(unittest.TestCase):
             headers={"X-CSRF-Token": "test-csrf-token"},
         )
         self.assertEqual(response.status_code, 200)
-        saved = mock_config_manager.update_section.call_args[0][1]
+        saved = stored["dhcp"]
         self.assertFalse(saved["enabled"])
         self.assertEqual(saved["ipv4"]["gateway"], "10.0.5.1")
 
