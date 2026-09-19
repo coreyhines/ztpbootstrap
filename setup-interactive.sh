@@ -5671,6 +5671,9 @@ main() {
                 if [[ "${UPGRADE_MODE:-false}" == "true" ]]; then
                     error "Upgrade mode requires a successful backup. Backup failed."
                     error "Please resolve backup issues and try again."
+                    # error() only prints; stop here before the upgrade wipes
+                    # the install directories with no backup to restore (#23).
+                    exit 1
                 fi
                 warn "Backup failed, but continuing with setup..."
                 if [[ "$NON_INTERACTIVE" == "true" ]]; then
