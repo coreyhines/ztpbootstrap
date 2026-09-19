@@ -5,6 +5,7 @@ Lightweight Flask application for configuration and monitoring
 """
 
 import fcntl
+import hmac
 import json
 import logging
 import os
@@ -19,6 +20,7 @@ from pathlib import Path
 import yaml
 from flask import (
     Flask,
+    abort,
     jsonify,
     make_response,
     render_template,
@@ -195,6 +197,7 @@ def safe_path_join(base_dir, filename):
 
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 # Enable template auto-reload in production for development/testing
 app.config["TEMPLATES_AUTO_RELOAD"] = True
 
@@ -425,6 +428,23 @@ def is_authenticated():
     return True
 
 
+@app.before_request
+def gate_api_requests():
+    """Require sessions for APIs except login and public dashboard health polls."""
+    public_paths = {
+        "/api/auth/status",  # Establish the UI's initial session state.
+        "/api/auth/login",  # Allow users to establish a session.
+        "/api/status",  # Initial dashboard health and periodic status polling.
+        "/api/dhcp/status",  # DHCP dashboard polls service health before login.
+    }
+    if request.path.startswith("/api/") and request.path not in public_paths:
+        if not is_authenticated():
+            return jsonify({"error": "Authentication required", "code": "AUTH_REQUIRED"}), 401
+    # Reject known oversized bodies before endpoint exception handlers consume them.
+    if request.content_length and request.content_length > app.config["MAX_CONTENT_LENGTH"]:
+        abort(413)
+
+
 def generate_csrf_token():
     """Generate a CSRF token for the current session"""
     if "csrf_token" not in session:
@@ -603,7 +623,7 @@ def auth_login():
                     computed_hash = hashlib.pbkdf2_hmac(
                         "sha256", password.encode("utf-8"), b"ztpbootstrap", 100000
                     )
-                    password_valid = stored_hash == computed_hash
+                    password_valid = hmac.compare_digest(stored_hash, computed_hash)
                     if DEBUG:
                         print(
                             f"Password verification (fallback format): valid={password_valid}, hash lengths match={len(stored_hash) == len(computed_hash)}",
@@ -754,7 +774,7 @@ def auth_change_password():
                 computed_hash = hashlib.pbkdf2_hmac(
                     "sha256", current_password.encode("utf-8"), b"ztpbootstrap", 100000
                 )
-                password_valid = stored_hash == computed_hash
+                password_valid = hmac.compare_digest(stored_hash, computed_hash)
             except Exception:
                 password_valid = False
         else:
@@ -893,7 +913,7 @@ def auth_change_password():
                                 computed_hash = hashlib.pbkdf2_hmac(
                                     "sha256", new_password.encode("utf-8"), b"ztpbootstrap", 100000
                                 )
-                                test_result = stored_hash == computed_hash
+                                test_result = hmac.compare_digest(stored_hash, computed_hash)
                             except Exception:
                                 test_result = False
 
@@ -963,6 +983,20 @@ def serve_image(filename):
         return "Image not found", 404
 
 
+def redact_config(value):
+    """Copy configuration without credentials, including nested password fields."""
+    if isinstance(value, dict):
+        return {
+            key: redact_config(item)
+            for key, item in value.items()
+            if "password" not in str(key).lower()
+            and str(key).lower() not in {"session_secret", "enroll_chars"}
+        }
+    if isinstance(value, list):
+        return [redact_config(item) for item in value]
+    return value
+
+
 @app.route("/api/config")
 @require_auth
 def get_config():
@@ -972,13 +1006,13 @@ def get_config():
             raw_content = CONFIG_FILE.read_text()
             # Try to parse YAML using PyYAML
             try:
-                parsed_config = yaml.safe_load(raw_content)
-                return jsonify({"parsed": parsed_config, "raw": raw_content})
+                parsed_config = redact_config(yaml.safe_load(raw_content))
+                return jsonify({"parsed": parsed_config, "raw": yaml.safe_dump(parsed_config)})
             except yaml.YAMLError:
-                # YAML parsing failed, return raw content
+                # Do not expose unparsed text: it may contain credentials.
                 return jsonify(
                     {
-                        "raw": raw_content,
+                        "raw": "",
                         "parsed": None,
                         "error": "YAML parse error: Invalid configuration file format",
                     }
@@ -4026,7 +4060,7 @@ def api_network_auto_detect():
 
 
 if __name__ == "__main__":
-    # Run on all interfaces (accessible from nginx container in pod).
+    # Bind to loopback; nginx shares the pod network namespace.
     # threaded=True so a single slow/blocked handler (e.g. a DHCP/Kea or podman
     # call) cannot stall the whole UI, including health checks and status polls.
-    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
+    app.run(host="127.0.0.1", port=5000, debug=False, threaded=True)
