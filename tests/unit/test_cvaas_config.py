@@ -2,10 +2,13 @@
 """Unit tests for CVaaS configuration helpers."""
 
 import importlib.util
+import os
+import stat
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 WEBUI_DIR = Path(__file__).resolve().parents[2] / "webui"
 if str(WEBUI_DIR) not in sys.path:
@@ -58,6 +61,44 @@ class TestSyncEnrollCharsToBootstrap(unittest.TestCase):
             self.assertNotIn("OLD_VALUE", content)
             backups = list(Path(tmpdir).glob("bootstrap_backup_*.py"))
             self.assertEqual(len(backups), 1)
+
+    def test_backup_is_owner_only(self):
+        """#67: the backup holds the old enrollment token, so it is 0600"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bootstrap = Path(tmpdir) / "bootstrap.py"
+            bootstrap.write_text('enrollChars = "OLD_SECRET"\n', encoding="utf-8")
+            os.chmod(bootstrap, 0o644)
+
+            ok, error = cvaas_config.sync_enroll_chars_to_bootstrap(bootstrap, "new-token")
+            self.assertTrue(ok, error)
+            (backup,) = Path(tmpdir).glob("bootstrap_backup_*.py")
+            self.assertEqual(stat.S_IMODE(os.stat(backup).st_mode), 0o600)
+            self.assertIn("OLD_SECRET", backup.read_text(encoding="utf-8"))
+            # bootstrap.py itself must stay readable for nginx to serve it
+            self.assertEqual(stat.S_IMODE(os.stat(bootstrap).st_mode), 0o644)
+
+    def test_same_instant_syncs_keep_both_backups(self):
+        """#58: two syncs in the same timestamp must not clobber a backup"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bootstrap = Path(tmpdir) / "bootstrap.py"
+            bootstrap.write_text('enrollChars = "FIRST"\n', encoding="utf-8")
+
+            with mock.patch("time.time_ns", return_value=1_700_000_000_000_001_000):
+                ok, error = cvaas_config.sync_enroll_chars_to_bootstrap(bootstrap, "SECOND")
+                self.assertTrue(ok, error)
+                ok, error = cvaas_config.sync_enroll_chars_to_bootstrap(bootstrap, "THIRD")
+                self.assertTrue(ok, error)
+
+            backups = sorted(Path(tmpdir).glob("bootstrap_backup_*.py"))
+            self.assertEqual(
+                [b.name for b in backups],
+                [
+                    "bootstrap_backup_1700000000_000001.py",
+                    "bootstrap_backup_1700000000_000001_1.py",
+                ],
+            )
+            self.assertIn("FIRST", backups[0].read_text(encoding="utf-8"))
+            self.assertIn("SECOND", backups[1].read_text(encoding="utf-8"))
 
     def test_fails_when_line_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
