@@ -35,15 +35,27 @@ install-deps: ## Install development dependencies
 
 lint: ## Run linting checks
 	@echo "Running shellcheck on root scripts..."
-	@shellcheck -S error *.sh || true
+	@shellcheck -S error *.sh
 	@echo "Running shellcheck on dev scripts..."
-	@shellcheck -S error dev/scripts/*.sh dev/tests/*.sh 2>/dev/null || true
+	@shellcheck -S error dev/scripts/*.sh dev/tests/*.sh
 	@echo "Running yamllint..."
-	@yamllint *.yaml *.yml config.yaml.template dev/tests/*.yaml 2>/dev/null || echo "yamllint: No YAML files to check or yamllint not installed"
+	@if command -v yamllint >/dev/null 2>&1; then \
+		files=""; \
+		for f in *.yaml *.yml config.yaml.template dev/tests/*.yaml; do \
+			if [ -f "$$f" ]; then files="$$files $$f"; fi; \
+		done; \
+		if [ -n "$$files" ]; then \
+			yamllint $$files; \
+		else \
+			echo "yamllint: no YAML files to check"; \
+		fi; \
+	else \
+		echo "yamllint not installed, skipping yamllint"; \
+	fi
 
 format: ## Format code
 	@echo "Formatting Python code with black..."
-	@black bootstrap.py 2>/dev/null || echo "black not installed, skipping Python formatting"
+	@black bootstrap.py webui/ tests/unit/
 	@echo "Formatting complete. Note: Shell scripts should be formatted manually."
 
 test: test-quick ## Run quick tests (suitable for pre-commit)

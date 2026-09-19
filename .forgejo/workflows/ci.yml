@@ -86,8 +86,8 @@ jobs:
 
       - name: Run shellcheck
         run: |
-          shellcheck -S error ./*.sh || true
-          shellcheck -S error dev/scripts/*.sh dev/tests/*.sh 2>/dev/null || true
+          shellcheck -S error ./*.sh
+          shellcheck -S error dev/scripts/*.sh dev/tests/*.sh
 
       - name: Run yamllint
         run: |
