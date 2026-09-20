@@ -14,6 +14,11 @@ Status: proposed; implementation and deployment have not started.
 - `/api/network/restart` has the same process-lifetime problem.
 - Current UI treats a successful HTTP response as completed apply and does not
   track a durable operation through a disconnect.
+- Read-only live diagnosis on fedora1 (located with `podwich ztpbootstrap`):
+  deployed image `hub.freeblizz.com/ztpbootstrap-webui:b4374dd` has a working
+  Podman client and socket. `podman ps` works inside the WebUI; `systemctl`
+  fails because the container has no systemd system bus. The WebUI host unit
+  has `BindsTo=ztpbootstrap-pod.service`. See the execution report for evidence.
 
 ## Proposed design
 

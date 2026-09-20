@@ -22,12 +22,13 @@ secrets, changes no code.
 | `scripts/network-host-worker.py` | installed to `/usr/local/lib/ztpbootstrap/worker.py` | protocol server |
 | `webui/network_jobs.py` | shipped with webui **and** copied to `/usr/local/lib/ztpbootstrap/network_jobs.py` | protocol + client + worker entrypoint + `JobStore` |
 | `/run/ztpbootstrap/network-worker.sock` | host runtime dir, bind-mounted into webui | the socket |
-| `/opt/containerdata/ztpbootstrap/.network-jobs/` | on the rw bind, **root-only 0700** subdir | durable job records |
+| `/var/lib/ztpbootstrap-network-worker/` | host-only, never mounted into WebUI, **0700 root** | durable job records |
 
 `/usr/local/lib/ztpbootstrap/` is the **immutable worker code path**: *outside*
 `webui/` (the `rw` container bind), so a stopped/misbehaving WebUI cannot rewrite
-worker logic. `install-network-worker.sh` copies `webui/network_*.py` +
-`network_jobs.py` into that dir (0555 root) and installs the worker unit.
+worker logic. The installer copies explicitly allowlisted network modules plus
+`config_manager.py`, `dhcp_config.py`, and `dhcp_utils.py` into that directory
+(root-owned 0555 directory, 0444 modules), and installs the independent unit.
 
 ### Worker imports (no CONTAINER_HOST)
 
@@ -37,16 +38,15 @@ before any import:
 
 ```python
 import sys
-from pathlib import Path
-sys.path.insert(0, "/usr/local/lib/ztpbootstrap")                       # wins
-sys.path.insert(0, "/opt/containerdata/ztpbootstrap/webui")
+sys.path.insert(0, "/usr/local/lib/ztpbootstrap")
+# Never import from the container-writable bind or honor PYTHONPATH/PYTHONHOME.
 ```
 
 `/usr/local/lib/ztpbootstrap` wins for `network_jobs`/`network_deploy`/
 `network_config`/`network_utils`/`network_validation`. The worker uses the **host**
 podman: `get_podman_cmd()` with no `CONTAINER_HOST`/`CONTAINER_SOCK`; it does
 **not** use the `ro`-mounted `/run/podman/podman.sock` inside the container.
-Config is read fresh through `ConfigManager(ZTP_CONFIG_DIR=".../ztpbootstrap")`,
+Config is read fresh through `ConfigManager(Path(config_dir) / "config.yaml")`,
 same locking/atomic/backup as the WebUI (shared lock file serializes both).
 
 Existing Podman socket users (the `ro,z` webui mount, DHCP path) are
@@ -63,18 +63,17 @@ Volume=/run/ztpbootstrap:/run/ztpbootstrap:ro,z
 ```
 
 `ro` is fine for connect(): the client only opens the fd, never writes the
-filesystem. Worker owns the dir `0700 root`; the socket file is
-`0660 root:ztpbootstrap-jobs`, and the container's mapped uid must be in group
-`ztpbootstrap-jobs` (created by install) to connect.
+filesystem. Initial supported deployment is rootful Podman with root WebUI uid,
+matching the live host. The worker owns the runtime dir and socket (0700/0600
+root), checks Linux SO_PEERCRED, and rejects other UIDs. Rootless/userns-mapped
+installs fail clearly until explicitly configured; no world-writable socket.
 
-**SELinux (honest; no `permissive`, no `unconfined`):** connecting to a host
-worker socket from a `container_t`-ish domain needs an allow rule. Install writes
-`systemd/ztpbootstrap-network-worker.te` + a `.if` interface and loads them via
-`semodule` **only in Enforcing** mode, scoped to `container_connect_ztpbootstrap_sock`
-(webui→worker socket) and `ztpbootstrap_worker_connect_systemd`/`podman`
-(worker→units). If the live host is not SELinux-managed, install detects
-`getenforce != Enforcing`, skips module load, and logs that the socket relies on
-that posture **only there**. No `setenforce 0` anywhere, no blanket privileges.
+SELinux remains enforcing. Do not invent policy interfaces or load speculative
+allow rules. Install the socket directory with a suitable persistent label; test
+connectto against the actual service domain in an isolated Fedora VM. If policy
+blocks this, provide the exact denied context and a narrowly scoped policy within
+the installer or document the missing prerequisite. Do not disable labeling or
+SELinux. No extra .te/.if repository files are assigned by this schedule.
 
 ## 4. Protocol (fixed, bounded JSON)
 
@@ -120,13 +119,13 @@ Frame: 4-byte big-endian length prefix + UTF-8 JSON body, max
 
 ### Semantics
 
-- **Single active job:** at most one non-terminal job; `apply`/`restart` while a job is `queued`/`running` returns the **existing** job with `error="duplicate"` (idempotent) and the caller polls that id — no 2nd mutation.
+- **Single active job:** at most one non-terminal job; `apply`/`restart` while a job is `queued`/`running` returns `worker_busy` and the active job id (HTTP 409). It must not claim that a different request was accepted. Clients recover from ambiguous submission using job listing, never blindly retry mutations.
 - **Durable acceptance:** the worker writes the record atomically (tmp + `os.replace`, 0600) and flushes **before** the response, so a post-acceptance crash leaves a recoverable on-disk job.
-- **Effective success:** `succeeded` only after a post-check confirms the pod runs and the target `podman_network` exists with the expected parent (`inspect_running_pod` + `inspect_podman_network`); a transport timeout or a queued job is **never** success.
-- **Rollback:** on any post-backup failure the worker restores the captured backup (quadlet + config + network), regenerates Kea, and restarts the stack if stopped, reusing `network_deploy` `create_network_backup`/`restore_network_backup`/`_rollback_network_apply`; if rollback fails -> `rollback_failed` (a half-applied state is never hidden as success).
-- **Concurrency preservation:** the worker mutates via `ConfigManager.update(mutator, validate)` under the exclusive lock against *fresh* state, touching only `network.ztp` + legacy mirror fields (same as `_save_ztp`); unrelated sections (dhcp, auth, cvaas) are never overwritten.
-- **Timeout:** `JOB_TIMEOUT_SEC = 180`; past `timeout_at` the worker marks the job `failed` (`error_code="timeout"`) and does not claim success.
-- **Stale / reboot:** on startup any `running` job is marked `stale` (`STALE_AFTER_SEC = 300`); a reboot or pod stop may leave host state indeterminate, so stale jobs never auto-report success — the operator re-runs.
+- **Effective success:** `succeeded` only after a post-check confirms all requested services are active, the pod runs on the target network with expected addresses, and that network has the expected parent (`inspect_running_pod` + `inspect_podman_network`); a transport timeout or a queued job is **never** success.
+- **Rollback:** on any post-backup failure the worker restores the captured backup (quadlet + config + network), regenerates Kea, and restarts the stack if stopped, reusing `network_deploy` `create_network_backup`/`restore_network_backup`/`_rollback_network_apply` after fixing their full-config restore and swallowed failures; if rollback fails -> `rollback_failed` (a half-applied state is never hidden as success).
+- **Concurrency preservation:** the worker mutates via `ConfigManager.update(mutator, validate)` under the exclusive lock against *fresh* state, touching only `network.ztp` + legacy mirror fields (same as `_save_ztp`); unrelated edits (DHCP reservations, auth, cvaas) are never overwritten, including on rollback. Capture managed leaf values, persist intended changes using fresh locked state, and compare before final commit/rollback to detect concurrent edits. Never copy config.yaml wholesale over live config. Kea generation/write failures must propagate, and snapshots belong in host-only state.
+- **Timeout:** `JOB_TIMEOUT_SEC = 900`; apply a monotonic deadline and bounded subprocess timeouts. Keep the single-job lock held until all mutation/rollback activity has ceased; never mark terminal while a timed-out thread can still mutate host state.
+- **Stale / reboot:** under an exclusive worker-instance flock, mark every persisted queued/running job `stale` immediately on worker restart. Pod restart alone does not stop the host worker. Keep recovery snapshots, report intervention required, and never silently retry an interrupted mutation.
 - **Retention:** keep newest `MAX_RETENTION = 50` terminal jobs; prune oldest.
 
 ## 5. Shared module: `webui/network_jobs.py`
@@ -137,8 +136,8 @@ H2 implements it; H3 imports the client side. Signatures H2/H3 share:
 # --- constants (importable by H2 worker and H3 flask) ---
 PROTOCOL_VERSION = 1
 SOCKET_PATH = "/run/ztpbootstrap/network-worker.sock"
-STATE_DIR = Path("/opt/containerdata/ztpbootstrap/.network-jobs")
-JOB_TIMEOUT_SEC = 180
+STATE_DIR = Path("/var/lib/ztpbootstrap-network-worker")
+JOB_TIMEOUT_SEC = 900
 STALE_AFTER_SEC = 300
 MAX_RETENTION = 50
 MAX_MESSAGE_BYTES = 64 * 1024
@@ -200,12 +199,11 @@ Description=ZTP network host worker
 After=network-online.target
 # Deliberately NO PartOf=/BindsTo=ztpbootstrap-pod.service: stopping the whole
 # pod must NOT stop this worker or lose in-flight job state.
-WantedBy=multi-user.target default.target
 
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/network-host-worker   # thin wrapper adding LIBDIR to sys.path
+ExecStart=/usr/bin/python3 -I /usr/local/lib/ztpbootstrap/worker.py
 Restart=on-failure
 RestartSec=3
 # no new caps beyond what podman/systemctl already need
@@ -233,7 +231,7 @@ WantedBy=multi-user.target default.target
 `webui/network_jobs.py` + `tests/unit/test_network_jobs.py`;
 `scripts/network-host-worker.py`, `scripts/install-network-worker.sh`;
 `systemd/ztpbootstrap-network-worker.service`, the `.container` mount in
-`ztpbootstrap-webui.container`, SELinux `.te`/`.if` (Enforcing-scoped); and
+`ztpbootstrap-webui.container`; and
 transaction/rollback tests added to `tests/unit/test_network_deploy.py`.
 
 ## 9. Open / honest items
@@ -243,3 +241,11 @@ diagnostics captured when the deployment host is confirmed — not inferred here
 If they change the transport/permission model, **revise this doc first** (spec
 H1 stop-and-revise) before H2. This bucket performs no code, infra, secret, or
 publish action.
+
+## Coordinator review corrections
+
+H1 farm commit a390e94 required the above corrections: host-only state, trusted
+imports only, correct ConfigManager API, viable rootful socket permissions, no
+invented SELinux policy, strict busy semantics, transaction-safe rollback, and
+complete readiness checks. Live diagnosis reproduced only systemd access failure;
+Podman itself works in the deployed WebUI. These corrections stay in H1's file.
