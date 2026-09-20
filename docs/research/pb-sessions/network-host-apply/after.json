@@ -1,0 +1,73 @@
+{
+  "wall_ts": "2026-09-20T03:52:29.757031+00:00",
+  "capacity_probe": "legacy",
+  "burnbar": null,
+  "claude": {
+    "ok": true,
+    "session_pct": 76.0,
+    "week_pct": 0.0,
+    "sonnet_week_pct": null,
+    "opus_week_pct": null,
+    "resets_at": {
+      "session": "2026-09-20T04:40:00.955351+00:00",
+      "week": "2026-09-26T21:00:00.955372+00:00"
+    },
+    "limits": [
+      {
+        "kind": "session",
+        "group": "session",
+        "percent": 76,
+        "severity": "warning",
+        "resets_at": "2026-09-20T04:40:00.955351+00:00",
+        "scope": null,
+        "is_active": true
+      },
+      {
+        "kind": "weekly_all",
+        "group": "weekly",
+        "percent": 12,
+        "severity": "normal",
+        "resets_at": "2026-09-26T21:00:00.955372+00:00",
+        "scope": null,
+        "is_active": false
+      },
+      {
+        "kind": "weekly_scoped",
+        "group": "weekly",
+        "percent": 0,
+        "severity": "normal",
+        "resets_at": "2026-09-26T21:00:00+00:00",
+        "scope": {
+          "model": {
+            "id": null,
+            "display_name": "Fable"
+          },
+          "surface": null
+        },
+        "is_active": false
+      }
+    ]
+  },
+  "cursor": {
+    "ok": false,
+    "error": "no_session_cookie",
+    "hint": "Set CURSOR_SESSION_COOKIE or CURSOR_SESSION_TOKEN in ~/.env"
+  },
+  "ollama_cloud": {
+    "ok": false,
+    "error": "no_cloud_cookie",
+    "hint": "Set OLLAMA_CLOUD_COOKIE from browser cookies at ollama.com/settings"
+  },
+  "codex": {
+    "ok": true,
+    "source": "chatgpt.json",
+    "pool": "chatgpt_plus_codex",
+    "session_pct": 66.0,
+    "week_pct": 10.0,
+    "overall_pct": 66.0,
+    "plan_type": "plus",
+    "harvested_at": "2026-09-20T03:52:23.596912Z"
+  },
+  "label": "after",
+  "feature": "network-host-apply"
+}

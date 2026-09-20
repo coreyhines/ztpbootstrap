@@ -176,7 +176,13 @@ jobs:
           persist-credentials: false
 
       - name: Install Python test dependencies
-        run: pip install --quiet -r webui/requirements.txt
+        run: |
+          # Use the same interpreter that runs the suite.  The generic
+          # `pip` entrypoint can belong to a different Python installation
+          # on a runner, which leaves Flask/PyYAML unavailable to python3.
+          python3 -m pip install --quiet --disable-pip-version-check \
+            -r webui/requirements.txt
+          python3 -c 'import flask, yaml; print("WebUI dependencies ready")'
 
       - name: Run Python unit tests
         run: |

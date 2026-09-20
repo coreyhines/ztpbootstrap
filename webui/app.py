@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -90,15 +91,14 @@ except ImportError as e:
     # DHCP modules not available - will fail gracefully
     print(f"Warning: DHCP modules not available: {e}", flush=True)
 
-# Import network modules
+# Import network modules. apply/restart move to the host worker (network_jobs);
+# this process never runs apply_ztp_network/restart_ztp_stack itself (#13/#57).
 try:
     from network_config import get_ztp_profile, merge_ztp_update, sync_legacy_network_fields
-    from network_deploy import (
-        apply_ztp_network,
-        auto_detect_from_parent,
-        get_network_status,
-        restart_ztp_stack,
-    )
+    from network_deploy import auto_detect_from_parent, get_network_status
+    from network_jobs import PROTOCOL_VERSION as NETWORK_PROTOCOL_VERSION
+    from network_jobs import SOCKET_PATH as NETWORK_WORKER_SOCKET_PATH
+    from network_jobs import NetworkJobClient
     from network_utils import discover_parent_interfaces, list_ztp_podman_networks
     from network_validation import plan_network_changes, validate_ztp_profile
 except ImportError as e:
@@ -106,10 +106,11 @@ except ImportError as e:
     get_ztp_profile = None
     merge_ztp_update = None
     sync_legacy_network_fields = None
-    apply_ztp_network = None
     auto_detect_from_parent = None
     get_network_status = None
-    restart_ztp_stack = None
+    NetworkJobClient = None
+    NETWORK_PROTOCOL_VERSION = 1
+    NETWORK_WORKER_SOCKET_PATH = None
     discover_parent_interfaces = None
     list_ztp_podman_networks = None
     plan_network_changes = None
@@ -3919,10 +3920,88 @@ def _load_full_config() -> dict:
     return {}
 
 
-def _save_full_config(config: dict):
-    """Replace config.yaml with ``config`` (locked, atomic, 0600, backed up)."""
-    success, error, _ = _update_config(lambda _current: config)
-    return success, error
+NETWORK_WORKER_SOCKET_ENV = "ZTP_NETWORK_WORKER_SOCKET"
+
+
+def _network_job_client():
+    """Build a client for the host-owned network worker.
+
+    The socket path defaults to the fixed contract path and may be overridden
+    with the ZTP_NETWORK_WORKER_SOCKET environment variable. This process only
+    submits/queries jobs; every host mutation happens in the worker, which
+    revalidates against fresh host config.
+    """
+    if NetworkJobClient is None:
+        return None
+    return NetworkJobClient(os.environ.get(NETWORK_WORKER_SOCKET_ENV) or NETWORK_WORKER_SOCKET_PATH)
+
+
+def _is_valid_job_id(job_id: str) -> bool:
+    """Only canonical uuid4 identifiers are accepted on the job status API."""
+    try:
+        return isinstance(job_id, str) and str(uuid.UUID(job_id, version=4)) == job_id
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def _job_submission_response(result: dict):
+    """Translate a worker submission result into HTTP status codes.
+
+    HTTP 202 records durable acceptance only: it is never proof that the
+    network was applied or the stack restarted. A queued, lost, or timed-out
+    job must never be presented as success (#13).
+    """
+    error = result.get("error")
+    job = result.get("job") if isinstance(result.get("job"), dict) else None
+    if result.get("ok") is True and error is None and job:
+        return (
+            jsonify({"job_id": job.get("job_id"), "state": job.get("state"), "job": job}),
+            202,
+        )
+    if error == "worker_busy":
+        return (
+            jsonify(
+                {
+                    "error": "A host network job is already active or recovery is required",
+                    "code": "worker_busy",
+                    "job": job,
+                    "recovery_required": bool(result.get("recovery_required")),
+                }
+            ),
+            409,
+        )
+    if error in ("bad_request", "validation", "duplicate"):
+        return jsonify({"error": "Host network worker rejected the request", "code": error}), 400
+    if error == "worker_down":
+        return (
+            jsonify(
+                {
+                    "error": "Host network worker unavailable; check job status before retrying",
+                    "code": "worker_down",
+                }
+            ),
+            503,
+        )
+    return (
+        jsonify(
+            {"error": "Unexpected host network worker response", "code": error or "bad_protocol"}
+        ),
+        502,
+    )
+
+
+def _job_status_payload(result: dict) -> dict:
+    """Bounded status shape matching the worker protocol; no secrets or raw stderr."""
+    payload = {
+        "v": result.get("v"),
+        "ok": result.get("ok") is True,
+        "error": result.get("error"),
+        "job": result.get("job") if isinstance(result.get("job"), dict) else None,
+        "recovery_required": result.get("recovery_required"),
+    }
+    if isinstance(result.get("jobs"), list):
+        payload["jobs"] = result["jobs"]
+    return payload
 
 
 @app.route("/api/network/status", methods=["GET"])
@@ -4035,26 +4114,32 @@ def api_network_ztp_save():
 @app.route("/api/network/apply", methods=["POST"])
 @require_auth
 def api_network_apply():
-    """Save ZTP profile and apply network changes with restart."""
+    """Submit a validated ZTP profile to the host worker.
+
+    Returns HTTP 202 once the worker durably accepted the job; the network is
+    NOT applied at that point. This endpoint never applies changes itself and
+    never saves the worker-returned/full config (#13/#57).
+    """
     try:
-        if not apply_ztp_network or not merge_ztp_update:
+        if not merge_ztp_update or not validate_ztp_profile or NetworkJobClient is None:
             return jsonify({"error": "Network modules not available"}), 503
-        data = request.get_json() or {}
-        ztp_data = data.get("ztp") or data
-        current = _load_full_config()
-        config = merge_ztp_update(current, ztp_data)
-        success, error_msg, updated = apply_ztp_network(
-            config, restart=True, current_config=current
-        )
-        if success:
-            ok, save_err = _save_full_config(updated)
-            if not ok:
-                return jsonify({"error": save_err}), 500
-            return jsonify({"success": True, "ztp": get_ztp_profile(updated)})
-        ok, save_err = _save_full_config(updated)
-        if not ok:
-            return jsonify({"error": save_err}), 500
-        return jsonify({"error": error_msg or "Apply failed"}), 500
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"error": "Request must be a JSON object"}), 400
+        ztp_data = data.get("ztp", data)
+        if not isinstance(ztp_data, dict):
+            return jsonify({"error": "ZTP profile must be an object"}), 400
+        merged = merge_ztp_update(_load_full_config(), ztp_data)
+        errors, _warnings = validate_ztp_profile(merged)
+        profile = get_ztp_profile(merged)
+        if not profile.get("enabled"):
+            errors = [*errors, "network.ztp must be enabled to apply"]
+        if errors:
+            return jsonify({"error": "; ".join(errors), "errors": errors}), 400
+        result = _network_job_client().enqueue_apply(profile)
+        return _job_submission_response(result)
+    except (AttributeError, TypeError, ValueError):
+        return jsonify({"error": "Invalid ZTP profile"}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -4062,15 +4147,65 @@ def api_network_apply():
 @app.route("/api/network/restart", methods=["POST"])
 @require_auth
 def api_network_restart():
-    """Restart ZTP stack without config changes."""
+    """Submit a ZTP stack restart to the host worker.
+
+    Returns HTTP 202 once the worker durably accepted the job; the restart has
+    NOT completed at that point and this process never restarts the stack (#13).
+    """
     try:
-        if not restart_ztp_stack:
+        if NetworkJobClient is None:
             return jsonify({"error": "Network modules not available"}), 503
-        config = _load_full_config()
-        success, error_msg = restart_ztp_stack(config)
-        if success:
-            return jsonify({"success": True})
-        return jsonify({"error": error_msg or "Restart failed"}), 500
+        result = _network_job_client().enqueue_restart()
+        return _job_submission_response(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/network/jobs", methods=["GET"])
+@require_auth
+def api_network_jobs():
+    """Read-only active and recent host network job listing."""
+    try:
+        if NetworkJobClient is None:
+            return jsonify({"error": "Network modules not available"}), 503
+        result = _network_job_client().status()
+        if result.get("error") == "worker_down":
+            return jsonify(_job_status_payload(result)), 503
+        if result.get("error"):
+            return jsonify(_job_status_payload(result)), 502
+        return jsonify(_job_status_payload(result))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/network/jobs/<path:job_id>", methods=["GET"])
+@require_auth
+def api_network_job_status(job_id):
+    """Read-only status of one host network job; 404 when the worker has no record."""
+    try:
+        if NetworkJobClient is None:
+            return jsonify({"error": "Network modules not available"}), 503
+        if not _is_valid_job_id(job_id):
+            return (
+                jsonify(
+                    {
+                        "v": NETWORK_PROTOCOL_VERSION,
+                        "ok": False,
+                        "error": "bad_request",
+                        "job": None,
+                        "recovery_required": None,
+                    }
+                ),
+                400,
+            )
+        result = _network_job_client().status(job_id)
+        if result.get("error") == "worker_down":
+            return jsonify(_job_status_payload(result)), 503
+        if result.get("error"):
+            return jsonify(_job_status_payload(result)), 502
+        if not isinstance(result.get("job"), dict):
+            return jsonify(_job_status_payload(result)), 404
+        return jsonify(_job_status_payload(result))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

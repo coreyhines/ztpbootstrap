@@ -10,13 +10,19 @@ import json
 import logging
 import os
 import shutil
+import signal
+import stat
 import subprocess
 import time
+import uuid
 from contextlib import contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
+from config_manager import ConfigManager
 from network_config import (
     get_ztp_profile,
     resolve_effective_network,
@@ -76,11 +82,52 @@ def network_apply_lock(timeout: int = 5) -> Iterator[None]:
 
 def _run_systemctl(args: List[str], timeout: int = 60) -> subprocess.CompletedProcess:
     base = ["systemctl"] if os.geteuid() == 0 else ["sudo", "systemctl"]
-    return subprocess.run(base + args, capture_output=True, text=True, timeout=timeout)
+    if args[0] not in ("start", "stop"):
+        return _bounded_run(base + args, timeout)
+    unit = args[1]
+    if unit not in SERVICES_START_ORDER:
+        raise ValueError("Unit is outside the network-worker allowlist")
+    finish = time.monotonic() + _remaining(timeout)
+    try:
+        result = _bounded_run(base + [args[0], "--no-block", unit], timeout)
+        if result.returncode:
+            return result
+        while time.monotonic() < finish:
+            state = _bounded_run(
+                base + ["show", unit, "--property=ActiveState", "--value"],
+                min(10, finish - time.monotonic()),
+            )
+            value = state.stdout.strip()
+            if state.returncode:
+                return state
+            if (args[0] == "start" and value == "active") or (
+                args[0] == "stop" and value in ("inactive", "failed")
+            ):
+                return result
+            if args[0] == "start" and value == "failed":
+                return subprocess.CompletedProcess(base + args, 1, "", "Service failed")
+            time.sleep(min(0.2, max(0, finish - time.monotonic())))
+        raise TimeoutError("Service transition timed out")
+    except (TimeoutError, subprocess.TimeoutExpired):
+        # A killed systemctl client does not cancel the daemon's job. Cancel
+        # that exact fixed unit's job before starting any recovery commands.
+        token = _OPERATION_DEADLINE.set(time.monotonic() + 15)
+        try:
+            pending = _bounded_run(base + ["show", unit, "--property=Job", "--value"], 5)
+            job = pending.stdout.strip().split(" ", 1)[0]
+            if pending.returncode:
+                raise RuntimeError("Cannot determine pending service job")
+            if job.isdigit() and int(job):
+                cancelled = _bounded_run(base + ["cancel", job], 5)
+                if cancelled.returncode:
+                    raise RuntimeError("Cannot cancel pending service job")
+        finally:
+            _OPERATION_DEADLINE.reset(token)
+        raise
 
 
 def _run_podman(args: List[str], timeout: int = 60) -> subprocess.CompletedProcess:
-    return subprocess.run(get_podman_cmd() + args, capture_output=True, text=True, timeout=timeout)
+    return _bounded_run(_PODMAN_FACTORY.get()() + args, timeout)
 
 
 def create_network_backup(tag: Optional[str] = None) -> Path:
@@ -96,7 +143,7 @@ def create_network_backup(tag: Optional[str] = None) -> Path:
 
 
 def restore_network_backup(backup_path: Path) -> bool:
-    """Restore pod quadlet and config.yaml from a network-apply backup."""
+    """Restore the pod quadlet and managed config leaves, retaining unrelated edits."""
     restored = False
     pod_backup = backup_path / "ztpbootstrap.pod"
     if pod_backup.exists() and POD_FILE.parent.exists():
@@ -104,7 +151,13 @@ def restore_network_backup(backup_path: Path) -> bool:
         restored = True
     config_backup = backup_path / "config.yaml"
     if config_backup.exists() and CONFIG_PATH.parent.exists():
-        shutil.copy2(config_backup, CONFIG_PATH)
+        import yaml
+
+        snapshot = yaml.safe_load(config_backup.read_text())
+        manager = ConfigManager(CONFIG_PATH)
+        ok, error = manager.update(lambda fresh: _merge_managed(fresh, _managed(snapshot)))
+        if not ok:
+            raise RuntimeError(error or "Could not restore managed network fields")
         restored = True
     return restored
 
@@ -150,15 +203,12 @@ def _rollback_network_apply(
     """
     restore_network_backup(backup_path)
     restored_config = _load_config_from_backup(backup_path) or fallback_config
-    try:
-        _ensure_network_from_backup(backup_path, restored_config)
-    except Exception as exc:
-        logger.warning(f"Podman network restore during rollback failed: {exc}")
+    _ensure_network_from_backup(backup_path, restored_config)
     _regenerate_kea_configs(restored_config)
     if stopped:
         ok, err = restart_ztp_stack(restored_config)
         if not ok:
-            logger.warning(f"Stack restart during rollback failed: {err}")
+            raise RuntimeError(err or "Stack restart during rollback failed")
     return restored_config
 
 
@@ -179,17 +229,25 @@ def ensure_podman_network(profile: Dict[str, Any]) -> Tuple[bool, Optional[str]]
 
     existing = inspect_podman_network(name)
     if existing:
+        existing_gateways = {
+            entry.get("subnet"): entry.get("gateway") or ""
+            for entry in existing.get("subnets") or []
+        }
         sig_current = (
             existing.get("parent"),
-            [(s.get("subnet"), s.get("gateway")) for s in existing.get("subnets") or []],
+            [(s.get("subnet"), s.get("gateway") or "") for s in existing.get("subnets") or []],
             existing.get("mode") or "bridge",
         )
         sig_desired = (
             parent,
             [
-                (ipv4_subnet, ipv4_gateway),
+                (ipv4_subnet, ipv4_gateway or existing_gateways.get(ipv4_subnet, "")),
             ]
-            + ([(ipv6_subnet, ipv6_gateway)] if ipv6_subnet else []),
+            + (
+                [(ipv6_subnet, ipv6_gateway or existing_gateways.get(ipv6_subnet, ""))]
+                if ipv6_subnet
+                else []
+            ),
             mode,
         )
         if sig_current == sig_desired:
@@ -205,13 +263,13 @@ def ensure_podman_network(profile: Dict[str, Any]) -> Tuple[bool, Optional[str]]
         "macvlan",
         "--subnet",
         ipv4_subnet,
-        "--gateway",
-        ipv4_gateway,
         "-o",
         f"parent={parent}",
         "-o",
         f"mode={mode}",
     ]
+    if ipv4_gateway:
+        cmd.extend(["--gateway", ipv4_gateway])
     if ipv6_subnet:
         if ipv6_gateway:
             cmd.extend(["--subnet", ipv6_subnet, "--gateway", ipv6_gateway])
@@ -238,7 +296,10 @@ def remove_stale_network(name: str, ztp_only: bool = True) -> Tuple[bool, Option
     if ztp_only:
         foreign = [c for c in containers if not str(c).startswith("ztpbootstrap")]
         if foreign:
-            return False, f"Network {name} is shared with foreign containers: {', '.join(foreign)}"
+            return (
+                False,
+                f"Network {name} is shared with foreign containers: {', '.join(foreign)}",
+            )
     result = _run_podman(["network", "rm", name], timeout=30)
     if result.returncode != 0 and "no such network" not in (result.stderr or "").lower():
         return False, result.stderr.strip() or "podman network rm failed"
@@ -360,29 +421,37 @@ def restart_ztp_stack(config: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         return False, str(exc)
 
 
-def _regenerate_kea_configs(config: Dict[str, Any]) -> None:
+def _regenerate_kea_configs(config: Dict[str, Any], config_dir: Optional[Path] = None) -> None:
+    """Generate fixed Kea files atomically; any failure aborts the transaction."""
     if not (config.get("dhcp") or {}).get("enabled"):
         return
-    try:
-        from dhcp_config import generate_kea_config
+    from dhcp_config import generate_kea_config
 
-        kea_config = generate_kea_config(config)
-        dhcp_config_dir = Path("/opt/containerdata/ztpbootstrap/dhcp")
-        dhcp_config_dir.mkdir(parents=True, exist_ok=True)
-        if "Dhcp4" in kea_config:
-            (dhcp_config_dir / "kea-dhcp4.conf").write_text(
-                json.dumps({"Dhcp4": kea_config["Dhcp4"]}, indent=2)
-            )
-        if "Dhcp6" in kea_config:
-            (dhcp_config_dir / "kea-dhcp6.conf").write_text(
-                json.dumps({"Dhcp6": kea_config["Dhcp6"]}, indent=2)
-            )
-        if "Control-agent" in kea_config:
-            (dhcp_config_dir / "kea-ctrl-agent.conf").write_text(
-                json.dumps({"Control-agent": kea_config["Control-agent"]}, indent=2)
-            )
-    except Exception as exc:
-        logger.warning(f"Kea config regeneration failed: {exc}")
+    kea_config = generate_kea_config(config)
+    parent = config_dir or CONFIG_PATH.parent
+    parent_fd = _open_directory(parent)
+    try:
+        try:
+            os.mkdir("dhcp", mode=0o755, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        directory = os.open("dhcp", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+    finally:
+        os.close(parent_fd)
+    try:
+        for key, filename in (
+            ("Dhcp4", "kea-dhcp4.conf"),
+            ("Dhcp6", "kea-dhcp6.conf"),
+            ("Control-agent", "kea-ctrl-agent.conf"),
+        ):
+            if key in kea_config:
+                _atomic_at(
+                    directory,
+                    filename,
+                    json.dumps({key: kea_config[key]}, indent=2).encode(),
+                )
+    finally:
+        os.close(directory)
 
 
 def _auto_fill_dhcp_subnet(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -402,7 +471,9 @@ def _auto_fill_dhcp_subnet(config: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def apply_ztp_network(
-    config: Dict[str, Any], restart: bool = True, current_config: Optional[Dict[str, Any]] = None
+    config: Dict[str, Any],
+    restart: bool = True,
+    current_config: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, Optional[str], Dict[str, Any]]:
     """
     Apply ZTP network profile: validate, network, quadlet, optional restart.
@@ -571,3 +642,511 @@ def auto_detect_from_parent(parent_interface: str) -> Dict[str, Any]:
         }
     except ValueError:
         return {}
+
+
+# The host path below is separate from the historical synchronous API. It commits
+# only managed leaves against fresh configuration and never restores config.yaml.
+
+_OPERATION_DEADLINE = ContextVar("network_operation_deadline", default=None)
+_PODMAN_FACTORY = ContextVar("network_podman_factory", default=get_podman_cmd)
+MANAGED_PATHS = (
+    ("network", "ztp"),
+    ("network", "ipv4"),
+    ("network", "ipv6"),
+    ("network", "network"),
+    ("container", "host_network"),
+)
+
+
+def _open_directory(path: Path) -> int:
+    """Pin the deployment directory; subsequent opens cannot follow replaced children."""
+    return os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+
+
+def _read_regular(name: str, directory: int, limit: int = 4 * 1024 * 1024) -> bytes:
+    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    with os.fdopen(fd, "rb") as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > limit:
+            raise ValueError("Unsafe deployment file")
+        data = stream.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError("Deployment file too large")
+        return data
+
+
+def _atomic_at(directory: int, name: str, data: bytes, mode: int = 0o600) -> None:
+    """Atomic replacement relative to an already-pinned directory (never a symlink)."""
+    temporary = f".network-{uuid.uuid4().hex}"
+    fd = os.open(
+        temporary,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        mode,
+        dir_fd=directory,
+    )
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, name, src_dir_fd=directory, dst_dir_fd=directory)
+        os.fsync(directory)
+    finally:
+        try:
+            os.unlink(temporary, dir_fd=directory)
+        except FileNotFoundError:
+            pass
+
+
+class HostConfigManager(ConfigManager):
+    """ConfigManager's update API with no-follow reads and host-only backups.
+
+    The container-writable directory is pinned once. Files, including the shared
+    lock, must be regular, single-link files; swaps cannot redirect privileged I/O.
+    """
+
+    def __init__(self, config_path: Path, backup_dir: Path):
+        super().__init__(config_path)
+        self._directory = _open_directory(self.config_path.parent)
+        self.backup_dir = Path(backup_dir)
+        self.backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+    @contextmanager
+    def _locked(self, exclusive: bool, timeout: Optional[float]) -> Iterator[None]:
+        wait = 5 if timeout is None else max(timeout, 0)
+        deadline = time.monotonic() + wait
+        if not self._lock.acquire(timeout=wait):
+            raise TimeoutError("Configuration thread lock busy")
+        try:
+            fd = os.open(
+                self.lock_path.name,
+                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
+                0o600,
+                dir_fd=self._directory,
+            )
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    raise ValueError("Unsafe configuration lock")
+                while True:
+                    try:
+                        fcntl.flock(
+                            fd,
+                            (fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH) | fcntl.LOCK_NB,
+                        )
+                        break
+                    except BlockingIOError:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("Configuration lock busy")
+                        time.sleep(0.05)
+                yield
+            finally:
+                os.close(fd)
+        finally:
+            self._lock.release()
+
+    def _read_unlocked(self) -> Dict:
+        import yaml
+
+        data = yaml.safe_load(_read_regular(self.config_path.name, self._directory))
+        if not isinstance(data, dict):
+            raise ValueError("Configuration must be an object")
+        return data
+
+    def _write_unlocked(self, config: Dict) -> None:
+        import yaml
+
+        try:
+            old = _read_regular(self.config_path.name, self._directory)
+        except FileNotFoundError:
+            old = None
+        if old is not None:
+            backup_fd = _open_directory(self.backup_dir)
+            try:
+                _atomic_at(backup_fd, f"config-{uuid.uuid4().hex}.yaml", old)
+            finally:
+                os.close(backup_fd)
+        _atomic_at(
+            self._directory,
+            self.config_path.name,
+            yaml.safe_dump(config, sort_keys=False).encode(),
+        )
+
+    def close(self) -> None:
+        if self._directory is not None:
+            os.close(self._directory)
+            self._directory = None
+
+
+def _remaining(timeout: float) -> float:
+    deadline = _OPERATION_DEADLINE.get()
+    remaining = timeout if deadline is None else min(timeout, deadline - time.monotonic())
+    if remaining <= 0:
+        raise TimeoutError("Host operation deadline exceeded")
+    return remaining
+
+
+def _bounded_run(command: List[str], timeout: float) -> subprocess.CompletedProcess:
+    """Kill and reap the entire command group before returning a timeout."""
+    timeout = _remaining(timeout)
+    with subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # The child exited between the timeout and kill.
+            process.communicate()
+            raise
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+def _managed(config: dict) -> list[dict]:
+    result = []
+    for section, key in MANAGED_PATHS:
+        source = config.get(section) or {}
+        result.append(
+            {
+                "path": [section, key],
+                "present": key in source,
+                "value": deepcopy(source.get(key)),
+            }
+        )
+    return result
+
+
+def _merge_managed(config: dict, snapshot: list[dict]) -> None:
+    for entry in snapshot:
+        section, key = entry["path"]
+        if entry["present"]:
+            config.setdefault(section, {})[key] = deepcopy(entry["value"])
+        else:
+            config.setdefault(section, {}).pop(key, None)
+
+
+def _cas_managed(manager: ConfigManager, expected: list[dict], desired: list[dict]) -> dict:
+    result = {}
+
+    def mutate(fresh):
+        if _managed(fresh) != expected:
+            raise RuntimeError("Managed network fields changed concurrently")
+        _merge_managed(fresh, desired)
+        result.update(deepcopy(fresh))
+
+    ok, error = manager.update(mutate)
+    if not ok:
+        raise RuntimeError(error or "Network configuration commit failed")
+    return result
+
+
+def verify_effective_stack(config: dict) -> None:
+    """Require active units, a running pod and actual infra-container addresses."""
+    for service in SERVICES_START_ORDER:
+        if service == "ztpbootstrap-dhcp.service" and not (config.get("dhcp") or {}).get("enabled"):
+            continue
+        result = _run_systemctl(["is-active", "--quiet", service], timeout=10)
+        if result.returncode != 0:
+            raise RuntimeError(f"Service did not become active: {service}")
+    pod = inspect_running_pod()
+    if not pod.get("running"):
+        raise RuntimeError("ZTP pod is not running")
+    effective = resolve_effective_network(config)
+    # Pod inspect does not reliably expose addresses across Podman versions.
+    # Inspect the pod's infra container, which owns its network namespace.
+    result = _run_podman(
+        ["pod", "inspect", "ztpbootstrap", "--format", "{{.InfraContainerID}}"],
+        timeout=15,
+    )
+    infra = result.stdout.strip()
+    if result.returncode or not infra or not all(c in "0123456789abcdef" for c in infra):
+        raise RuntimeError("Could not identify pod network namespace")
+    result = _run_podman(["inspect", infra, "--format", "{{json .NetworkSettings}}"], timeout=15)
+    if result.returncode:
+        raise RuntimeError("Could not inspect pod network namespace")
+    settings = json.loads(result.stdout)
+    if effective["host_network"]:
+        result = _run_podman(
+            ["inspect", infra, "--format", "{{.HostConfig.NetworkMode}}"], timeout=15
+        )
+        if result.returncode or result.stdout.strip() != "host":
+            raise RuntimeError("Expected host network mode")
+        return
+    name = effective["podman_network"]
+    attached = (settings.get("Networks") or {}).get(name)
+    if attached is None:
+        raise RuntimeError("Pod is not attached to the requested network")
+    import ipaddress
+
+    for field, actual in (
+        ("ipv4_address", "IPAddress"),
+        ("ipv6_address", "GlobalIPv6Address"),
+    ):
+        expected = effective.get(field)
+        if expected and (
+            not attached.get(actual)
+            or ipaddress.ip_address(expected) != ipaddress.ip_address(attached[actual])
+        ):
+            raise RuntimeError("Pod address differs from requested address")
+    network = inspect_podman_network(name)
+    if not network or (
+        get_ztp_profile(config).get("enabled") and network.get("driver") != "macvlan"
+    ):
+        raise RuntimeError("Requested network is missing or has the wrong driver")
+    if effective.get("parent_interface") and network.get("parent") != effective["parent_interface"]:
+        raise RuntimeError("Network parent differs from requested interface")
+    if get_ztp_profile(config).get("enabled"):
+        expected_subnets = {effective["ipv4_subnet"]: effective["ipv4_gateway"]}
+        if effective.get("ipv6_subnet"):
+            expected_subnets[effective["ipv6_subnet"]] = effective["ipv6_gateway"]
+        actual_subnets = {
+            entry.get("subnet"): entry.get("gateway") or ""
+            for entry in network.get("subnets") or []
+        }
+        if (
+            set(actual_subnets) != set(expected_subnets)
+            or any(
+                gateway and actual_subnets[subnet] != gateway
+                for subnet, gateway in expected_subnets.items()
+            )
+            or (network.get("mode") or "bridge") != effective["macvlan_mode"]
+        ):
+            raise RuntimeError("Network parameters differ from requested profile")
+    _remaining(1)
+
+
+def _snapshot_network(name: str) -> dict | None:
+    if not name or name == "host":
+        return None
+    info = inspect_podman_network(name)
+    return deepcopy(info) if info else None
+
+
+def _restore_network_info(info: dict | None) -> None:
+    if not info:
+        return
+    profile = {
+        "enabled": True,
+        "podman_network": info["name"],
+        "parent_interface": info["parent"],
+        "macvlan_mode": info.get("mode") or "bridge",
+        "ipv4": {},
+        "ipv6": {},
+    }
+    if info.get("driver") != "macvlan":
+        # A previous non-macvlan network is never deleted by this transaction.
+        if inspect_podman_network(info["name"]) != info:
+            raise RuntimeError("Previous non-macvlan network changed; manual recovery required")
+        return
+    for entry in info.get("subnets") or []:
+        key = "ipv6" if ":" in entry["subnet"] else "ipv4"
+        profile[key] = {
+            "subnet": entry["subnet"],
+            "gateway": entry.get("gateway") or "",
+        }
+    ok, error = ensure_podman_network(profile)
+    if not ok:
+        raise RuntimeError(error or "Could not restore previous network")
+
+
+def execute_host_job(
+    manager: ConfigManager,
+    op: str,
+    profile: dict | None,
+    snapshot_dir: Path,
+    *,
+    deadline: float,
+) -> dict:
+    """Apply/restart as one serialized transaction owned entirely by the host.
+
+    Recovery has its own bounded allowance and runs before the worker releases its
+    single-job lock. Snapshots remain host-only for recovery after a host crash.
+    """
+    from network_config import merge_ztp_update
+    from network_jobs import validate_profile
+
+    token = _OPERATION_DEADLINE.set(deadline)
+    before = candidate = None
+    committed = None
+    quadlet_fd = None
+    quadlet_bytes = None
+    intended_quadlet = None
+    old_network = target_network = None
+    stopped = False
+    snapshot_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+    try:
+        before = manager.read_config()
+        if op not in ("apply", "restart") or (op == "apply" and not validate_profile(profile)):
+            return {
+                "state": "failed",
+                "error_code": "validation",
+                "detail": "Invalid host operation",
+            }
+        # Revalidate any persisted profile too: the container may edit config.yaml.
+        persisted = get_ztp_profile(before)
+        if persisted.get("enabled"):
+            from network_jobs import build_apply_request
+
+            if not validate_profile(build_apply_request(persisted)["ztp"]):
+                raise ValueError("Persisted network profile is invalid")
+        candidate = merge_ztp_update(before, profile) if op == "apply" else deepcopy(before)
+        errors, _warnings = validate_ztp_profile(candidate)
+        if errors:
+            return {
+                "state": "failed",
+                "error_code": "validation",
+                "detail": "Host profile validation failed",
+            }
+        quadlet_fd = _open_directory(POD_FILE.parent)
+        quadlet_bytes = _read_regular(POD_FILE.name, quadlet_fd, 65536)
+        current_effective = resolve_effective_network(before)
+        effective = resolve_effective_network(candidate)
+        # Capture actual runtime network, not a draft profile previously saved by UI.
+        actual_quadlet = {"network": None, "ipv4": None, "ipv6": None}
+        for line in quadlet_bytes.decode().splitlines():
+            key, separator, value = line.strip().partition("=")
+            field = {"Network": "network", "IP": "ipv4", "IP6": "ipv6"}.get(key)
+            if separator and field:
+                actual_quadlet[field] = value.strip()
+        previous_name = actual_quadlet.get("network") or current_effective["podman_network"]
+        old_network = _snapshot_network(previous_name)
+        target_network = _snapshot_network(effective["podman_network"])
+        for info in (old_network, target_network):
+            if (
+                info
+                and info.get("driver") != "macvlan"
+                and op == "apply"
+                and info["name"] == effective["podman_network"]
+            ):
+                raise ValueError("Refusing to replace a non-macvlan network")
+        snapshot = {
+            "managed": _managed(before),
+            "old_network": old_network,
+            "target_network": target_network,
+            "quadlet": quadlet_bytes.decode(),
+        }
+        snapshot_fd = _open_directory(snapshot_dir)
+        try:
+            _atomic_at(snapshot_fd, "recovery.json", json.dumps(snapshot).encode())
+        finally:
+            os.close(snapshot_fd)
+        # Always stop for apply: an apparently no-op desired profile can have drift.
+        stopped = True
+        stop_ztp_stack()
+        if op == "apply":
+            ok, error = ensure_podman_network(get_ztp_profile(candidate))
+            if not ok:
+                raise RuntimeError(error or "Network creation failed")
+            intended_quadlet = render_pod_quadlet_content(get_ztp_profile(candidate)).encode()
+            if _read_regular(POD_FILE.name, quadlet_fd, 65536) != quadlet_bytes:
+                raise RuntimeError("Quadlet changed concurrently")
+            _atomic_at(quadlet_fd, POD_FILE.name, intended_quadlet, 0o644)
+            committed = _managed(candidate)
+            candidate = _cas_managed(manager, _managed(before), committed)
+        else:
+            fresh = manager.read_config()
+            if _managed(fresh) != _managed(before):
+                raise RuntimeError("Network configuration changed concurrently")
+            candidate = fresh
+        _regenerate_kea_configs(candidate, config_dir=manager.config_path.parent)
+        start_ztp_stack(dhcp_enabled=bool((candidate.get("dhcp") or {}).get("enabled")))
+        verify_effective_stack(candidate)
+        fresh = manager.read_config()
+        if _managed(fresh) != _managed(candidate) or fresh.get("dhcp") != candidate.get("dhcp"):
+            raise RuntimeError("Configuration changed during readiness checks")
+        if op == "apply":
+            finished = deepcopy(candidate)
+            ztp = finished["network"]["ztp"]
+            ztp.update(
+                status="applied",
+                applied_at=utc_now_iso(),
+                applied_parent=ztp["parent_interface"],
+                applied_network=effective["podman_network"],
+                last_error="",
+            )
+            _cas_managed(manager, committed, _managed(finished))
+        return {
+            "state": "succeeded",
+            "error_code": None,
+            "detail": "Host services and effective network verified",
+            "effective_applied": True,
+        }
+    except Exception as exc:
+        logger.exception("Host network operation failed")
+        timeout = isinstance(exc, (TimeoutError, subprocess.TimeoutExpired))
+        if not stopped:
+            return {
+                "state": "failed",
+                "error_code": "timeout" if timeout else "validation",
+                "detail": "Host prerequisites or configuration validation failed; no stack mutation performed",
+            }
+        # No command from the failed attempt remains running when rollback begins.
+        recovery_token = _OPERATION_DEADLINE.set(time.monotonic() + 300)
+        try:
+            stop_ztp_stack()
+            if committed is not None:
+                # Compare first: never replace a newer network edit with the backup.
+                restored = _cas_managed(manager, committed, _managed(before))
+            else:
+                restored = manager.read_config()
+                if _managed(restored) != _managed(before):
+                    raise RuntimeError("Concurrent network edit prevents automatic rollback")
+            if intended_quadlet is not None:
+                current_bytes = _read_regular(POD_FILE.name, quadlet_fd, 65536)
+                if current_bytes not in (intended_quadlet, quadlet_bytes):
+                    raise RuntimeError("Concurrent quadlet edit prevents automatic rollback")
+                _atomic_at(quadlet_fd, POD_FILE.name, quadlet_bytes, 0o644)
+            if (
+                op == "apply"
+                and target_network is None
+                and effective["podman_network"] != previous_name
+            ):
+                ok, error = remove_stale_network(effective["podman_network"], ztp_only=True)
+                if not ok:
+                    raise RuntimeError(error or "Could not remove candidate network")
+            _restore_network_info(target_network)
+            _restore_network_info(old_network)
+            _regenerate_kea_configs(restored, config_dir=manager.config_path.parent)
+            start_ztp_stack(dhcp_enabled=bool((restored.get("dhcp") or {}).get("enabled")))
+            # Previous actual quadlet may differ from a saved draft. Verify its
+            # addresses and network while retaining the user's desired config.
+            check = deepcopy(restored)
+            old_profile = get_ztp_profile(check)
+            old_profile.update(enabled=previous_name != "host", podman_network=previous_name)
+            old_profile["ipv4"]["address"] = actual_quadlet.get("ipv4") or ""
+            old_profile["ipv6"]["address"] = actual_quadlet.get("ipv6") or ""
+            if old_network:
+                old_profile["parent_interface"] = old_network.get("parent") or ""
+                old_profile["macvlan_mode"] = old_network.get("mode") or "bridge"
+                for entry in old_network.get("subnets") or []:
+                    block = old_profile["ipv6" if ":" in entry["subnet"] else "ipv4"]
+                    block.update(subnet=entry["subnet"], gateway=entry.get("gateway") or "")
+            check.setdefault("network", {})["ztp"] = old_profile
+            check.setdefault("container", {})["host_network"] = previous_name == "host"
+            verify_effective_stack(check)
+        except Exception:
+            logger.exception("Host network rollback failed")
+            return {
+                "state": "rollback_failed",
+                "error_code": "rollback_failed",
+                "detail": "Rollback incomplete; inspect host journal and retained recovery snapshot",
+                "effective_applied": False,
+            }
+        finally:
+            _OPERATION_DEADLINE.reset(recovery_token)
+        return {
+            "state": "failed",
+            "error_code": "timeout" if timeout else "podman_failed",
+            "detail": "Host operation failed; previous runtime restored and verified",
+            "effective_applied": False,
+        }
+    finally:
+        if quadlet_fd is not None:
+            os.close(quadlet_fd)
+        _OPERATION_DEADLINE.reset(token)

@@ -239,3 +239,293 @@ class TestNetworkDeploy(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHostTransaction(unittest.TestCase):
+    """Real config/quadlet persistence with controlled host failures and concurrency."""
+
+    def setUp(self):
+        from contextlib import ExitStack
+
+        import network_deploy as deploy
+        import yaml
+        from config_manager import ConfigManager
+
+        self.deploy = deploy
+        self.resources = ExitStack()
+        self.addCleanup(self.resources.close)
+        self.root = Path(self.resources.enter_context(tempfile.TemporaryDirectory()))
+        self.config_path = self.root / "config.yaml"
+        self.config = TestNetworkDeploy()._enabled_config()
+        self.config["network"]["ztp"]["vlan_id"] = 5
+        self.config["auth"] = {"keep": "original"}
+        self.config_path.write_text(yaml.safe_dump(self.config))
+        self.manager = ConfigManager(self.config_path)
+        self.pod_path = self.root / "ztpbootstrap.pod"
+        self.pod_path.write_text("[Pod]\nPodName=ztpbootstrap\nNetwork=ztp-net-5\nIP=10.0.5.10\n")
+        self.network = {
+            "name": "ztp-net-5",
+            "driver": "macvlan",
+            "parent": "enp7s0.5",
+            "mode": "bridge",
+            "subnets": [{"subnet": "10.0.5.0/24", "gateway": "10.0.5.1"}],
+            "containers": [],
+        }
+        self.resources.enter_context(patch("network_deploy.POD_FILE", self.pod_path))
+        self.resources.enter_context(
+            patch("network_deploy.inspect_podman_network", return_value=self.network)
+        )
+        self.ensure = self.resources.enter_context(
+            patch("network_deploy.ensure_podman_network", return_value=(True, None))
+        )
+        self.stop = self.resources.enter_context(patch("network_deploy.stop_ztp_stack"))
+        self.start = self.resources.enter_context(patch("network_deploy.start_ztp_stack"))
+        self.kea = self.resources.enter_context(patch("network_deploy._regenerate_kea_configs"))
+        self.verify = self.resources.enter_context(patch("network_deploy.verify_effective_stack"))
+        self.profile = self.config["network"]["ztp"].copy()
+        self.profile["ipv4"] = dict(self.profile["ipv4"], address="10.0.5.20")
+
+    def execute(self):
+        import time
+
+        return self.deploy.execute_host_job(
+            self.manager,
+            "apply",
+            self.profile,
+            self.root / "snapshot",
+            deadline=time.monotonic() + 10,
+        )
+
+    def test_restart_uses_host_lifetime_without_rewriting_config(self):
+        import time
+
+        before = self.config_path.read_bytes()
+        result = self.deploy.execute_host_job(
+            self.manager,
+            "restart",
+            None,
+            self.root / "snapshot",
+            deadline=time.monotonic() + 10,
+        )
+        self.assertEqual(result["state"], "succeeded")
+        self.assertTrue(result["effective_applied"])
+        self.assertEqual(self.config_path.read_bytes(), before)
+        self.ensure.assert_not_called()
+        self.stop.assert_called_once()
+        self.start.assert_called_once()
+        self.verify.assert_called_once()
+
+    def test_success_preserves_concurrent_unrelated_edits(self):
+        def concurrent_edit(_profile):
+            self.manager.update(lambda fresh: fresh["auth"].update(keep="concurrent"))
+            self.manager.update(
+                lambda fresh: fresh["dhcp"].update(reservations=[{"ip": "10.0.5.99"}])
+            )
+            return True, None
+
+        self.ensure.side_effect = concurrent_edit
+        result = self.execute()
+        self.assertEqual(result["state"], "succeeded")
+        final = self.manager.read_config()
+        self.assertEqual(final["auth"]["keep"], "concurrent")
+        self.assertEqual(final["dhcp"]["reservations"][0]["ip"], "10.0.5.99")
+        self.assertEqual(final["network"]["ztp"]["status"], "applied")
+        self.assertEqual(final["network"]["ztp"]["ipv4"]["address"], "10.0.5.20")
+        self.assertTrue((self.root / "snapshot" / "recovery.json").exists())
+        self.assertEqual((self.root / "snapshot" / "recovery.json").stat().st_mode & 0o777, 0o600)
+
+    def test_rollback_preserves_concurrent_auth_and_restores_only_network(self):
+        original_pod = self.pod_path.read_text()
+
+        self.kea.side_effect = [OSError("disk full"), None]
+        self.verify.side_effect = None
+        self.start.side_effect = lambda **_kwargs: self.manager.update(
+            lambda fresh: fresh["auth"].update(keep="during failure")
+        )
+        result = self.execute()
+        self.assertEqual(result["state"], "failed")
+        final = self.manager.read_config()
+        self.assertEqual(final["auth"]["keep"], "during failure")
+        self.assertEqual(final["network"]["ztp"]["ipv4"]["address"], "10.0.5.10")
+        self.assertEqual(self.pod_path.read_text(), original_pod)
+        self.assertEqual(self.kea.call_count, 2)
+        self.verify.assert_called_once()
+
+    def test_rollback_failure_is_distinct(self):
+        self.start.side_effect = RuntimeError("service failed")
+        result = self.execute()
+        self.assertEqual(result["state"], "rollback_failed")
+        self.assertEqual(result["error_code"], "rollback_failed")
+        self.assertFalse(result["effective_applied"])
+
+    def test_managed_concurrent_edit_is_never_overwritten(self):
+        def concurrent_edit(_profile):
+            self.manager.update(
+                lambda fresh: fresh["network"]["ztp"]["ipv4"].update(address="10.0.5.77")
+            )
+            return True, None
+
+        self.ensure.side_effect = concurrent_edit
+        result = self.execute()
+        self.assertEqual(result["state"], "rollback_failed")
+        self.assertEqual(
+            self.manager.read_config()["network"]["ztp"]["ipv4"]["address"], "10.0.5.77"
+        )
+
+    def test_partial_stop_failure_attempts_recovery(self):
+        self.stop.side_effect = [RuntimeError("partial stop"), None]
+        result = self.execute()
+        self.assertEqual(result["state"], "failed")
+        self.assertEqual(self.stop.call_count, 2)
+        self.start.assert_called_once()
+
+    def test_timeout_recovery_finishes_before_return(self):
+        self.ensure.side_effect = [
+            subprocess.TimeoutExpired("podman", 1),
+            (True, None),
+            (True, None),
+        ]
+        result = self.execute()
+        self.assertEqual(result["state"], "failed")
+        self.assertEqual(result["error_code"], "timeout")
+        self.start.assert_called_once()
+        self.verify.assert_called_once()
+
+    def test_unsafe_quadlet_is_rejected_before_stopping(self):
+        self.pod_path.unlink()
+        self.pod_path.symlink_to(self.config_path)
+        result = self.execute()
+        self.assertEqual(result["state"], "failed")
+        self.stop.assert_not_called()
+
+    def test_failed_postcheck_never_reports_effective_success(self):
+        self.verify.side_effect = [RuntimeError("wrong actual address"), None]
+        result = self.execute()
+        self.assertEqual(result["state"], "failed")
+        self.assertFalse(result["effective_applied"])
+        self.assertEqual(
+            self.manager.read_config()["network"]["ztp"]["ipv4"]["address"], "10.0.5.10"
+        )
+
+
+class TestHostBoundaries(unittest.TestCase):
+    def test_host_manager_rejects_symlink_config_lock_and_hardlink(self):
+        import os
+
+        from network_deploy import HostConfigManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            victim = root / "victim"
+            victim.write_text("auth: secret\n")
+            path = root / "config.yaml"
+            manager = HostConfigManager(path, root / "backups")
+            self.addCleanup(manager.close)
+            path.symlink_to(victim)
+            ok, _ = manager.update(lambda fresh: fresh.update(auth="changed"))
+            self.assertFalse(ok)
+            self.assertEqual(victim.read_text(), "auth: secret\n")
+            path.unlink()
+            os.link(victim, path)
+            ok, _ = manager.update(lambda fresh: fresh.update(auth="changed"))
+            self.assertFalse(ok)
+            path.unlink()
+            path.write_text("network: {}\n")
+            manager.lock_path.unlink()
+            manager.lock_path.symlink_to(victim)
+            ok, _ = manager.update(lambda fresh: fresh.update(auth="changed"))
+            self.assertFalse(ok)
+            self.assertEqual(victim.read_text(), "auth: secret\n")
+
+    def test_host_manager_backup_is_outside_container_directory(self):
+        from network_deploy import HostConfigManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            shared = root / "shared"
+            shared.mkdir()
+            path = shared / "config.yaml"
+            path.write_text("auth: original\n")
+            manager = HostConfigManager(path, root / "host" / "backups")
+            self.addCleanup(manager.close)
+            self.assertTrue(manager.update(lambda fresh: fresh.update(auth="changed"))[0])
+            self.assertEqual(manager.read_config()["auth"], "changed")
+            self.assertEqual(list(shared.glob("*.backup.*")), [])
+            self.assertEqual(len(list((root / "host" / "backups").glob("*.yaml"))), 1)
+
+    def test_kea_errors_propagate_and_directory_symlinks_are_rejected(self):
+        from network_deploy import _regenerate_kea_configs
+
+        with patch(
+            "dhcp_config.generate_kea_config",
+            side_effect=ValueError("invalid Kea config"),
+        ):
+            with self.assertRaises(ValueError):
+                _regenerate_kea_configs({"dhcp": {"enabled": True}})
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            outside = root / "outside"
+            outside.mkdir()
+            (root / "dhcp").symlink_to(outside, target_is_directory=True)
+            with patch("dhcp_config.generate_kea_config", return_value={"Dhcp4": {}}):
+                with self.assertRaises(OSError):
+                    _regenerate_kea_configs({"dhcp": {"enabled": True}}, root)
+            self.assertEqual(list(outside.iterdir()), [])
+
+    def test_subprocess_timeout_reaps_children_before_return(self):
+        import time
+
+        from network_deploy import _bounded_run
+
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = Path(tmp) / "orphan"
+            child = "import time,pathlib; time.sleep(.5); pathlib.Path(%r).write_text('bad')" % str(
+                marker
+            )
+            parent = (
+                "import subprocess,sys; p=subprocess.Popen([sys.executable,'-c',%r]); p.wait()"
+                % child
+            )
+            with self.assertRaises(subprocess.TimeoutExpired):
+                _bounded_run([sys.executable, "-c", parent], timeout=0.1)
+            time.sleep(0.6)
+            self.assertFalse(marker.exists())
+
+    def test_systemctl_timeout_cancels_exact_pending_job(self):
+        import network_deploy as deploy
+
+        with patch("network_deploy._bounded_run") as run:
+            run.side_effect = [
+                subprocess.TimeoutExpired("systemctl", 1),
+                subprocess.CompletedProcess([], 0, "321\n", ""),
+                subprocess.CompletedProcess([], 0, "", ""),
+            ]
+            with self.assertRaises(subprocess.TimeoutExpired):
+                deploy._run_systemctl(["start", "ztpbootstrap-webui.service"], timeout=1)
+            self.assertEqual(run.call_args_list[-1].args[0][-2:], ["cancel", "321"])
+
+    def test_postcheck_uses_actual_infra_address(self):
+        import json
+
+        import network_deploy as deploy
+
+        config = TestNetworkDeploy()._enabled_config()
+        with (
+            patch(
+                "network_deploy._run_systemctl",
+                return_value=subprocess.CompletedProcess([], 0),
+            ),
+            patch("network_deploy.inspect_running_pod", return_value={"running": True}),
+            patch("network_deploy._run_podman") as run,
+        ):
+            run.side_effect = [
+                subprocess.CompletedProcess([], 0, "a" * 64, ""),
+                subprocess.CompletedProcess(
+                    [],
+                    0,
+                    json.dumps({"Networks": {"ztp-net-5": {"IPAddress": "10.0.5.99"}}}),
+                    "",
+                ),
+            ]
+            with self.assertRaisesRegex(RuntimeError, "address differs"):
+                deploy.verify_effective_stack(config)
