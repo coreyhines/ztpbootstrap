@@ -267,3 +267,100 @@ Installs without `network.ztp` in `config.yaml` continue using legacy `network.i
 - [RUNTIME_ZTP_NETWORK_SPEC.md](RUNTIME_ZTP_NETWORK_SPEC.md) — feature spec, API, UI tabs
 - [DHCP_IMPLEMENTATION_PLAN.md](DHCP_IMPLEMENTATION_PLAN.md) — Kea configuration
 - [QUICK_START.md](QUICK_START.md) — lab mode with host networking (no macvlan)
+
+## Host worker for UI apply and restart (#13 / #57)
+
+The WebUI submits a durable job to a separate host systemd service. HTTP 202 means
+accepted, not applied. The worker survives stopping the pod and owns network,
+quadlet, configuration and service transitions. The browser polls authenticated
+`GET /api/network/jobs/<job_id>`; `GET /api/network/jobs` lists recent jobs. A
+successful result requires `state: succeeded` and `effective_applied: true`.
+Connection loss leaves the result unknown. Check recorded status before retrying.
+
+### Install or update on the rootful Linux host
+
+Use a reviewed checkout, outside the container. On Fedora install prerequisites
+through your host configuration management: `python3-pyyaml`, `podman`,
+`policycoreutils-python-utils`, `selinux-policy-devel`, `checkpolicy`, and `make`.
+Then run the idempotent installer through that same deployment workflow:
+
+```bash
+sudo ./scripts/install-network-worker.sh --check
+sudo ./scripts/install-network-worker.sh
+```
+
+The installer starts/restarts only the independent worker. Deploy the matching
+WebUI code/image and `systemd/ztpbootstrap-webui.container` through the fleet's
+reviewed deployment workflow, reload systemd, and recreate the WebUI at the
+planned maintenance window so its new socket-directory mount takes effect.
+Installing the worker alone does not update the running WebUI image or mount.
+The worker must never be given `PartOf` or `BindsTo` dependencies on the pod.
+
+Paths and permissions:
+
+| Path | Purpose |
+|---|---|
+| `/usr/local/lib/ztpbootstrap` | Root-owned installed Python modules; never import from the container-writable code/config bind |
+| `/var/lib/ztpbootstrap-network-worker` | Host-only job records, recovery snapshots and config backups; mode 0700, not mounted into the container |
+| `/run/ztpbootstrap/network-worker.sock` | Root-owned mode 0600 socket in a persistent runtime directory; directory mounted `ro,z` in the WebUI |
+| `ZTP_NETWORK_WORKER_SOCKET` | Optional WebUI client socket path override; default is the path above |
+| `ZTP_CONFIG_DIR` | Worker config directory; set in a host unit override for non-default installs |
+
+Initial support is rootful Podman with the WebUI mapped to host UID 0. Other peer
+UIDs are rejected. This is a fixed apply/restart/status interface, not a command
+runner. The existing Podman socket mount remains for other dashboard features.
+
+On SELinux hosts, the installer builds the embedded `ztp_network_worker` policy
+and adds a systemd `SELinuxContext` drop-in. The worker has a distinct domain with
+the trusted host-management privileges of an unconfined host service; the
+container remains confined. Only connection permission to that specific worker
+domain is added. SELinux remains enforcing. The runtime directory receives a
+persistent `container_file_t` label. Verify the installed configuration:
+
+```bash
+sudo systemctl is-active ztpbootstrap-network-worker.service
+sudo podman exec ztpbootstrap-webui python3 -c \
+  'from network_jobs import NetworkJobClient; print(NetworkJobClient().capabilities())'
+```
+
+Require `ok: true` and a Podman version before trying an apply. If denied, inspect
+`journalctl -u ztpbootstrap-network-worker` and `ausearch -m AVC -ts recent` on the
+host; do not disable SELinux or container labeling. A directory mounted before the
+worker was installed may need the WebUI recreated. `RuntimeDirectoryPreserve=yes`
+keeps the directory inode stable across later worker restarts.
+
+### Outcomes and recovery
+
+- `queued` / `running`: host operation is pending; do not submit another mutation.
+- `succeeded` + `effective_applied`: requested services and runtime were verified.
+- `failed`: inspect the result. A failure after mutation attempts rollback and
+  reports whether the old runtime was restored and verified.
+- `stale` / `rollback_failed`: intervention is required. The persistent
+  `.recovery-required` marker blocks new apply/restart submissions with HTTP 409.
+
+A host/worker interruption marks accepted queued/running jobs stale; it does not
+blindly replay them. To recover, stop **only the worker**, inspect its journal and
+`/var/lib/ztpbootstrap-network-worker/<job_id>/recovery.json`, inspect outstanding
+systemd jobs for the four fixed ZTP units, and resolve/cancel incomplete transitions.
+Restore or verify the intended network, quadlet, Kea configuration and service
+state. Preserve unrelated configuration edits. After that review, remove the
+host-only `.recovery-required` marker and start the worker. Removing the marker
+alone is not recovery. Do not expose recovery snapshots through Nginx.
+
+The UI offers an explicit link when the IP changes, preserving the current
+scheme, port and path. It never automatically sends authenticated requests to a
+new origin. Sign in there if needed and use recent jobs to recover the result.
+For rollback of this feature, revert the reviewed WebUI deployment first, then
+stop/disable the worker; retain host-only state until recovery evidence is no
+longer needed. Reverting the old synchronous UI does not repair its host-control
+limitation.
+
+### Verification recorded during implementation
+
+`podwich ztpbootstrap` located the live pod on fedora1. Its deployed WebUI already
+had working Podman client/socket access; `systemctl` inside it failed because it
+could not reach host systemd. The socket's `:ro` mount was not the cause.
+A separate Fedora VM confirmed confined-container socket access with the dedicated
+policy and SELinux enforcing. This does not constitute a production rollout or a
+successful live network migration. Run a controlled maintenance-window apply and
+failure/rollback check on the deployment host before closing production acceptance.

@@ -174,3 +174,24 @@ get_csrf_token() {
     assert_success
     assert_output --partial "AUTH_REQUIRED"
 }
+
+@test "network jobs endpoint requires auth" {
+    run curl "${CURL_OPTS[@]}" -s -o /dev/null -w "%{http_code}" "${BASE_URL}/api/network/jobs"
+    assert_success
+    [[ "$output" == "401" ]]
+}
+
+@test "network restart is a durable asynchronous job (explicit opt-in)" {
+    [[ "${ZTP_TEST_ALLOW_RESTART:-}" == "1" ]] || skip "Set ZTP_TEST_ALLOW_RESTART=1 only on an isolated test deployment"
+    require_auth_or_skip
+    get_csrf_token
+    local body="${BATS_TEST_TMPDIR}/restart.json"
+    run curl "${CURL_OPTS[@]}" -s --max-time 10 -b /tmp/test_cookies.txt \
+        -o "$body" -w "%{http_code}" -X POST \
+        -H "Content-Type: application/json" -H "X-CSRF-Token: ${AUTH_CSRF_TOKEN}" \
+        "${BASE_URL}/api/network/restart" -d '{}'
+    assert_success
+    [[ "$output" == "202" ]]
+    run python3 -c 'import json,sys,uuid; d=json.load(open(sys.argv[1])); uuid.UUID(d["job_id"]); assert d["state"] == "queued"; assert not d["job"]["effective_applied"]' "$body"
+    assert_success
+}

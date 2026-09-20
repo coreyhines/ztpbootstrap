@@ -261,6 +261,62 @@
                 </div>
             </div>
 
+            <!-- Host network job status: apply/restart are async and durable on the host worker (#13/#57) -->
+            <div x-show="activeApplication === 'ztp-network' && authenticated && (networkJob || networkJobNotice || networkJobRecoveryRequired)" class="bg-white rounded-lg shadow-sm p-6 mb-4">
+                <div class="flex items-center justify-between mb-3">
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-900">Host network job</h2>
+                        <p class="text-sm text-gray-600">Apply/restart are queued to an independent host worker — an accepted job is <em>not</em> a completed change</p>
+                    </div>
+                    <button x-show="networkJobBusy()" type="button" @click="pollNetworkJob()" class="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 text-sm">Refresh</button>
+                </div>
+                <div x-show="networkJob" class="mb-4 p-4 bg-gray-50 border border-gray-200 border-l-4 rounded-md" :class="networkJobStateClass()">
+                    <div class="flex items-center gap-2">
+                        <svg x-show="networkJobBusy()" class="w-4 h-4 text-blue-600 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                        </svg>
+                        <p class="text-sm font-medium text-gray-900">
+                            <span x-text="networkJob?.op === 'restart' ? 'Stack restart' : (networkJob?.op === 'apply' ? 'Network apply' : 'Host operation')"></span>
+                            — <span x-text="networkJobStateLabel()"></span>
+                        </p>
+                    </div>
+                    <p class="text-sm text-gray-700 mt-1" x-text="networkJobOutcomeText()"></p>
+                    <p class="text-xs text-gray-500 mt-2">
+                        <span x-show="networkJob?.job_id">Job <span class="font-mono" x-text="networkJob?.job_id"></span></span>
+                        <span x-show="networkJob?.podman_network"> · Network <span x-text="networkJob?.podman_network"></span></span>
+                        <span x-show="networkJob?.updated_at"> · Updated <span x-text="(networkJob?.updated_at || '').replace('T', ' ').slice(0, 19)"></span></span>
+                    </p>
+                    <div x-show="networkJobReconnectUrl()" class="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                        <p class="text-sm text-blue-900">This job moves the pod to a new address; the connection you are using may stop working at any moment. Continue at the new address (same scheme and port, validated by the worker):</p>
+                        <a :href="networkJobReconnectUrl()" class="inline-block mt-2 px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm font-medium" x-text="networkJobReconnectUrl()"></a>
+                        <p class="text-xs text-blue-800 mt-1">This page never redirects or navigates on its own.</p>
+                    </div>
+                </div>
+                <div x-show="networkJobRecoveryRequired || ['rollback_failed', 'stale'].includes(networkJob?.state || '')" class="mb-4 p-4 bg-red-50 border border-red-200 rounded-md">
+                    <p class="text-sm font-medium text-red-900">Host recovery required — new apply/restart submissions are blocked</p>
+                    <p class="text-sm text-red-700 mt-1">The host worker interrupted an operation or could not roll it back and locked new mutations. A host operator must remediate on the host first; removing the marker alone is <em>not</em> recovery:</p>
+                    <ol class="mt-2 text-sm text-red-800 list-decimal list-inside space-y-1">
+                        <li><code>sudo systemctl stop ztpbootstrap-network-worker.service</code></li>
+                        <li>Inspect the worker journal and the recovery snapshot under <code>/var/lib/ztpbootstrap-network-worker/</code>; resolve outstanding systemd jobs and runtime state for the ztpbootstrap units.</li>
+                        <li>Only after remediation: remove <code>/var/lib/ztpbootstrap-network-worker/.recovery-required</code>, then <code>sudo systemctl start ztpbootstrap-network-worker.service</code>.</li>
+                    </ol>
+                    <p class="text-xs text-red-700 mt-2">Runbook: docs/ZTP_NETWORK_HOST_SETUP.md → “Host network worker (async apply)”</p>
+                </div>
+                <div x-show="networkJobNotice" class="mb-4 p-3 border rounded-md" :class="networkJobNoticeClass()">
+                    <p class="text-sm" x-text="networkJobNotice?.text"></p>
+                </div>
+                <div x-show="networkJobsRecent.length" class="mt-2">
+                    <p class="text-xs font-medium text-gray-600 mb-1">Recent host jobs</p>
+                    <template x-for="recentJob in networkJobsRecent.slice(0, 5)" :key="recentJob.job_id">
+                        <div class="flex items-center justify-between text-sm py-0.5">
+                            <span x-text="`${recentJob.op} · ${recentJob.state}${recentJob.effective_applied ? ' · verified' : ''}`"></span>
+                            <span class="text-xs text-gray-500 font-mono" x-text="(recentJob.created_at || '').slice(0, 19)"></span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
             <!-- ZTP Network Panel -->
             <div x-show="activeApplication === 'ztp-network' && authenticated" class="bg-white rounded-lg shadow-sm p-6 mb-4">
                 <div x-show="networkStatus.drift" class="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
@@ -361,11 +417,12 @@
                     </template>
                 </div>
                 <div class="flex flex-wrap gap-3">
-                    <button @click="validateNetwork()" :disabled="loadingStates.network" class="px-4 py-2 bg-gray-100 text-gray-800 rounded-md hover:bg-gray-200 text-sm">Validate</button>
-                    <button @click="saveNetwork()" :disabled="loadingStates.network" class="px-4 py-2 bg-blue-100 text-blue-800 rounded-md hover:bg-blue-200 text-sm">Save</button>
-                    <button @click="applyNetwork()" :disabled="loadingStates.network" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm">Apply &amp; restart</button>
-                    <button @click="restartNetworkStack()" :disabled="loadingStates.network" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm">Restart only</button>
+                    <button @click="validateNetwork()" :disabled="loadingStates.network || networkJobBusy() || networkJobRecoveryRequired" class="px-4 py-2 bg-gray-100 text-gray-800 rounded-md hover:bg-gray-200 text-sm">Validate</button>
+                    <button @click="saveNetwork()" :disabled="loadingStates.network || networkJobBusy() || networkJobRecoveryRequired" class="px-4 py-2 bg-blue-100 text-blue-800 rounded-md hover:bg-blue-200 text-sm">Save</button>
+                    <button @click="applyNetwork()" :disabled="loadingStates.network || networkJobBusy() || networkJobRecoveryRequired" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm">Apply &amp; restart</button>
+                    <button @click="restartNetworkStack()" :disabled="loadingStates.network || networkJobBusy() || networkJobRecoveryRequired" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 text-sm">Restart only</button>
                 </div>
+                <p x-show="networkJobBusy()" class="mt-3 text-sm text-blue-700">A host network job is queued or running on the worker. These controls stay disabled until it finishes; the worker also rejects duplicate submissions while a job is active.</p>
             </div>
 
             <!-- DHCP Server Status Cards -->
@@ -1856,6 +1913,14 @@
                 networkParents: [],
                 networkValidation: { errors: [], warnings: [] },
                 networkPollInterval: null,
+                // Durable host-worker job state (#13/#57). A queued/running job
+                // survives page reloads via sessionStorage and is only ever
+                // tracked through GET status polls — mutations are never retried.
+                networkJob: null,
+                networkJobNotice: null,
+                networkJobRecoveryRequired: false,
+                networkJobsRecent: [],
+                networkJobPollTimer: null,
                 // DHCP state
                 dhcpConfig: {
                     enabled: false,
@@ -1991,6 +2056,7 @@
                     this.$watch('authenticated', (isAuthed) => {
                         if (isAuthed) {
                             this.closeLoginModal();
+                            this.resumeNetworkJobTracking();
                         } else {
                             this.syncLoginModalVisibility();
                         }
@@ -2015,6 +2081,7 @@
                         if (this.logRefreshInterval) {
                             clearInterval(this.logRefreshInterval);
                         }
+                        this.stopNetworkJobPolling();
                     });
 
                     // Watch for application changes
@@ -2091,6 +2158,12 @@
 
                     // Check authentication status
                     await this.checkAuthStatus();
+
+                    // Resume tracking a durable host network job that outlived a
+                    // page reload (#13). Read-only status query; never a retry.
+                    if (this.authenticated) {
+                        this.resumeNetworkJobTracking();
+                    }
 
                     // Small delay to ensure Alpine.js is fully initialized
                     await new Promise(resolve => setTimeout(resolve, 100));
@@ -3621,49 +3694,420 @@
                     }
                 },
 
-                async applyNetwork() {
-                    if (!await this.ensureAuthForNetwork(() => this.applyNetwork())) return;
-                    if (!confirm('Apply network changes and restart the ztpbootstrap pod?')) return;
-                    this.loadingStates.network = true;
+                // Host network worker jobs (#13/#57): apply/restart are durable,
+                // asynchronous host operations. This page submits once, then only
+                // ever issues GET status polls. A 202 is durable acceptance by the
+                // worker — never proof that the network changed or the stack
+                // restarted.
+
+                networkJobBusy() {
+                    return !!(this.networkJob && (this.networkJob.state === 'queued' || this.networkJob.state === 'running'));
+                },
+
+                networkJobStateLabel() {
+                    const job = this.networkJob;
+                    if (!job) return '';
+                    switch (job.state) {
+                        case 'queued':
+                            return 'Queued — accepted by the worker, not applied yet';
+                        case 'running':
+                            return 'Running on the host worker';
+                        case 'succeeded':
+                            return job.effective_applied === true
+                                ? 'Completed and verified on the host'
+                                : 'Finished, but verification did not confirm the change';
+                        case 'failed':
+                            return 'Failed on the host worker';
+                        case 'rollback_failed':
+                            return 'Rollback failed — host state uncertain';
+                        case 'stale':
+                            return 'Interrupted (stale) — host state uncertain';
+                        default:
+                            return 'Unknown state';
+                    }
+                },
+
+                networkJobStateClass() {
+                    const job = this.networkJob;
+                    if (!job) return '';
+                    if (this.networkJobBusy()) return 'border-blue-500';
+                    if (job.state === 'succeeded' && job.effective_applied === true) return 'border-green-500';
+                    if (['failed', 'rollback_failed', 'stale'].includes(job.state)) return 'border-red-500';
+                    return 'border-yellow-500';
+                },
+
+                networkJobOutcomeText() {
+                    const job = this.networkJob;
+                    if (!job) return '';
+                    const op = job.op === 'restart' ? 'stack restart' : 'network apply';
+                    switch (job.state) {
+                        case 'queued':
+                        case 'running':
+                            return (job.detail || `The host worker accepted the ${op}.`) + ' This is NOT proof the change completed — wait for the final state.';
+                        case 'succeeded':
+                            return job.effective_applied === true
+                                ? `The host worker completed the ${op} and verified the effective network state.`
+                                : `The worker reported the ${op} finished but could not verify the effective state. Treat it as not applied until checked on the host.`;
+                        case 'failed':
+                            return (job.detail || `The ${op} failed.`) + ' Check the worker journal on the host before retrying.';
+                        case 'rollback_failed':
+                            return 'Automatic rollback failed; the host may be partially configured. Follow the recovery procedure below before any new apply.';
+                        case 'stale':
+                            return 'The worker restarted while this job was active and marked it stale. Inspect the host before retrying — see the recovery procedure below.';
+                        default:
+                            return job.detail || '';
+                    }
+                },
+
+                networkJobNoticeClass() {
+                    const kind = (this.networkJobNotice && this.networkJobNotice.kind) || 'info';
+                    return {
+                        busy: 'bg-yellow-50 border-yellow-200 text-yellow-800',
+                        unknown: 'bg-orange-50 border-orange-200 text-orange-800',
+                        error: 'bg-red-50 border-red-200 text-red-800',
+                        info: 'bg-blue-50 border-blue-200 text-blue-800'
+                    }[kind] || 'bg-blue-50 border-blue-200 text-blue-800';
+                },
+
+                networkJobReconnectUrl() {
+                    // Preserve this page's scheme/port/path and substitute ONLY the
+                    // worker-reported IP literal from changed_endpoint.after. Built
+                    // as an explicit link: never used for automatic navigation.
+                    const after = this.networkJob && this.networkJob.changed_endpoint && this.networkJob.changed_endpoint.after;
+                    if (typeof after !== 'string' || !after) return null;
+                    let parsed;
                     try {
-                        const response = await fetch('/api/network/apply', {
+                        parsed = new URL(after);
+                    } catch (_e) {
+                        return null;
+                    }
+                    if (parsed.username || parsed.password) return null;
+                    const host = (parsed.hostname || '').replace(/^\[|\]$/g, '');
+                    const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+                    const validV4 = !!v4 && v4.slice(1).every(octet => Number(octet) <= 255);
+                    const validV6 = !validV4 && host.includes(':') && /^[0-9a-fA-F:.]+$/.test(host);
+                    if (!validV4 && !validV6) return null;
+                    const hostLiteral = validV6 ? `[${host}]` : host;
+                    const port = window.location.port ? `:${window.location.port}` : '';
+                    return `${window.location.protocol}//${hostLiteral}${port}${window.location.pathname}`;
+                },
+
+                networkJobStorageKey() {
+                    return 'ztpbootstrap-network-job';
+                },
+
+                _rememberNetworkJob(job) {
+                    // Persist an active job id across reloads; clear on terminal.
+                    try {
+                        if (job && job.job_id && (job.state === 'queued' || job.state === 'running')) {
+                            sessionStorage.setItem(this.networkJobStorageKey(), JSON.stringify({ job_id: job.job_id, op: job.op || null }));
+                        } else {
+                            sessionStorage.removeItem(this.networkJobStorageKey());
+                        }
+                    } catch (_e) { /* sessionStorage unavailable: tracking continues in memory */ }
+                },
+
+                _readRememberedNetworkJob() {
+                    let raw;
+                    try {
+                        raw = sessionStorage.getItem(this.networkJobStorageKey());
+                    } catch (_e) {
+                        return null;
+                    }
+                    if (!raw) return null;
+                    try {
+                        const parsed = JSON.parse(raw);
+                        if (parsed && this._isValidJobId(parsed.job_id)) {
+                            return { job_id: parsed.job_id, op: typeof parsed.op === 'string' ? parsed.op : null };
+                        }
+                    } catch (_e) {
+                        // Tolerate a legacy plain-id value.
+                        if (this._isValidJobId(raw)) return { job_id: raw, op: null };
+                    }
+                    return null;
+                },
+
+                _isValidJobId(jobId) {
+                    return typeof jobId === 'string' &&
+                        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(jobId);
+                },
+
+                trackNetworkJob(job) {
+                    this.networkJob = job || null;
+                    this._rememberNetworkJob(job);
+                    if (job && (job.state === 'queued' || job.state === 'running')) {
+                        this.startNetworkJobPolling();
+                    }
+                },
+
+                finishNetworkJob() {
+                    this.stopNetworkJobPolling();
+                    this._rememberNetworkJob(null);
+                    // Read-only refresh of the network tab now that the job settled.
+                    this.loadNetworkStatus();
+                },
+
+                startNetworkJobPolling() {
+                    this.stopNetworkJobPolling();
+                    // Only GET status polls after enqueue — never re-POST a mutation.
+                    this.networkJobPollTimer = setInterval(() => this.pollNetworkJob(), 3000);
+                },
+
+                stopNetworkJobPolling() {
+                    if (this.networkJobPollTimer) {
+                        clearInterval(this.networkJobPollTimer);
+                        this.networkJobPollTimer = null;
+                    }
+                },
+
+                async pollNetworkJob() {
+                    const job = this.networkJob;
+                    if (!job || !job.job_id || !this.networkJobBusy()) {
+                        this.stopNetworkJobPolling();
+                        return;
+                    }
+                    try {
+                        const response = await fetch(`/api/network/jobs/${job.job_id}`, { credentials: 'same-origin' });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            this.stopNetworkJobPolling();
+                            return;
+                        }
+                        if (response.status === 404) {
+                            // Record pruned from the worker: the outcome is UNKNOWN, never success.
+                            this.stopNetworkJobPolling();
+                            this._rememberNetworkJob(null);
+                            this.networkJobNotice = {
+                                kind: 'unknown',
+                                text: 'The host worker no longer has this job on record. Do not assume the change applied — verify host state directly before a new apply.'
+                            };
+                            return;
+                        }
+                        if (!response.ok) {
+                            // Worker trouble: keep last known state, retry on the next tick.
+                            return;
+                        }
+                        const data = await response.json();
+                        this.networkJobRecoveryRequired = !!data.recovery_required;
+                        if (data.job) {
+                            this.networkJob = data.job;
+                            if (!this.networkJobBusy()) {
+                                this.finishNetworkJob();
+                            }
+                        }
+                    } catch (error) {
+                        // Connection lost mid-poll: the host outcome is UNKNOWN, not failure.
+                        this.networkJobNotice = {kind: 'unknown', text: 'Connection lost. The operation may still be running; waiting for its recorded result.'};
+                    }
+                },
+
+                async fetchNetworkJobs() {
+                    try {
+                        const response = await fetch('/api/network/jobs', { credentials: 'same-origin' });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            return null;
+                        }
+                        if (!response.ok) return null;
+                        return await response.json();
+                    } catch (_e) {
+                        return null;
+                    }
+                },
+
+                async recoverAmbiguousNetworkSubmission(reason) {
+                    // The submit answer never arrived: recover via the read-only job
+                    // listing instead of blindly re-sending a mutation.
+                    const data = await this.fetchNetworkJobs();
+                    if (data && Array.isArray(data.jobs)) this.networkJobsRecent = data.jobs;
+                    if (!data) {
+                        this.networkJobNotice = {
+                            kind: 'unknown',
+                            text: reason + ' The worker could not be reached either: the host outcome is UNKNOWN. Do not assume success or failure — inspect the host before retrying.'
+                        };
+                        return;
+                    }
+                    this.networkJobRecoveryRequired = !!data.recovery_required;
+                    const recent = Array.isArray(data.jobs) ? data.jobs : [];
+                    const active = recent.find(j => j.state === 'queued' || j.state === 'running') ||
+                        (data.job && (data.job.state === 'queued' || data.job.state === 'running') ? data.job : null);
+                    if (active) {
+                        this.trackNetworkJob(active);
+                        this.networkJobNotice = {
+                            kind: 'info',
+                            text: reason + ' An active job exists; tracking job ' + active.job_id + '.'
+                        };
+                    } else {
+                        this.networkJobNotice = {
+                            kind: 'unknown',
+                            text: reason + ' No job is currently active. The operation may already have finished; review recent jobs before retrying.'
+                        };
+                    }
+                },
+
+                async resumeNetworkJobTracking() {
+                    const remembered = this._readRememberedNetworkJob();
+                    if (!remembered) {
+                        const listing = await this.fetchNetworkJobs();
+                        if (listing) {
+                            this.networkJobRecoveryRequired = !!listing.recovery_required;
+                            this.networkJobsRecent = listing.jobs || [];
+                            if (listing.job) this.trackNetworkJob(listing.job);
+                        }
+                        return;
+                    }
+                    try {
+                        const response = await fetch(`/api/network/jobs/${remembered.job_id}`, { credentials: 'same-origin' });
+                        if (response.status === 401) {
+                            this.authenticated = false;
+                            return;
+                        }
+                        if (response.status === 404) {
+                            this._rememberNetworkJob(null);
+                            return;
+                        }
+                        if (!response.ok) {
+                            this._resumeUnreachable(remembered);
+                            return;
+                        }
+                        const data = await response.json();
+                        this.networkJobRecoveryRequired = !!data.recovery_required;
+                        if (data.job) {
+                            this.networkJob = data.job;
+                            if (this.networkJobBusy()) {
+                                this.startNetworkJobPolling();
+                            } else {
+                                this._rememberNetworkJob(null);
+                                this.loadNetworkStatus();
+                            }
+                        } else {
+                            this._rememberNetworkJob(null);
+                        }
+                    } catch (_e) {
+                        this._resumeUnreachable(remembered);
+                    }
+                },
+
+                _resumeUnreachable(remembered) {
+                    // The job may still be running on the host: keep polling its
+                    // status. The outcome is UNKNOWN until the worker answers.
+                    this.networkJob = {
+                        job_id: remembered.job_id,
+                        op: remembered.op || 'unknown',
+                        state: 'queued',
+                        detail: 'Waiting for the worker job record…'
+                    };
+                    this.startNetworkJobPolling();
+                    this.networkJobNotice = {
+                        kind: 'unknown',
+                        text: 'A host network job was submitted before this page loaded, but its status cannot be reached right now. The host outcome is UNKNOWN — polling continues until the worker answers.'
+                    };
+                },
+
+                async submitNetworkJob(endpoint, payload, confirmMessage) {
+                    if (!await this.ensureAuthForNetwork(() => this.submitNetworkJob(endpoint, payload, confirmMessage))) return;
+                    if (this.networkJobBusy() || this.networkJobRecoveryRequired || this.loadingStates.network) return; // no duplicate submissions
+                    if (!confirm(confirmMessage)) return;
+                    this.loadingStates.network = true;
+                    this.networkJobNotice = null;
+                    const opLabel = endpoint.endsWith('/restart') ? 'restart' : 'apply';
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 15000);
+                    try {
+                        const response = await fetch(endpoint, {
                             method: 'POST',
                             credentials: 'same-origin',
                             headers: this.getCsrfHeaders(),
-                            body: JSON.stringify(this.networkPayload())
+                            body: JSON.stringify(payload),
+                            signal: controller.signal
                         });
-                        const data = await response.json();
-                        if (!response.ok) throw new Error(data.error || 'Apply failed');
-                        await this.loadNetworkStatus();
-                        alert('Network applied and stack restarted');
+                        const data = await response.json().catch(() => null);
+                        if (response.status === 202 && data && data.job_id) {
+                            // HTTP 202 = durable acceptance only; nothing is applied yet.
+                            this.networkJobRecoveryRequired = false;
+                            this.trackNetworkJob(data.job || {
+                                job_id: data.job_id,
+                                op: opLabel,
+                                state: data.state || 'queued',
+                                detail: 'Accepted by the host worker; awaiting execution'
+                            });
+                            return;
+                        }
+                        if (response.status === 409) {
+                            // Busy or recovery interlock: adopt the reported job,
+                            // never resubmit. The worker says which job is active.
+                            this.networkJobRecoveryRequired = !!(data && data.recovery_required);
+                            if (data && data.job && data.job.job_id) {
+                                this.trackNetworkJob(data.job);
+                            }
+                            this.networkJobNotice = {
+                                kind: this.networkJobRecoveryRequired ? 'error' : 'busy',
+                                text: this.networkJobRecoveryRequired
+                                    ? ((data && data.error) || 'The host worker requires recovery; new submissions are blocked.')
+                                    : 'Another host network job is already active; this submission was not accepted. Wait for it to finish.'
+                            };
+                            const listing = await this.fetchNetworkJobs();
+                            if (listing) {
+                                if (Array.isArray(listing.jobs)) this.networkJobsRecent = listing.jobs;
+                                if (!this.networkJob && listing.job &&
+                                    (listing.job.state === 'queued' || listing.job.state === 'running')) {
+                                    this.trackNetworkJob(listing.job);
+                                }
+                            }
+                            return;
+                        }
+                        if (response.status === 400) {
+                            const details = data && Array.isArray(data.errors) && data.errors.length
+                                ? data.errors.join('; ')
+                                : ((data && data.error) || 'Invalid request');
+                            alert('Rejected: ' + details);
+                            return;
+                        }
+                        if (response.status === 401 || response.status === 403) {
+                            this.authenticated = false;
+                            await this.checkAuthStatus();
+                            if (!this.authenticated) {
+                                this.pendingAction = () => this.submitNetworkJob(endpoint, payload, confirmMessage);
+                                this.showLoginModal = true;
+                            }
+                            alert((data && data.error) || 'Authentication required — please sign in again.');
+                            return;
+                        }
+                        if (response.status >= 500) {
+                            // 502/503/5xx: the worker may have durably accepted the
+                            // job before the answer was lost. Recover via listing.
+                            await this.recoverAmbiguousNetworkSubmission(
+                                'The server reported a worker-side problem (' + ((data && data.error) || response.status) + ') and the submission outcome is uncertain.'
+                            );
+                            return;
+                        }
+                        alert('Submit failed: ' + ((data && data.error) || `Unexpected server response (${response.status})`));
                     } catch (error) {
-                        alert('Apply failed: ' + error.message);
-                        await this.loadNetworkStatus();
+                        // Lost connection or timeout DURING submission: outcome UNKNOWN.
+                        await this.recoverAmbiguousNetworkSubmission(
+                            'The connection dropped while submitting (' +
+                            (error && error.name === 'AbortError' ? 'timeout' : ((error && error.message) || 'network error')) + ').'
+                        );
                     } finally {
+                        clearTimeout(timeoutId);
                         this.loadingStates.network = false;
                     }
                 },
 
+                async applyNetwork() {
+                    await this.submitNetworkJob(
+                        '/api/network/apply',
+                        this.networkPayload(),
+                        'Submit the network change to the host worker? The worker will stop and restart the pod to apply it; an accepted job is not a completed change.'
+                    );
+                },
+
                 async restartNetworkStack() {
-                    if (!await this.ensureAuthForNetwork(() => this.restartNetworkStack())) return;
-                    if (!confirm('Restart the ztpbootstrap stack?')) return;
-                    this.loadingStates.network = true;
-                    try {
-                        const response = await fetch('/api/network/restart', {
-                            method: 'POST',
-                            credentials: 'same-origin',
-                            headers: this.getCsrfHeaders(),
-                            body: JSON.stringify({})
-                        });
-                        const data = await response.json();
-                        if (!response.ok) throw new Error(data.error || 'Restart failed');
-                        await this.loadNetworkStatus();
-                        alert('Stack restart requested');
-                    } catch (error) {
-                        alert('Restart failed: ' + error.message);
-                    } finally {
-                        this.loadingStates.network = false;
-                    }
+                    await this.submitNetworkJob(
+                        '/api/network/restart',
+                        {},
+                        'Request a stack restart from the host worker? The restart runs asynchronously; an accepted job is not a completed restart.'
+                    );
                 },
 
                 async autoDetectNetwork() {

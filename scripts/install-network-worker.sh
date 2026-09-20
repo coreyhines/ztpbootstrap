@@ -6,6 +6,37 @@ usage() {
     printf 'Usage: %s [--check]\nInstall the rootful host network worker; --check only validates prerequisites.\n' "$0"
 }
 
+install_socket_policy() (
+    # Keep the existing privileged host-service role, but give this worker a
+    # distinct peer type. The connecting container remains confined.
+    local policy_dir
+    policy_dir="$(mktemp -d)"
+    trap 'rm -rf -- "${policy_dir}"' EXIT
+    cat > "${policy_dir}/ztp_network_worker.te" <<'POLICY'
+policy_module(ztp_network_worker, 1.0.0)
+type ztp_network_worker_t;
+domain_type(ztp_network_worker_t)
+role system_r types ztp_network_worker_t;
+unconfined_domain(ztp_network_worker_t)
+gen_require(`
+    type init_t;
+    type bin_t;
+    type container_t;
+')
+allow init_t ztp_network_worker_t:process transition;
+allow ztp_network_worker_t bin_t:file entrypoint;
+allow container_t ztp_network_worker_t:unix_stream_socket connectto;
+POLICY
+    make -C "${policy_dir}" -f /usr/share/selinux/devel/Makefile ztp_network_worker.pp
+    semodule -i "${policy_dir}/ztp_network_worker.pp"
+    install -d -o root -g root -m 0755 \
+        /etc/systemd/system/ztpbootstrap-network-worker.service.d
+    printf '[Service]\nSELinuxContext=system_u:system_r:ztp_network_worker_t:s0\n' \
+        > "${policy_dir}/selinux.conf"
+    install -o root -g root -m 0644 "${policy_dir}/selinux.conf" \
+        /etc/systemd/system/ztpbootstrap-network-worker.service.d/selinux.conf
+)
+
 main() {
     local check_only=0 command source_dir target module effective_uid
     readonly target=/usr/local/lib/ztpbootstrap
@@ -38,9 +69,13 @@ main() {
         [[ "${rootless}" == false ]] || { printf 'Error: only rootful Podman is supported.\n' >&2; exit 1; }
     }
     if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
-        for command in semanage restorecon; do
+        for command in semanage restorecon semodule make checkmodule mktemp rm cat; do
             command -v "${command}" >/dev/null 2>&1 || { printf 'Error: %s required for persistent SELinux labels.\n' "${command}" >&2; return 1; }
         done
+        [[ -f /usr/share/selinux/devel/Makefile ]] || {
+            printf 'Error: install selinux-policy-devel, policycoreutils-python-utils, checkpolicy and make.\n' >&2
+            return 1
+        }
     fi
     local modules=(network_jobs network_deploy network_config network_utils network_validation config_manager dhcp_config dhcp_utils)
     for module in "${modules[@]}"; do
@@ -49,7 +84,7 @@ main() {
         }
     done
     if (( check_only )); then
-        printf 'Host prerequisites present. SELinux socket connectivity must still be verified from the WebUI.\n'
+        printf 'Host prerequisites present. Verify socket connectivity after installation.\n'
         return 0
     fi
     # Stop only the independent worker before updating its trusted module set.
@@ -66,10 +101,10 @@ main() {
     chmod 0555 "${target}"
     install -d -o root -g root -m 0700 /run/ztpbootstrap /var/lib/ztpbootstrap-network-worker
     if command -v selinuxenabled >/dev/null 2>&1 && selinuxenabled; then
-        # This labels the socket inode for the container bind mount. The peer's
-        # process domain still needs connectto permission; verify it explicitly.
-        semanage fcontext -a -t container_file_t '/run/ztpbootstrap(/.*)?' 2>/dev/null || \
-            semanage fcontext -m -t container_file_t '/run/ztpbootstrap(/.*)?'
+        install_socket_policy
+        # Label the inode; the policy above separately permits peer connection.
+        semanage fcontext -a -t container_file_t '/var/run/ztpbootstrap(/.*)?' 2>/dev/null || \
+            semanage fcontext -m -t container_file_t '/var/run/ztpbootstrap(/.*)?'
         restorecon -RF /run/ztpbootstrap "${target}"
     fi
     install -o root -g root -m 0644 "${source_dir}/systemd/ztpbootstrap-network-worker.service" \
