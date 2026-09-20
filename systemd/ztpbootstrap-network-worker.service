@@ -1,0 +1,29 @@
+[Unit]
+Description=ZTP network host worker
+After=network-online.target
+Wants=network-online.target
+# Independent of the pod: do not add PartOf= or BindsTo=.
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+RuntimeDirectory=ztpbootstrap
+RuntimeDirectoryMode=0700
+# Keep the bind-mounted directory inode stable across worker restarts.
+RuntimeDirectoryPreserve=yes
+StateDirectory=ztpbootstrap-network-worker
+StateDirectoryMode=0700
+Environment=ZTP_CONFIG_DIR=/opt/containerdata/ztpbootstrap
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+UnsetEnvironment=CONTAINER_HOST CONTAINER_CONNECTION CONTAINER_SOCK PYTHONPATH PYTHONHOME
+ExecStart=/usr/bin/python3 -I /usr/local/lib/ztpbootstrap/worker.py
+Restart=on-failure
+RestartSec=3
+# A graceful worker stop must retain ownership through the 900s apply + recovery.
+TimeoutStopSec=1250
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target

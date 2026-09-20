@@ -249,3 +249,19 @@ imports only, correct ConfigManager API, viable rootful socket permissions, no
 invented SELinux policy, strict busy semantics, transaction-safe rollback, and
 complete readiness checks. Live diagnosis reproduced only systemd access failure;
 Podman itself works in the deployed WebUI. These corrections stay in H1's file.
+
+## H2 recovery interlock (coordinator review)
+
+`stale` and `rollback_failed` persist a host-only `.recovery-required` marker in
+`/var/lib/ztpbootstrap-network-worker/` before their terminal record is written.
+While it exists, every apply/restart submission returns `worker_busy` with
+`recovery_required: true` and the affected job when available. Status remains
+available and includes `recovery_required`. Worker restart and job retention do
+not clear the marker. There is deliberately no protocol reset operation.
+
+An operator must stop the worker, inspect the retained recovery snapshot and
+systemd jobs for the fixed ZTP units, resolve/cancel outstanding transitions,
+and verify or restore the intended runtime. Only after that remediation may the
+operator remove `.recovery-required` from the host-only state directory and start
+the worker again. Removing the marker alone is not recovery. This prevents a new
+apply from overlapping uncertain host work after interruption or failed rollback.

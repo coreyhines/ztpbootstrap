@@ -1,5 +1,8 @@
 [Unit]
 Description=ZTP Bootstrap Web UI Container
+# Create the host socket directory before Podman binds it at boot.
+Wants=ztpbootstrap-network-worker.service
+After=ztpbootstrap-network-worker.service
 # Cap automatic restarts: five starts in five minutes, then the unit stays
 # failed instead of retrying forever. A fault that survives a restart should
 # be visible as a failed unit, not hidden behind an endless restart loop.
@@ -18,6 +21,8 @@ Volume=/run/systemd/journal:/run/systemd/journal:ro
 Volume=/run/log/journal:/run/log/journal:ro
 Volume=/var/log/journal:/var/log/journal:ro,z
 Volume=/run/podman/podman.sock:/run/podman/podman.sock:ro,z
+# Host worker survives pod restarts; rootful UID 0 and SELinux connectto required.
+Volume=/run/ztpbootstrap:/run/ztpbootstrap:ro,z
 Volume=/etc/containers/systemd/ztpbootstrap:/etc/containers/systemd/ztpbootstrap:rw
 Volume=/sys/class/net:/sys/class/net:ro
 Environment=TZ=UTC
