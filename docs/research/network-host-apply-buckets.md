@@ -63,8 +63,23 @@ unrelated setup bugs, and podman PR #7 title cleanup are out of scope.
 
 ## Status
 
-H1 ready to execute; H2/H3 waiting on dependencies. No deployment authorized.
-Execution snapshot: `pb-sessions/network-host-apply/execute-before.json`.
-Claude is now 100%, which makes the legacy aggregate RED; no scheduled bucket
-uses Claude. H1 remains on approved local capacity. Retain the approved project
-model choices rather than the probe's stale built-in model fallback.
+Implementation complete on `feature/network-host-apply`; no production deployment.
+
+| Bucket | Result | Commit | Executor evidence |
+|---|---|---|---|
+| H1 | Integrated with coordinator security corrections | a390e94, 43b765b | /tmp/ollama-bucket-H1.log |
+| H2 | Integrated; coordinator completed SELinux installer after agent usage-limit error | 3905a91, 4e0ec3d | /root/h2_host_worker |
+| H3 | Integrated; coordinator completed/repaired after timeout then round limit | 4e0ec3d | /tmp/ollama-bucket-H3.log; /tmp/network-host-apply-H3-retry.log |
+
+User said "continue" after the capacity issue. A cloud reroute for H2 was announced,
+then withdrawn before dispatch when Codex capacity reset. H2 did run on the originally
+approved native Codex agent. It completed worker/tests/recovery lock before a later
+usage-limit error. No H2 cloud execution occurred; the final SELinux installer work
+was explicitly taken over by the coordinator. H3 exhausted two farm attempts;
+coordinator fallback follows AGENTS.md and was announced in chat.
+
+Verification: 307 Python tests pass; 34 worker/transaction tests also pass on Linux;
+23 CI checks pass; changed Python black/ruff and shellcheck pass; JS behavior checks
+pass; actual worker/client socket exchange verified under systemd and confined
+Podman with SELinux enforcing. Live BATS tests skipped (no local deployed WebUI).
+See execution report for complete limits and capacity economics.
