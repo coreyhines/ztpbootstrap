@@ -17,5 +17,5 @@ load_versions_env() {
     NGINX_IMAGE="${NGINX_IMAGE:-docker.io/nginx:1.30.2}"
     POSTGRES_IMAGE="${POSTGRES_IMAGE:-docker.io/library/postgres:17.10-alpine}"
     WEBUI_IMAGE="${WEBUI_IMAGE:-registry.fedoraproject.org/fedora:44}"
-    KEA_IMAGE="${KEA_IMAGE:-ztpbootstrap-kea:3.0.3}"
+    KEA_IMAGE="${KEA_IMAGE:-hub.freeblizz.com/ztpbootstrap-kea:3.0.4-1}"
 }

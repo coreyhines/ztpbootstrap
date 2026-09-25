@@ -1,5 +1,5 @@
 #!/bin/sh
-# Start Kea DHCP services (image built from kea/Containerfile, tagged ztpbootstrap-kea:3.0.3)
+# Start Kea DHCP services (image built from kea/Containerfile, tag set by KEA_IMAGE in versions.env)
 # No runtime package installation - all binaries are baked into the image
 
 set -e

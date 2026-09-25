@@ -21,7 +21,7 @@ SYSTEMD_DIR = Path("/etc/containers/systemd/ztpbootstrap")
 DHCP_CONTAINER_FILE = SYSTEMD_DIR / "ztpbootstrap-dhcp.container"
 DHCP_SERVICE_NAME = "ztpbootstrap-dhcp.service"
 DHCP_CONTAINER_NAME = "ztpbootstrap-dhcp"
-DEFAULT_KEA_IMAGE = "ztpbootstrap-kea:3.0.3"
+DEFAULT_KEA_IMAGE = "hub.freeblizz.com/ztpbootstrap-kea:3.0.4-1"
 
 
 def get_kea_image() -> str:

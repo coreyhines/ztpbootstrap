@@ -44,7 +44,7 @@ KEA_SERVER="kea-test-server"
 KEA_CLIENT="dhcp-test-client"
 # ISC does not publish free public Kea images; we build from kea/Containerfile.
 # Allow override via KEA_IMAGE env var for CI environments that pre-build.
-KEA_IMAGE="${KEA_IMAGE:-ztpbootstrap-kea:3.0.3}"
+KEA_IMAGE="${KEA_IMAGE:-hub.freeblizz.com/ztpbootstrap-kea:3.0.4-1}"
 CLIENT_IMAGE="docker.io/alpine:3.19"
 KEA_IP="192.168.253.2"
 RANGE_START="192.168.253.100"
@@ -112,9 +112,17 @@ wait_for_port() {
 # ---------------------------------------------------------------------------
 # Step 0: Ensure Kea image is available (build locally if needed)
 # ---------------------------------------------------------------------------
-if ! podman image exists "$KEA_IMAGE" 2>/dev/null; then
+if ! podman image exists "$KEA_IMAGE" 2>/dev/null && ! podman pull -q "$KEA_IMAGE" >/dev/null 2>&1; then
     echo "==> Kea image '$KEA_IMAGE' not found — building from kea/Containerfile"
-    podman build -t "$KEA_IMAGE" -f "${REPO_DIR}/kea/Containerfile" "${REPO_DIR}" 2>&1
+    # In a subshell, so versions.env cannot override a KEA_IMAGE set by CI.
+    # shellcheck disable=SC1091
+    kea_version="$(. "${REPO_DIR}/versions.env" && echo "$KEA_VERSION")"
+    # shellcheck disable=SC1091
+    kea_pkg_release="$(. "${REPO_DIR}/versions.env" && echo "$KEA_PKG_RELEASE")"
+    podman build -t "$KEA_IMAGE" \
+        --build-arg KEA_VERSION="$kea_version" \
+        --build-arg KEA_PKG_RELEASE="$kea_pkg_release" \
+        -f "${REPO_DIR}/kea/Containerfile" "${REPO_DIR}" 2>&1
 fi
 
 # ---------------------------------------------------------------------------
