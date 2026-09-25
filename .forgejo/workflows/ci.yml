@@ -8,8 +8,12 @@
 # dhcp-integration-test workflow does not block the public mirror.
 #
 # Runtime notes for this Forgejo instance:
-#   * runs-on targets the `strongpod` runner; `ubuntu-latest` matches no
-#     runner on this instance.
+#   * runs-on uses the canonical runner labels from the podman repo's
+#     config/forgejo-runners.yml: `exec-container` plus `host-strongpod`.
+#     The legacy `strongpod` label is also carried by fedora1's runners,
+#     where these container jobs sat idle for 12-15 minutes before failing
+#     (2026-09-25), so it must not be used to mean the strongpod host.
+#     `ubuntu-latest` matches no runner on this instance.
 #   * Actions are fully qualified to data.forgejo.org.
 #   * Secret scanners / SBOM / dependency audit invoke underlying tools
 #     directly (see scripts/secret-scan.sh).
@@ -31,7 +35,7 @@ on:
 jobs:
   secret-scan:
     name: Secret Scanning
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
     container:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
@@ -64,7 +68,7 @@ jobs:
 
   lint:
     name: Code Quality Checks
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
     container:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
@@ -114,7 +118,7 @@ jobs:
 
   dependency-scan:
     name: Dependency Scanning
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
     container:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
@@ -136,7 +140,7 @@ jobs:
 
   sbom:
     name: Generate SBOM
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
     container:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
@@ -163,7 +167,7 @@ jobs:
     # Same python container as other jobs. ci-test.sh and unit tests do not
     # need host podman (:host jobs run inside the runner image, which has no
     # podman binary even though the physical host does).
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
     container:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 30
@@ -203,7 +207,7 @@ jobs:
     if: >
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
     container:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
