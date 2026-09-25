@@ -44,7 +44,7 @@ KEA_SERVER="kea-test-server"
 KEA_CLIENT="dhcp-test-client"
 # ISC does not publish free public Kea images; we build from kea/Containerfile.
 # Allow override via KEA_IMAGE env var for CI environments that pre-build.
-KEA_IMAGE="${KEA_IMAGE:-hub.freeblizz.com/ztpbootstrap-kea:3.0.4-1}"
+KEA_IMAGE="${KEA_IMAGE:-hub.freeblizz.com/ztpbootstrap-kea:3.0.4-2}"
 CLIENT_IMAGE="docker.io/alpine:3.19"
 KEA_IP="192.168.253.2"
 RANGE_START="192.168.253.100"

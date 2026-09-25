@@ -10,7 +10,7 @@ StartLimitIntervalSec=300
 StartLimitBurst=5
 
 [Container]
-Image=hub.freeblizz.com/ztpbootstrap-kea:3.0.4-1
+Image=hub.freeblizz.com/ztpbootstrap-kea:3.0.4-2
 ContainerName=ztpbootstrap-dhcp
 Pod=ztpbootstrap.pod
 Exec=/bin/sh /app/start-kea.sh
