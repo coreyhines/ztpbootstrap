@@ -64,7 +64,10 @@ jobs:
       - name: Is this tag already on the hub?
         run: |
           set -euo pipefail
-          export SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt SSL_CERT_DIR=/etc/pki/tls/certs
+          # Use the image's own trust store. Fedora 44 dropped
+          # /etc/pki/tls/certs/ca-bundle.crt, and a runner can hand in a
+          # host-only SSL_CERT_FILE; either makes curl exit 77.
+          unset SSL_CERT_FILE SSL_CERT_DIR
           tag="${KEA_IMAGE##*:}"
           code="$(curl -s -o /dev/null -w '%{http_code}' \
             -H 'Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json' \
@@ -78,7 +81,10 @@ jobs:
       - name: Build
         run: |
           set -euo pipefail
-          export SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt SSL_CERT_DIR=/etc/pki/tls/certs
+          # Use the image's own trust store. Fedora 44 dropped
+          # /etc/pki/tls/certs/ca-bundle.crt, and a runner can hand in a
+          # host-only SSL_CERT_FILE; either makes curl exit 77.
+          unset SSL_CERT_FILE SSL_CERT_DIR
           buildah build --format docker -f kea/Containerfile \
             --build-arg KEA_VERSION="${KEA_VERSION}" \
             --build-arg KEA_PKG_RELEASE="${KEA_PKG_RELEASE}" \
@@ -104,7 +110,10 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
-          export SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt SSL_CERT_DIR=/etc/pki/tls/certs
+          # Use the image's own trust store. Fedora 44 dropped
+          # /etc/pki/tls/certs/ca-bundle.crt, and a runner can hand in a
+          # host-only SSL_CERT_FILE; either makes curl exit 77.
+          unset SSL_CERT_FILE SSL_CERT_DIR
           if [ "${PUBLISHED}" = 1 ]; then
             printf 'skip: %s is already on the hub\n' "${KEA_IMAGE}"
             exit 0
