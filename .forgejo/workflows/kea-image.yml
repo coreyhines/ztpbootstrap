@@ -102,6 +102,14 @@ jobs:
               exit 1
             fi
           done
+          # The quadlet's Exec= replaces CMD; an ENTRYPOINT would swallow it
+          # as arguments to kea-dhcp4 (3.0.4-1 crash-looped on fedora1).
+          ep="$(buildah inspect --format '{{.OCIv1.Config.Entrypoint}}' "${KEA_IMAGE}")"
+          if [ "${ep}" != "[]" ]; then
+            printf 'error: image sets ENTRYPOINT %s; the quadlet needs CMD only\n' "${ep}" >&2
+            exit 1
+          fi
+          buildah run "${ctr}" /bin/sh -c 'test -x /usr/sbin/kea-dhcp4 && test -x /usr/sbin/kea-ctrl-agent'
           for lib in libdhcp_lease_cmds.so libdhcp_host_cmds.so libdhcp_pgsql.so; do
             buildah run "${ctr}" test -f "/usr/lib64/kea/hooks/${lib}"
           done

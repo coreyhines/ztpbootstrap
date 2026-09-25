@@ -8,8 +8,12 @@
 # dhcp-integration-test workflow does not block the public mirror.
 #
 # Runtime notes for this Forgejo instance:
-#   * runs-on targets the `strongpod` runner; `ubuntu-latest` matches no
-#     runner on this instance.
+#   * runs-on uses the canonical runner labels from the podman repo's
+#     config/forgejo-runners.yml: `exec-container` plus `host-strongpod`.
+#     The legacy `strongpod` label is also carried by fedora1's runners,
+#     where these container jobs sat idle for 12-15 minutes before failing
+#     (2026-09-25), so it must not be used to mean the strongpod host.
+#     `ubuntu-latest` matches no runner on this instance.
 #   * Actions are fully qualified to data.forgejo.org.
 #   * Secret scanners / SBOM / dependency audit invoke underlying tools
 #     directly (see scripts/secret-scan.sh).
@@ -31,11 +35,18 @@ on:
 jobs:
   secret-scan:
     name: Secret Scanning
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
     container:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
     steps:
+      # Put the image's own Python first. strongpod's runner-01 injects
+      # PATH=/usr/bin:/usr/local/bin:... (meant for its host-executor jobs),
+      # which makes `python3` Debian's /usr/bin/python3, with no pip
+      # ("No module named pip", 2026-09-25).
+      - name: Use the image's Python
+        run: echo /usr/local/bin >> "$GITHUB_PATH"
+
       # actions/checkout is a Node action; the plain Python image has
       # neither git nor node.
       - name: Install git and node
@@ -64,11 +75,18 @@ jobs:
 
   lint:
     name: Code Quality Checks
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
     container:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
     steps:
+      # Put the image's own Python first. strongpod's runner-01 injects
+      # PATH=/usr/bin:/usr/local/bin:... (meant for its host-executor jobs),
+      # which makes `python3` Debian's /usr/bin/python3, with no pip
+      # ("No module named pip", 2026-09-25).
+      - name: Use the image's Python
+        run: echo /usr/local/bin >> "$GITHUB_PATH"
+
       - name: Install git and node
         run: apt-get update && apt-get install -y --no-install-recommends git nodejs
 
@@ -114,11 +132,18 @@ jobs:
 
   dependency-scan:
     name: Dependency Scanning
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
     container:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
     steps:
+      # Put the image's own Python first. strongpod's runner-01 injects
+      # PATH=/usr/bin:/usr/local/bin:... (meant for its host-executor jobs),
+      # which makes `python3` Debian's /usr/bin/python3, with no pip
+      # ("No module named pip", 2026-09-25).
+      - name: Use the image's Python
+        run: echo /usr/local/bin >> "$GITHUB_PATH"
+
       - name: Install git and node
         run: apt-get update && apt-get install -y --no-install-recommends git nodejs
 
@@ -136,11 +161,18 @@ jobs:
 
   sbom:
     name: Generate SBOM
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
     container:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
     steps:
+      # Put the image's own Python first. strongpod's runner-01 injects
+      # PATH=/usr/bin:/usr/local/bin:... (meant for its host-executor jobs),
+      # which makes `python3` Debian's /usr/bin/python3, with no pip
+      # ("No module named pip", 2026-09-25).
+      - name: Use the image's Python
+        run: echo /usr/local/bin >> "$GITHUB_PATH"
+
       - name: Install git and node
         run: apt-get update && apt-get install -y --no-install-recommends git nodejs curl
 
@@ -163,11 +195,18 @@ jobs:
     # Same python container as other jobs. ci-test.sh and unit tests do not
     # need host podman (:host jobs run inside the runner image, which has no
     # podman binary even though the physical host does).
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
     container:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 30
     steps:
+      # Put the image's own Python first. strongpod's runner-01 injects
+      # PATH=/usr/bin:/usr/local/bin:... (meant for its host-executor jobs),
+      # which makes `python3` Debian's /usr/bin/python3, with no pip
+      # ("No module named pip", 2026-09-25).
+      - name: Use the image's Python
+        run: echo /usr/local/bin >> "$GITHUB_PATH"
+
       - name: Install git and node
         run: apt-get update && apt-get install -y --no-install-recommends git nodejs
 
@@ -203,13 +242,20 @@ jobs:
     if: >
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
     container:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
     env:
       MIRROR_GITHUB_TOKEN: ${{ secrets.MIRROR_GITHUB_TOKEN }}
     steps:
+      # Put the image's own Python first. strongpod's runner-01 injects
+      # PATH=/usr/bin:/usr/local/bin:... (meant for its host-executor jobs),
+      # which makes `python3` Debian's /usr/bin/python3, with no pip
+      # ("No module named pip", 2026-09-25).
+      - name: Use the image's Python
+        run: echo /usr/local/bin >> "$GITHUB_PATH"
+
       - name: Install git and node
         run: apt-get update && apt-get install -y --no-install-recommends git nodejs ca-certificates
 

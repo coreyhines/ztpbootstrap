@@ -9,7 +9,7 @@ name: DHCP Integration Tests
 
 jobs:
   dhcp-server-tests:
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
 
     steps:
       - name: Checkout code
@@ -253,7 +253,7 @@ jobs:
           sudo podman network rm dhcp-test-net || true
 
   dhcp-ipv6-tests:
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
 
     steps:
       - name: Checkout code
@@ -381,7 +381,7 @@ jobs:
           sudo podman network rm dhcp6-test-net || true
 
   dhcp-relay-tests:
-    runs-on: strongpod
+    runs-on: [exec-container, host-strongpod]
 
     steps:
       - name: Checkout code

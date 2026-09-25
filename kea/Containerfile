@@ -45,5 +45,8 @@ LABEL org.opencontainers.image.title="ztpbootstrap-kea" \
 # kea-admin is used for DB schema init/upgrade
 # kea-ctrl-agent exposes the REST control socket
 
-ENTRYPOINT ["/usr/sbin/kea-dhcp4"]
-CMD ["-c", "/etc/kea/kea-dhcp4.conf"]
+# CMD only, never ENTRYPOINT: the quadlet runs `Exec=/bin/sh
+# /app/start-kea.sh`, which replaces CMD. With an ENTRYPOINT it would be
+# handed to kea-dhcp4 as arguments instead, and the container exits at
+# once (3.0.4-1 did exactly that on fedora1). CI checks this.
+CMD ["/usr/sbin/kea-dhcp4", "-c", "/etc/kea/kea-dhcp4.conf"]
