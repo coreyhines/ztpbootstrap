@@ -40,6 +40,13 @@ jobs:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
     steps:
+      # Put the image's own Python first. strongpod's runner-01 injects
+      # PATH=/usr/bin:/usr/local/bin:... (meant for its host-executor jobs),
+      # which makes `python3` Debian's /usr/bin/python3, with no pip
+      # ("No module named pip", 2026-09-25).
+      - name: Use the image's Python
+        run: echo /usr/local/bin >> "$GITHUB_PATH"
+
       # actions/checkout is a Node action; the plain Python image has
       # neither git nor node.
       - name: Install git and node
@@ -73,6 +80,13 @@ jobs:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
     steps:
+      # Put the image's own Python first. strongpod's runner-01 injects
+      # PATH=/usr/bin:/usr/local/bin:... (meant for its host-executor jobs),
+      # which makes `python3` Debian's /usr/bin/python3, with no pip
+      # ("No module named pip", 2026-09-25).
+      - name: Use the image's Python
+        run: echo /usr/local/bin >> "$GITHUB_PATH"
+
       - name: Install git and node
         run: apt-get update && apt-get install -y --no-install-recommends git nodejs
 
@@ -123,6 +137,13 @@ jobs:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
     steps:
+      # Put the image's own Python first. strongpod's runner-01 injects
+      # PATH=/usr/bin:/usr/local/bin:... (meant for its host-executor jobs),
+      # which makes `python3` Debian's /usr/bin/python3, with no pip
+      # ("No module named pip", 2026-09-25).
+      - name: Use the image's Python
+        run: echo /usr/local/bin >> "$GITHUB_PATH"
+
       - name: Install git and node
         run: apt-get update && apt-get install -y --no-install-recommends git nodejs
 
@@ -145,6 +166,13 @@ jobs:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 15
     steps:
+      # Put the image's own Python first. strongpod's runner-01 injects
+      # PATH=/usr/bin:/usr/local/bin:... (meant for its host-executor jobs),
+      # which makes `python3` Debian's /usr/bin/python3, with no pip
+      # ("No module named pip", 2026-09-25).
+      - name: Use the image's Python
+        run: echo /usr/local/bin >> "$GITHUB_PATH"
+
       - name: Install git and node
         run: apt-get update && apt-get install -y --no-install-recommends git nodejs curl
 
@@ -172,6 +200,13 @@ jobs:
       image: docker.io/library/python:3.12-bookworm
     timeout-minutes: 30
     steps:
+      # Put the image's own Python first. strongpod's runner-01 injects
+      # PATH=/usr/bin:/usr/local/bin:... (meant for its host-executor jobs),
+      # which makes `python3` Debian's /usr/bin/python3, with no pip
+      # ("No module named pip", 2026-09-25).
+      - name: Use the image's Python
+        run: echo /usr/local/bin >> "$GITHUB_PATH"
+
       - name: Install git and node
         run: apt-get update && apt-get install -y --no-install-recommends git nodejs
 
@@ -214,6 +249,13 @@ jobs:
     env:
       MIRROR_GITHUB_TOKEN: ${{ secrets.MIRROR_GITHUB_TOKEN }}
     steps:
+      # Put the image's own Python first. strongpod's runner-01 injects
+      # PATH=/usr/bin:/usr/local/bin:... (meant for its host-executor jobs),
+      # which makes `python3` Debian's /usr/bin/python3, with no pip
+      # ("No module named pip", 2026-09-25).
+      - name: Use the image's Python
+        run: echo /usr/local/bin >> "$GITHUB_PATH"
+
       - name: Install git and node
         run: apt-get update && apt-get install -y --no-install-recommends git nodejs ca-certificates
 
