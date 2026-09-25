@@ -1,0 +1,114 @@
+---
+# Build the Kea DHCP image from kea/Containerfile and publish it to
+# hub.freeblizz.com as KEA_IMAGE (versions.env).
+#
+# Pull requests build and check the image but never push. A push to main
+# publishes it, once: a tag already on the hub is left alone, so bumping
+# KEA_IMAGE's -<n> suffix is how a rebuild of the same Kea gets out.
+#
+# buildah needs a privileged job container (/dev/fuse), so this selects on
+# the capability labels only the privileged runners advertise (the same
+# runners podwitch's build_image uses).
+name: Kea image
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - kea/**
+      - versions.env
+      - .forgejo/workflows/kea-image.yml
+  pull_request:
+    paths:
+      - kea/**
+      - versions.env
+      - .forgejo/workflows/kea-image.yml
+  workflow_dispatch:
+
+jobs:
+  kea-image:
+    name: Build and publish Kea image
+    runs-on: [cap-buildah, cap-privileged]
+    timeout-minutes: 30
+    container:
+      image: quay.io/buildah/stable:v1.43.2@sha256:704af5d17babbd88bd93c06ecea7554001a2e9570e1fd54687188d3ae5de0e55
+      options: --privileged --device /dev/fuse
+    steps:
+      - name: Install git and node (for checkout)
+        run: dnf install -y -q git nodejs
+      - uses: https://data.forgejo.org/actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Read and check the pins
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC1091
+          . ./versions.env
+          : "${KEA_VERSION:?versions.env must set KEA_VERSION}"
+          : "${KEA_PKG_RELEASE:?versions.env must set KEA_PKG_RELEASE}"
+          : "${KEA_IMAGE:?versions.env must set KEA_IMAGE}"
+          case "${KEA_IMAGE}" in
+            "hub.freeblizz.com/ztpbootstrap-kea:${KEA_VERSION}-"[0-9]*) ;;
+            *)
+              printf 'error: KEA_IMAGE %s must be hub.freeblizz.com/ztpbootstrap-kea:%s-<n>\n' \
+                "${KEA_IMAGE}" "${KEA_VERSION}" >&2
+              exit 1
+              ;;
+          esac
+          {
+            printf 'KEA_VERSION=%s\n' "${KEA_VERSION}"
+            printf 'KEA_PKG_RELEASE=%s\n' "${KEA_PKG_RELEASE}"
+            printf 'KEA_IMAGE=%s\n' "${KEA_IMAGE}"
+          } >> "${GITHUB_ENV}"
+      - name: Is this tag already on the hub?
+        run: |
+          set -euo pipefail
+          export SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt SSL_CERT_DIR=/etc/pki/tls/certs
+          tag="${KEA_IMAGE##*:}"
+          code="$(curl -s -o /dev/null -w '%{http_code}' \
+            -H 'Accept: application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json' \
+            "https://hub.freeblizz.com/v2/ztpbootstrap-kea/manifests/${tag}")"
+          case "${code}" in
+            200) printf 'PUBLISHED=1\n' >> "${GITHUB_ENV}"
+                 printf '%s is already on the hub; it will not be pushed again.\n' "${KEA_IMAGE}" ;;
+            404) printf 'PUBLISHED=0\n' >> "${GITHUB_ENV}" ;;
+            *)   printf 'error: hub answered %s for %s\n' "${code}" "${KEA_IMAGE}" >&2; exit 1 ;;
+          esac
+      - name: Build
+        run: |
+          set -euo pipefail
+          export SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt SSL_CERT_DIR=/etc/pki/tls/certs
+          buildah build --format docker -f kea/Containerfile \
+            --build-arg KEA_VERSION="${KEA_VERSION}" \
+            --build-arg KEA_PKG_RELEASE="${KEA_PKG_RELEASE}" \
+            -t "${KEA_IMAGE}" .
+      - name: Check the image holds the pinned Kea
+        run: |
+          set -euo pipefail
+          ctr="$(buildah from "${KEA_IMAGE}")"
+          trap 'buildah rm "${ctr}" >/dev/null' EXIT
+          want="${KEA_VERSION}-${KEA_PKG_RELEASE}"
+          for pkg in isc-kea-dhcp4 isc-kea-dhcp6 isc-kea-ctrl-agent isc-kea-hooks isc-kea-admin isc-kea-pgsql; do
+            got="$(buildah run "${ctr}" rpm -q --qf '%{VERSION}-%{RELEASE}' "${pkg}")"
+            if [ "${got}" != "${want}" ]; then
+              printf 'error: %s is %s, versions.env pins %s\n' "${pkg}" "${got}" "${want}" >&2
+              exit 1
+            fi
+          done
+          for lib in libdhcp_lease_cmds.so libdhcp_host_cmds.so libdhcp_pgsql.so; do
+            buildah run "${ctr}" test -f "/usr/lib64/kea/hooks/${lib}"
+          done
+          printf 'Kea %s in %s\n' "${want}" "${KEA_IMAGE}"
+      - name: Publish
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          export SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt SSL_CERT_DIR=/etc/pki/tls/certs
+          if [ "${PUBLISHED}" = 1 ]; then
+            printf 'skip: %s is already on the hub\n' "${KEA_IMAGE}"
+            exit 0
+          fi
+          # hub.freeblizz.com is open (no auth).
+          buildah push --digestfile /tmp/kea.digest "${KEA_IMAGE}"
+          printf 'pushed %s@%s\n' "${KEA_IMAGE}" "$(cat /tmp/kea.digest)"

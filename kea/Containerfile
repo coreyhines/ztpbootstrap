@@ -1,19 +1,46 @@
-# Containerfile for ISC Kea DHCP server (Fedora-based)
+# Containerfile for ISC Kea DHCP server (Fedora base, ISC's own packages)
 #
-# Build: podman build -t ztpbootstrap-kea:3.0.3 -f kea/Containerfile .
-# Update KEA_IMAGE in versions.env after building and pushing to your registry.
+# Kea comes from ISC's package repository (kea-3-0, the LTS line), pinned to
+# one exact build, so the image tag always says what is inside. Fedora's own
+# kea package trails ISC and would install whatever it ships on build day.
+#
+# KEA_VERSION and KEA_PKG_RELEASE come from versions.env; CI passes them in
+# (.forgejo/workflows/kea-image.yml). By hand:
+#   . ./versions.env
+#   podman build --build-arg KEA_VERSION="$KEA_VERSION" \
+#     --build-arg KEA_PKG_RELEASE="$KEA_PKG_RELEASE" \
+#     -t "$KEA_IMAGE" -f kea/Containerfile .
 #
 # Kea binaries: /usr/sbin/kea-dhcp4, /usr/sbin/kea-dhcp6, /usr/sbin/kea-ctrl-agent
 # Hook libs:    /usr/lib64/kea/hooks/
+# ISC's binaries carry file capabilities, so the container needs
+# CAP_NET_RAW and CAP_NET_BIND_SERVICE (the quadlet adds both).
 
 FROM registry.fedoraproject.org/fedora:44
 
-RUN dnf install -y -q \
-        kea \
-        kea-hooks \
+ARG KEA_VERSION
+ARG KEA_PKG_RELEASE
+
+# ISC's repo file names a CA bundle path Fedora 44 no longer has; the
+# system default trust store is what we want anyway.
+RUN test -n "${KEA_VERSION}" && test -n "${KEA_PKG_RELEASE}" \
+    && curl -fsS "https://dl.cloudsmith.io/public/isc/kea-3-0/config.rpm.txt?distro=fedora&codename=44" \
+       | sed '/^sslcacert=/d' > /etc/yum.repos.d/isc-kea-3-0.repo \
+    && v="${KEA_VERSION}-${KEA_PKG_RELEASE}" \
+    && dnf install -y -q \
+        "isc-kea-dhcp4-${v}" \
+        "isc-kea-dhcp6-${v}" \
+        "isc-kea-ctrl-agent-${v}" \
+        "isc-kea-hooks-${v}" \
+        "isc-kea-admin-${v}" \
+        "isc-kea-pgsql-${v}" \
         nmap-ncat \
         curl \
-    && dnf clean all
+    && dnf clean all \
+    && rpm -q "isc-kea-dhcp4-${v}"
+
+LABEL org.opencontainers.image.title="ztpbootstrap-kea" \
+      org.opencontainers.image.version="${KEA_VERSION}"
 
 # kea-admin is used for DB schema init/upgrade
 # kea-ctrl-agent exposes the REST control socket
